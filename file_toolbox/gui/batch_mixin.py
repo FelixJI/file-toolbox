@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QFileDialog, QListWidget, QMessageBox, QTableWidge
 
 from file_toolbox.common.file_utils import format_file_size, get_file_info
 
-# 替代 RCPM core.constants.time_constants 的常量
+# 预览防抖 / worker 停止超时(毫秒)
 PREVIEW_DEBOUNCE_MS = 200
 WORKER_STOP_TIMEOUT_MS = 3000
 
