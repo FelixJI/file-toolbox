@@ -130,3 +130,46 @@ def pdf_sample(tmp_path) -> Path:
     c.drawString(390, y, "1525.50")
     c.save()
     return pdf_path
+
+
+# --- 虚构 ZIP fixtures(模拟税务局完整下载:含 pdf+ofd+嵌套 zip) ---
+_XML_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "invoice" / "sample_einvoice.xml"
+)
+
+
+@pytest.fixture
+def zip_with_xml(tmp_path) -> Path:
+    """完整 ZIP:含 pdf+ofd 占位 + 嵌套 zip(内含 xml),模拟完整下载。应优先采信 xml。"""
+    xml_src = _XML_FIXTURE.read_bytes()
+    inner_buf = io.BytesIO()
+    with zipfile.ZipFile(inner_buf, "w") as zf:
+        zf.writestr("dzfp_99990000000000000001.xml", xml_src)
+    inner_bytes = inner_buf.getvalue()
+
+    outer_path = tmp_path / "full_invoice.zip"
+    with zipfile.ZipFile(outer_path, "w") as zf:
+        zf.writestr("some.pdf", b"%PDF-1.4 fake")
+        zf.writestr("some.ofd", b"PK fake")
+        zf.writestr("99990000000000000001.zip", inner_bytes)
+    return outer_path
+
+
+@pytest.fixture
+def zip_xml_only(tmp_path) -> Path:
+    """ZIP 内直接含 XML(无嵌套)。"""
+    xml_src = _XML_FIXTURE.read_bytes()
+    p = tmp_path / "xml_only.zip"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("dzfp_99990000000000000001.xml", xml_src)
+    return p
+
+
+@pytest.fixture
+def zip_ofd_only(tmp_path, ofd_sample) -> Path:
+    """ZIP 内只含 OFD(无 xml),应回退到 OFD。"""
+    ofd_bytes = ofd_sample.read_bytes()
+    p = tmp_path / "ofd_only.zip"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("some.ofd", ofd_bytes)
+    return p
