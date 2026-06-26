@@ -1,6 +1,6 @@
 # File Toolbox
 
-批量文件工具箱,提供 4 个常用文件批处理功能,带命令行(CLI)和图形界面(GUI)。
+批量文件工具箱,提供 5 个常用文件批处理功能,带命令行(CLI)和图形界面(GUI)。
 
 | 功能 | 说明 | 平台要求 |
 |---|---|---|
@@ -8,6 +8,7 @@
 | **批量建文件夹** | 从粘贴的 Excel 表格或层级列表批量创建目录结构 | 全平台 |
 | **批量生成 PDF** | Word/Excel/PPT/图片 → PDF,可合并、可转图片型 | Word/Excel/PPT 需 Windows + Office |
 | **批量替换** | Word/Excel/txt 文档内容批量替换(简单+正则),自动备份 | Word/Excel 需 Windows + Office |
+| **发票识别** | 电子发票(PDF/OFD/XML)→ Excel(双 Sheet)/JSON,按发票号码去重 | 需 `pip install 'file-toolbox[invoice]'` |
 
 ## 安装
 
@@ -17,6 +18,8 @@ cd file-toolbox
 pip install -e .
 # 带 GUI:
 pip install -e ".[gui]"
+# 带发票识别:
+pip install -e ".[invoice]"
 ```
 
 > 需要 Python ≥ 3.11。
@@ -46,6 +49,11 @@ file-toolbox pdf *.docx *.xlsx *.png \
 file-toolbox replace *.docx \
     --op simple_replace:find="旧公司",replace="新公司",case_sensitive=false \
     --op regex_replace:pattern="20\d{2}",replace="2026" --yes
+
+# 发票识别(默认预览,--yes 导出;支持 zip/xml/ofd/pdf)
+file-toolbox invoice *.zip *.xml *.ofd *.pdf \
+    --format excel --output 发票汇总.xlsx \
+    --dedupe mark --yes
 
 # 启动图形界面
 file-toolbox gui
@@ -81,7 +89,7 @@ file-toolbox gui
 file-toolbox gui
 ```
 
-一个主窗口,4 个 Tab(重命名 / 建文件夹 / 生成PDF / 内容替换),顶部有「历史」按钮查看操作记录。
+一个主窗口,5 个 Tab(重命名 / 建文件夹 / 生成PDF / 内容替换 / 发票识别),顶部有「历史」按钮查看操作记录。
 
 ## 数据位置
 
@@ -101,6 +109,7 @@ file-toolbox gui
 
 - 重命名、建文件夹、图片转 PDF、文本替换:**全平台**(Windows / macOS / Linux)。
 - Word/Excel/PPT 转 PDF、Word/Excel 内容替换:**仅 Windows**,需已安装 Microsoft Office 或 WPS Office(通过 COM 自动化调用)。
+- 发票识别(PDF/OFD/XML 解析 + Excel/JSON 导出):**全平台**,需额外安装 `pip install 'file-toolbox[invoice]'`(pdfplumber + openpyxl)。扫描版发票(图片型)暂不支持。
 
 ## 许可证
 
