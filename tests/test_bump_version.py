@@ -48,3 +48,62 @@ class TestValidatePEP440:
         assert validate_pep440("") is False
         assert validate_pep440("1.2.x") is False
         assert validate_pep440("1..2") is False
+
+
+class TestMigrateChangelog:
+    def _sample(self) -> str:
+        return """# Changelog
+
+## [Unreleased]
+
+### Added
+- 新功能 A
+- 新功能 B
+
+### Fixed
+- 修 bug X
+
+## 0.1.0 - 2026-06-25
+
+### Added
+- 初始功能
+"""
+
+    def test_moves_unreleased_to_new_version(self):
+        from scripts.bump_version import migrate_changelog
+
+        result = migrate_changelog(self._sample(), "0.2.0", "2026-06-26")
+        # 新版本段在 Unreleased 之后
+        assert "## [Unreleased]" in result
+        assert "## 0.2.0 - 2026-06-26" in result
+        # 新功能 A/B 移到了 0.2.0 段
+        idx_unreleased = result.index("## [Unreleased]")
+        idx_new = result.index("## 0.2.0 - 2026-06-26")
+        idx_old = result.index("## 0.1.0")
+        assert idx_unreleased < idx_new < idx_old
+        assert "新功能 A" in result[result.index("## 0.2.0"):result.index("## 0.1.0")]
+
+    def test_empty_unreleased_still_emits_new_section(self):
+        from scripts.bump_version import migrate_changelog
+
+        empty = """# Changelog
+
+## [Unreleased]
+
+## 0.1.0 - 2026-06-25
+
+### Added
+- 初始
+"""
+        result = migrate_changelog(empty, "0.2.0", "2026-06-26")
+        assert "## 0.2.0 - 2026-06-26" in result
+        # Unreleased 段保留(可能为空)
+        assert "## [Unreleased]" in result
+
+    def test_markdown_blank_lines_preserved(self):
+        """标题行之间必须有空行(整洁 Markdown)。"""
+        from scripts.bump_version import migrate_changelog
+
+        result = migrate_changelog(self._sample(), "0.2.0", "2026-06-26")
+        # 新版本标题后应紧跟空行再接子标题
+        assert "## 0.2.0 - 2026-06-26\n\n### Added" in result
