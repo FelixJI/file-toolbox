@@ -151,3 +151,36 @@ def create_desktop_shortcut() -> ShortcutResult:
 def create_start_menu_shortcut() -> ShortcutResult:
     """创建开始菜单快捷方式(已存在则覆盖,幂等)。"""
     return _create_shortcut(LOCATION_START_MENU)
+
+
+def _shortcut_filename() -> str:
+    """平台对应的快捷方式文件名(不含目录)。"""
+    if sys.platform == "win32":
+        return f"{APP_NAME}.lnk"
+    return f"{APP_NAME}.desktop"  # macOS 也返回此名(但删除会因 macOS 创建失败而天然"未找到")
+
+
+def _remove_shortcut(location: str) -> ShortcutResult:
+    """删除快捷方式。不存在返回 success=False(不报错)。"""
+    loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
+    target_dir = desktop_dir() if location == LOCATION_DESKTOP else start_menu_dir()
+    path = target_dir / _shortcut_filename()
+    if not path.exists():
+        return ShortcutResult(
+            False, "", location, f"未找到{loc_name}快捷方式(可能尚未创建)"
+        )
+    try:
+        path.unlink()
+        return ShortcutResult(True, str(path), location, f"已删除{loc_name}快捷方式")
+    except OSError as e:
+        return ShortcutResult(False, "", location, f"删除{loc_name}快捷方式失败: {e}")
+
+
+def remove_desktop_shortcut() -> ShortcutResult:
+    """删除桌面快捷方式(不存在不报错,幂等)。"""
+    return _remove_shortcut(LOCATION_DESKTOP)
+
+
+def remove_start_menu_shortcut() -> ShortcutResult:
+    """删除开始菜单快捷方式(不存在不报错,幂等)。"""
+    return _remove_shortcut(LOCATION_START_MENU)

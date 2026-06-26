@@ -86,3 +86,43 @@ def test_create_start_menu_creates_dir_if_missing(monkeypatch, tmp_path):
     r = shortcuts.create_start_menu_shortcut()
     assert r.success is True
     assert start.exists()
+
+
+def test_remove_nonexistent_desktop_returns_false(monkeypatch, tmp_path):
+    _patch_dirs(monkeypatch, tmp_path)
+    r = shortcuts.remove_desktop_shortcut()
+    assert r.success is False
+    assert r.location == shortcuts.LOCATION_DESKTOP
+    assert "未找到" in r.message
+
+
+def test_remove_nonexistent_start_menu_returns_false(monkeypatch, tmp_path):
+    _patch_dirs(monkeypatch, tmp_path)
+    r = shortcuts.remove_start_menu_shortcut()
+    assert r.success is False
+    assert r.location == shortcuts.LOCATION_START_MENU
+    assert "未找到" in r.message
+
+
+def test_create_then_remove_desktop_idempotent(monkeypatch, tmp_path):
+    desk, _ = _patch_dirs(monkeypatch, tmp_path)
+    assert shortcuts.create_desktop_shortcut().success
+    assert list(desk.iterdir())  # 存在
+    r = shortcuts.remove_desktop_shortcut()
+    assert r.success is True
+    assert "已删除" in r.message
+    assert list(desk.iterdir()) == []  # 已删
+    # 再删一次(不存在),应 success=False 不报错
+    r2 = shortcuts.remove_desktop_shortcut()
+    assert r2.success is False
+    assert "未找到" in r2.message
+
+
+def test_create_then_remove_start_menu_idempotent(monkeypatch, tmp_path):
+    _, start = _patch_dirs(monkeypatch, tmp_path)
+    assert shortcuts.create_start_menu_shortcut().success
+    r = shortcuts.remove_start_menu_shortcut()
+    assert r.success is True
+    assert list(start.iterdir()) == []
+    r2 = shortcuts.remove_start_menu_shortcut()
+    assert r2.success is False
