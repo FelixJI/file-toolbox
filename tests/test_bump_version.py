@@ -111,7 +111,7 @@ class TestMigrateChangelog:
 
 class TestPyprojectVersionIO:
     def test_read_current_version(self, tmp_path):
-        from scripts.bump_version import read_pyproject_version, write_pyproject_version
+        from scripts.bump_version import read_pyproject_version
 
         pj = tmp_path / "pyproject.toml"
         pj.write_text(

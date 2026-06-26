@@ -118,7 +118,7 @@ file-toolbox gui
 ### 本地打包
 
 ```bash
-uv run --with nuitka --extra gui --extra invoice python scripts/build_exe.py build
+uv run --with nuitka --extra gui --extra invoice python scripts/build_exe.py
 # 产物:dist/FileToolbox-{version}-win64.zip
 ```
 

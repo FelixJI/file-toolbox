@@ -61,9 +61,7 @@ def release(
     # 2. build(非 CI 且 skip-build 时跳过)
     if not skip_build:
         typer.echo("=== Nuitka 打包 ===")
-        build_args = ["build"]
-        if ci:
-            build_args.append("--ci")
+        build_args = ["--ci"] if ci else []
         _run("build_exe.py", *build_args)
 
     if not ci:

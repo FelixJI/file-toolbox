@@ -29,7 +29,7 @@ jobs:
           key: nuitka-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
 
       - name: Nuitka 打包
-        run: uv run --with nuitka python scripts/build_exe.py build --ci
+        run: uv run --with nuitka python scripts/build_exe.py --ci
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
