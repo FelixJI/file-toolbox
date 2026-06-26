@@ -10,7 +10,7 @@ from file_toolbox import __version__
 APP_NAME = "File Toolbox"
 APP_DESCRIPTION = "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、发票识别"
 VERSION = __version__
-REPO_URL = "https://github.com/felji/file-toolbox"  # 占位常量,后续替换为真实地址
+REPO_URL = "https://github.com/FelixJI/file-toolbox"
 LICENSE = "MIT"
 PYTHON_REQUIREMENT = ">=3.11"
 
