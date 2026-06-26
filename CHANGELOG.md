@@ -14,6 +14,10 @@
   - 按发票号码去重,支持 keep_all/dedupe/mark(标色)三策略;同号不同来源保留更高优先级。
   - GUI 表格预览,重复行标黄、PDF 弱解析行标灰。
   - 新增可选依赖组 `invoice`(pdfplumber + openpyxl)。
+- 关于界面(`gui` 第 6 个 Tab):展示软件名称/版本号/开源地址(可点击+复制)/技术路线/更新日志。
+  - 一键创建/删除桌面与开始菜单快捷方式(Windows `.lnk` via COM,Linux `.desktop`)。
+  - Windows 用注册表读取真实桌面路径(规避 OneDrive 重定向);macOS 提示手动添加。
+  - 新增 `common/metadata.py`(应用元信息单一数据源,`get_changelog()` 3 级回退链读 `CHANGELOG.md`)。
 
 ## 0.1.0 - 2026-06-25
 
