@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.gui.dialogs import (
+    AboutTab,
     BatchFolderCreatorDialog,
     ContentReplaceDialog,
     FileRenamerDialog,
@@ -55,6 +56,8 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._pdf_tab, "生成PDF")
         tabs.addTab(self._replace_tab, "内容替换")
         tabs.addTab(self._invoice_tab, "发票识别")
+        self._about_tab = AboutTab()
+        tabs.addTab(self._about_tab, "关于")
         layout.addWidget(tabs, stretch=1)
 
         central.setLayout(layout)
@@ -86,6 +89,7 @@ class MainWindow(QMainWindow):
             self._pdf_tab,
             self._replace_tab,
             self._invoice_tab,
+            self._about_tab,
         ):
             if hasattr(tab, "closeEvent"):
                 # 触发各 tab 的清理
