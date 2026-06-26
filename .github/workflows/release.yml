@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: 同步依赖(含 gui + invoice + dev)
+        run: uv sync --extra gui --extra invoice --extra dev
+
+      - name: 缓存 Nuitka build 目录
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: nuitka-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+      - name: Nuitka 打包
+        run: uv run --with nuitka python scripts/build_exe.py build --ci
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: FileToolbox-win64
+          path: |
+            dist/FileToolbox-*-win64.zip
+            dist/checksums.txt
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载产物
+        uses: actions/download-artifact@v4
+        with:
+          name: FileToolbox-win64
+          path: artifacts
+
+      - name: 从 tag 提取版本号
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: 提取 Release notes
+        run: uv run --extra dev python scripts/extract_changelog.py "${{ steps.ver.outputs.version }}" --out release_notes.md
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          files: |
+            artifacts/FileToolbox-*-win64.zip
+            artifacts/checksums.txt
