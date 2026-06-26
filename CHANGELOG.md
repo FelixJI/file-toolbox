@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- 发票识别工具 `invoice`:识别电子发票(PDF/OFD/XML),导出 Excel(双 Sheet:汇总+明细)/JSON。
+  - 解析优先级:ZIP 内 XML > OFD > PDF(XML/OFD 为结构化数据,PDF 为尽力而为)。
+  - 按发票号码去重,支持 keep_all/dedupe/mark(标色)三策略;同号不同来源保留更高优先级。
+  - GUI 表格预览,重复行标黄、PDF 弱解析行标灰。
+  - 新增可选依赖组 `invoice`(pdfplumber + openpyxl)。
+
 ## 0.1.0 - 2026-06-25
 
 ### Added

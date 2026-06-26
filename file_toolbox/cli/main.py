@@ -3,6 +3,7 @@
 import typer
 
 from file_toolbox import __version__
+from file_toolbox.cli.invoice_cmd import invoice
 from file_toolbox.cli.mkdir_cmd import mkdir
 from file_toolbox.cli.pdf_cmd import pdf
 from file_toolbox.cli.rename_cmd import rename
@@ -28,11 +29,12 @@ def gui():
     run_gui()
 
 
-# 注册 4 个命令(平铺,避免子 app 嵌套)
+# 注册 5 个命令(平铺,避免子 app 嵌套)
 app.command(name="rename")(rename)
 app.command(name="mkdir")(mkdir)
 app.command(name="pdf")(pdf)
 app.command(name="replace")(replace)
+app.command(name="invoice")(invoice)
 
 
 @app.callback()

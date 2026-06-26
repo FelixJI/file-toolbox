@@ -17,6 +17,7 @@ from file_toolbox.gui.dialogs import (
     ContentReplaceDialog,
     FileRenamerDialog,
     HistoryDialog,
+    InvoiceTab,
     PDFGeneratorDialog,
 )
 
@@ -42,16 +43,18 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
-        # 4 Tab
+        # 5 Tab
         tabs = QTabWidget()
         self._rename_tab = FileRenamerDialog()
         self._mkdir_tab = BatchFolderCreatorDialog()
         self._pdf_tab = PDFGeneratorDialog()
         self._replace_tab = ContentReplaceDialog()
+        self._invoice_tab = InvoiceTab()
         tabs.addTab(self._rename_tab, "重命名")
         tabs.addTab(self._mkdir_tab, "建文件夹")
         tabs.addTab(self._pdf_tab, "生成PDF")
         tabs.addTab(self._replace_tab, "内容替换")
+        tabs.addTab(self._invoice_tab, "发票识别")
         layout.addWidget(tabs, stretch=1)
 
         central.setLayout(layout)
@@ -67,7 +70,7 @@ class MainWindow(QMainWindow):
             self,
             "查看历史",
             "选择工具:",
-            ["rename", "replace", "pdf", "mkdir"],
+            ["rename", "replace", "pdf", "mkdir", "invoice"],
             0,
             editable=False,
         )
@@ -77,7 +80,13 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def closeEvent(self, event):
-        for tab in (self._rename_tab, self._mkdir_tab, self._pdf_tab, self._replace_tab):
+        for tab in (
+            self._rename_tab,
+            self._mkdir_tab,
+            self._pdf_tab,
+            self._replace_tab,
+            self._invoice_tab,
+        ):
             if hasattr(tab, "closeEvent"):
                 # 触发各 tab 的清理
                 try:
