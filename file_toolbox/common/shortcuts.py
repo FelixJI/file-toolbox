@@ -71,3 +71,83 @@ def start_menu_dir() -> Path:
     if sys.platform == "win32":
         return _windows_start_menu()
     return _linux_start_menu()
+
+
+def _gui_command() -> tuple[str, list[str]]:
+    """启动 GUI 的命令:python 解释器 + -m file_toolbox gui。"""
+    return (sys.executable, ["-m", "file_toolbox", "gui"])
+
+
+def _create_windows_lnk(target_dir: Path, location: str) -> ShortcutResult:
+    """Windows:用 WScript.Shell COM 创建 .lnk。目录不存在则创建。"""
+    try:
+        import win32com.client  # pywin32,Windows 已是依赖
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        exe, args = _gui_command()
+        lnk_path = target_dir / f"{APP_NAME}.lnk"
+        shell = win32com.client.Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortCut(str(lnk_path))
+        shortcut.Targetpath = exe
+        shortcut.Arguments = " ".join(args)
+        shortcut.WorkingDirectory = str(Path.home())
+        shortcut.Description = APP_NAME
+        shortcut.Save()
+        loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
+        return ShortcutResult(
+            True, str(lnk_path), location, f"已创建{loc_name}快捷方式"
+        )
+    except Exception as e:  # noqa: BLE001 — COM 失败不抛给 UI
+        loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
+        return ShortcutResult(False, "", location, f"创建{loc_name}快捷方式失败: {e}")
+
+
+def _create_linux_desktop_file(target_dir: Path, location: str) -> ShortcutResult:
+    """Linux:创建 .desktop 文件。目录不存在则创建。"""
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        exe, args = _gui_command()
+        desktop_path = target_dir / f"{APP_NAME}.desktop"
+        content = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            f"Name={APP_NAME}\n"
+            f"Comment={APP_NAME}\n"
+            f"Exec={exe} {' '.join(args)}\n"
+            "Terminal=false\n"
+        )
+        desktop_path.write_text(content, encoding="utf-8")
+        loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
+        return ShortcutResult(
+            True, str(desktop_path), location, f"已创建{loc_name}快捷方式"
+        )
+    except OSError as e:
+        loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
+        return ShortcutResult(False, "", location, f"创建{loc_name}快捷方式失败: {e}")
+
+
+def _create_macos_unsupported(location: str) -> ShortcutResult:
+    loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
+    return ShortcutResult(
+        False, "", location, f"macOS 暂不支持自动创建{loc_name}快捷方式,请手动添加"
+    )
+
+
+def _create_shortcut(location: str) -> ShortcutResult:
+    """创建快捷方式的平台分发。"""
+    if sys.platform == "darwin":
+        return _create_macos_unsupported(location)
+    target_dir = desktop_dir() if location == LOCATION_DESKTOP else start_menu_dir()
+    if sys.platform == "win32":
+        return _create_windows_lnk(target_dir, location)
+    return _create_linux_desktop_file(target_dir, location)
+
+
+def create_desktop_shortcut() -> ShortcutResult:
+    """创建桌面快捷方式(已存在则覆盖,幂等)。"""
+    return _create_shortcut(LOCATION_DESKTOP)
+
+
+def create_start_menu_shortcut() -> ShortcutResult:
+    """创建开始菜单快捷方式(已存在则覆盖,幂等)。"""
+    return _create_shortcut(LOCATION_START_MENU)
