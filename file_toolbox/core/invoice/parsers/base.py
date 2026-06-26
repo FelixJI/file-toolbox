@@ -1,13 +1,17 @@
 """解析器路由与异常。"""
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from file_toolbox.core.invoice.types import Invoice
 
 
 class UnsupportedFormatError(Exception):
     """文件格式不支持或解析失败。"""
 
 
-def parse_invoice(path: Path, source_file: str = "") -> object:
+def parse_invoice(path: Path, source_file: str = "") -> "Invoice":
     """按扩展名路由到具体解析器,返回 Invoice。"""
     path = Path(path)
     suffix = path.suffix.lower()
