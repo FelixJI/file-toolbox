@@ -7,10 +7,13 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from packaging.version import InvalidVersion, Version
 
 PARTS = ("major", "minor", "patch", "prerelease")
+
+_VERSION_LINE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
 
 
 def validate_pep440(version: str) -> bool:
@@ -98,3 +101,23 @@ def migrate_changelog(content: str, new_version: str, date: str) -> str:
         + ("\n" + rest.lstrip("\n") if rest.strip() else "")
     )
     return rebuilt
+
+
+def read_pyproject_version(path: Path) -> str:
+    """从 pyproject.toml 读 [project] version。"""
+    text = path.read_text(encoding="utf-8")
+    m = _VERSION_LINE.search(text)
+    if not m:
+        raise ValueError(f'{path} 中未找到 version = "..." 行')
+    return m.group(1)
+
+
+def write_pyproject_version(path: Path, new_version: str) -> None:
+    """把新版本写回 pyproject.toml,只替换 version 行,保留其余内容。"""
+    if not validate_pep440(new_version):
+        raise ValueError(f"新版本不符合 PEP 440: {new_version!r}")
+    text = path.read_text(encoding="utf-8")
+    new_text, n = _VERSION_LINE.subn(f'version = "{new_version}"', text, count=1)
+    if n == 0:
+        raise ValueError(f'{path} 中未找到 version = "..." 行')
+    path.write_text(new_text, encoding="utf-8")

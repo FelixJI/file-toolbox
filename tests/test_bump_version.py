@@ -107,3 +107,34 @@ class TestMigrateChangelog:
         result = migrate_changelog(self._sample(), "0.2.0", "2026-06-26")
         # 新版本标题后应紧跟空行再接子标题
         assert "## 0.2.0 - 2026-06-26\n\n### Added" in result
+
+
+class TestPyprojectVersionIO:
+    def test_read_current_version(self, tmp_path):
+        from scripts.bump_version import read_pyproject_version, write_pyproject_version
+
+        pj = tmp_path / "pyproject.toml"
+        pj.write_text(
+            '[project]\nname = "file-toolbox"\nversion = "0.3.7"\n', encoding="utf-8"
+        )
+        assert read_pyproject_version(pj) == "0.3.7"
+
+    def test_write_version_preserves_rest(self, tmp_path):
+        from scripts.bump_version import read_pyproject_version, write_pyproject_version
+
+        original = (
+            "[project]\n"
+            'name = "file-toolbox"\n'
+            'version = "0.3.7"\n'
+            'requires-python = ">=3.11"\n'
+        )
+        pj = tmp_path / "pyproject.toml"
+        pj.write_text(original, encoding="utf-8")
+        write_pyproject_version(pj, "0.4.0")
+        new = pj.read_text(encoding="utf-8")
+        assert read_pyproject_version(pj) == "0.4.0"
+        # 其他行保持不变
+        assert 'name = "file-toolbox"' in new
+        assert 'requires-python = ">=3.11"' in new
+        # 只有一处 version 行
+        assert new.count("version =") == 1
