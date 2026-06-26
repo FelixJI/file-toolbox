@@ -111,6 +111,52 @@ file-toolbox gui
 - Word/Excel/PPT 转 PDF、Word/Excel 内容替换:**仅 Windows**,需已安装 Microsoft Office 或 WPS Office(通过 COM 自动化调用)。
 - 发票识别(PDF/OFD/XML 解析 + Excel/JSON 导出):**全平台**,需额外安装 `pip install 'file-toolbox[invoice]'`(pdfplumber + openpyxl)。扫描版发票(图片型)暂不支持。
 
+## 打包与发版
+
+本项目用 **Nuitka**(`--standalone`)打包为 Windows 可执行程序,产出免安装便携 zip。
+
+### 本地打包
+
+```bash
+uv run --with nuitka --extra gui --extra invoice python scripts/build_exe.py build
+# 产物:dist/FileToolbox-{version}-win64.zip
+```
+
+### 版本号管理
+
+版本号唯一真相源:`pyproject.toml`。`__init__.py` 运行时经 `importlib.metadata` 读取。
+
+```bash
+# 查看当前版本
+uv run --extra dev python scripts/bump_version.py current
+
+# bump 版本(自动改 pyproject + 迁移 CHANGELOG + git commit + tag)
+uv run --extra dev python scripts/bump_version.py bump patch
+uv run --extra dev python scripts/bump_version.py bump minor
+uv run --extra dev python scripts/bump_version.py bump --set 1.0.0
+
+# 推送 tag 触发 GitHub Actions 发版
+git push --tags
+```
+
+### 更新依赖
+
+```bash
+uv run --extra dev python scripts/update_deps.py check    # 检查可升级
+uv run --extra dev python scripts/update_deps.py update   # 全量升级 uv.lock
+uv run --extra dev python scripts/update_deps.py update PySide6  # 单包升级
+```
+
+### 一键发版
+
+```bash
+uv run --extra dev python scripts/release.py patch   # bump → build,提示推送
+```
+
+### GitHub Actions
+
+推送 `v*` tag 后,`.github/workflows/release.yml` 自动在 Windows 上打包,创建 GitHub Release 并附带便携 zip + 校验和。
+
 ## 许可证
 
 MIT

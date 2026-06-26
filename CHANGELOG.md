@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- 打包与发版工具链:
+  - Nuitka `--standalone` 打包脚本(`scripts/build_exe.py`),产出 Windows 便携 exe + zip + 校验和。
+  - 版本号管理 `scripts/bump_version.py`(bump/current/validate,自动 git commit + tag),pyproject.toml 单一真相源。
+  - 依赖更新 `scripts/update_deps.py`(uv lock 封装 + 升级摘要)。
+  - 一键发版 `scripts/release.py`。
+  - GitHub Actions `release.yml`:tag 触发自动打包 + 发版。
 - 发票识别工具 `invoice`:识别电子发票(PDF/OFD/XML),导出 Excel(双 Sheet:汇总+明细)/JSON。
   - 解析优先级:ZIP 内 XML > OFD > PDF(XML/OFD 为结构化数据,PDF 为尽力而为)。
   - 按发票号码去重,支持 keep_all/dedupe/mark(标色)三策略;同号不同来源保留更高优先级。
