@@ -1,12 +1,37 @@
+# Python
 __pycache__/
 *.py[cod]
 .venv/
 *.egg-info/
 dist/
 build/
-.file_toolbox/
+
+# Test / lint caches
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 htmlcov/
 .coverage
+
+# App runtime data
+.file_toolbox/
+logs/
+
+# IDE / editor settings
+.idea/
+.vscode/
+
+# AI assistant folders
+.claude/
+.cursor/
+.aider*
+.windsurf/
+.continue/
+.cody/
+.gemini/
+.copilot/
+
+# 设计/计划文档,仅本地使用
+docs/
+
+# uv.lock SHOULD be tracked (intentionally NOT ignored)
