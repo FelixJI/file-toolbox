@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from typer.testing import CliRunner
 
 from file_toolbox.cli.main import app
@@ -16,7 +14,7 @@ def test_version():
 def test_help_lists_commands():
     r = runner.invoke(app, ["--help"])
     assert r.exit_code == 0
-    for cmd in ["rename", "mkdir", "pdf", "replace", "gui"]:
+    for cmd in ["rename", "mkdir", "pdf", "replace", "gui", "invoice"]:
         assert cmd in r.output
 
 
