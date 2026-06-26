@@ -32,3 +32,22 @@ def test_tech_stack_is_list_of_tuples():
 
 def test_python_requirement_string():
     assert "3.11" in metadata.PYTHON_REQUIREMENT
+
+
+def test_get_changelog_finds_repo_root():
+    """开发环境:CHANGELOG.md 在仓库根,应返回完整内容。"""
+    text = metadata.get_changelog()
+    assert isinstance(text, str)
+    assert "Changelog" in text or "changelog" in text.lower()
+
+
+def test_get_changelog_fallback_when_missing(tmp_path, monkeypatch):
+    """模拟找不到 CHANGELOG.md:切到空目录,断言返回兜底字符串(含版本号),不抛异常。"""
+    monkeypatch.chdir(tmp_path)
+    # 同时屏蔽仓库根查找:让 _repo_root_changelog_path 指向不存在的地方
+    monkeypatch.setattr(
+        metadata, "_repo_root_changelog_path", lambda: tmp_path / "nope.md"
+    )
+    text = metadata.get_changelog()
+    assert isinstance(text, str)
+    assert file_toolbox.__version__ in text  # 兜底文本含版本号
