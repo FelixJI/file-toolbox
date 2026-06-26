@@ -138,3 +138,38 @@ class TestPyprojectVersionIO:
         assert 'requires-python = ">=3.11"' in new
         # 只有一处 version 行
         assert new.count("version =") == 1
+
+
+class TestExtractChangelog:
+    def test_extract_existing_version(self):
+        from scripts.extract_changelog import extract_version_notes
+
+        content = """# Changelog
+
+## [Unreleased]
+
+## 0.2.0 - 2026-06-26
+
+### Added
+- 新功能 A
+
+### Fixed
+- bug X
+
+## 0.1.0 - 2026-06-25
+
+### Added
+- 初始
+"""
+        notes = extract_version_notes(content, "0.2.0")
+        assert "新功能 A" in notes
+        assert "bug X" in notes
+        assert "初始" not in notes  # 不含旧版本
+
+    def test_version_not_found_raises(self):
+        import pytest
+
+        from scripts.extract_changelog import extract_version_notes
+
+        with pytest.raises(ValueError):
+            extract_version_notes("# Changelog\n## 0.1.0\n\n- x\n", "9.9.9")
