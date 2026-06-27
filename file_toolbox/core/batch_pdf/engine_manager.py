@@ -6,10 +6,35 @@ Office引擎管理器
 
 import contextlib
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from file_toolbox.common.loggable import LoggableMixin
 
 from .constants import ENGINE_AUTO, ENGINE_WPS
+
+
+@dataclass(frozen=True)
+class _AppSpec:
+    """单个 Office 应用的配置(app 实例属性、引擎属性、各引擎 ProgID、检测用 ProgID)。"""
+
+    kind: str               # word | excel | ppt
+    app_attr: str           # self._word_app 等
+    engine_attr: str        # self._current_word_engine 等
+    ms_prog_id: str         # Microsoft Office ProgID
+    wps_prog_id: str        # WPS Office ProgID
+    label: str              # 错误提示用名
+
+
+# 三种应用的配置表 —— 新增应用只需在此添加一行。
+_APP_CONFIG: dict[str, _AppSpec] = {
+    "word": _AppSpec("word", "_word_app", "_current_word_engine",
+                     "Word.Application", "KWPS.Application", "Word"),
+    "excel": _AppSpec("excel", "_excel_app", "_current_excel_engine",
+                      "Excel.Application", "Ket.Application", "Excel"),
+    "ppt": _AppSpec("ppt", "_ppt_app", "_current_ppt_engine",
+                    "PowerPoint.Application", "KWPP.Application", "PowerPoint"),
+}
 
 
 class EngineManager(LoggableMixin):
@@ -26,56 +51,44 @@ class EngineManager(LoggableMixin):
         self._current_excel_engine: str | None = None
         self._current_ppt_engine: str | None = None
 
+    # ------------------------------------------------------------------ #
+    #  引擎检测
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _try_detect(prog_id: str, log: Callable[[str], None]) -> bool:
+        """尝试 Dispatch 一个 ProgID,成功即视为引擎可用。"""
+        import gc
+        import time
+
+        import win32com.client
+
+        try:
+            app = win32com.client.Dispatch(prog_id)
+            try:
+                app.Quit()
+            except Exception:
+                pass  # Quit 失败不影响"引擎可用"的判定
+            return True
+        except Exception as e:
+            log(f"{e}")
+            return False
+        finally:
+            gc.collect()
+            time.sleep(0.1)
+
     def _detect_available_engines(self, force_refresh: bool = False) -> dict[str, bool]:
         """检测可用的Office引擎（带缓存）"""
         if EngineManager._cached_engines is not None and not force_refresh:
             return EngineManager._cached_engines
 
-        import win32com.client
-
-        engines = {"office": False, "wps": False}
-
-        # 检测Microsoft Office Word
-        # 只要Dispatch成功就说明引擎可用，Quit()失败不应影响检测结果
-        try:
-            word = win32com.client.Dispatch("Word.Application")
-            engines["office"] = True
-            try:
-                word.Quit()
-            except Exception:
-                pass  # 忽略退出时的错误
-            finally:
-                word = None
-        except Exception as e:
-            self.logger.warning(f"检测Microsoft Office Word失败: {e}")
-        finally:
-            # 强制垃圾回收,确保COM对象被释放
-            import gc
-            import time
-
-            gc.collect()
-            time.sleep(0.1)
-
-        # 检测WPS Office (使用KWPS.Application)
-        # 只要Dispatch成功就说明引擎可用，Quit()失败不应影响检测结果
-        try:
-            wps = win32com.client.Dispatch("KWPS.Application")
-            engines["wps"] = True
-            try:
-                wps.Quit()
-            except Exception:
-                pass  # 忽略退出时的错误
-            finally:
-                wps = None
-        except Exception as e:
-            self.logger.warning(f"检测WPS Office失败: {e}")
-        finally:
-            # 强制垃圾回收,确保COM对象被释放
-            import gc
-            import time
-
-            gc.collect()
-            time.sleep(0.1)
+        engines = {
+            "office": self._try_detect(
+                "Word.Application", lambda m: self.logger.warning(f"检测Microsoft Office Word失败: {m}")
+            ),
+            "wps": self._try_detect(
+                "KWPS.Application", lambda m: self.logger.warning(f"检测WPS Office失败: {m}")
+            ),
+        }
 
         # 缓存结果
         EngineManager._cached_engines = engines
@@ -105,203 +118,95 @@ class EngineManager(LoggableMixin):
         if callback:
             callback(self.get_engine_info(use_cache=True))
 
-    def _get_word_prog_id(self, engine: str = "auto") -> str:
-        """获取Word的ProgID"""
+    # ------------------------------------------------------------------ #
+    #  应用初始化(配置驱动)
+    # ------------------------------------------------------------------ #
+    def _get_prog_id(self, kind: str, engine: str = ENGINE_AUTO) -> str:
+        """根据 kind 与引擎选择返回首选 ProgID(auto 时按检测结果优先 MS Office)。"""
+        spec = _APP_CONFIG[kind]
         if engine == ENGINE_AUTO:
             engines = self._detect_available_engines()
-            if engines["office"]:
-                return "Word.Application"
-            elif engines["wps"]:
-                return "KWPS.Application"
-            else:
-                return "Word.Application"
-        elif engine == ENGINE_WPS:
-            return "KWPS.Application"
-        else:  # ENGINE_MS_OFFICE
-            return "Word.Application"
+            if engines["wps"] and not engines["office"]:
+                return spec.wps_prog_id
+            return spec.ms_prog_id
+        if engine == ENGINE_WPS:
+            return spec.wps_prog_id
+        return spec.ms_prog_id
 
-    def _get_excel_prog_id(self, engine: str = "auto") -> str:
-        """获取Excel的ProgID"""
-        if engine == ENGINE_AUTO:
-            engines = self._detect_available_engines()
-            if engines["office"]:
-                return "Excel.Application"
-            elif engines["wps"]:
-                return "Ket.Application"
-            else:
-                return "Excel.Application"
-        elif engine == ENGINE_WPS:
-            return "Ket.Application"
-        else:  # ENGINE_MS_OFFICE
-            return "Excel.Application"
+    def _prog_ids_to_try(self, kind: str, engine: str) -> list[str]:
+        """按引擎偏好返回 ProgID 尝试顺序(含回退)。"""
+        spec = _APP_CONFIG[kind]
+        if engine == ENGINE_WPS:
+            return [spec.wps_prog_id, spec.ms_prog_id]
+        # ENGINE_AUTO / ENGINE_MS_OFFICE:均优先 MS Office
+        return [spec.ms_prog_id, spec.wps_prog_id]
 
-    def _get_ppt_prog_id(self, engine: str = "auto") -> str:
-        """获取PowerPoint的ProgID"""
-        if engine == ENGINE_AUTO:
-            engines = self._detect_available_engines()
-            if engines["office"]:
-                return "PowerPoint.Application"
-            elif engines["wps"]:
-                return "KWPP.Application"
-            else:
-                return "PowerPoint.Application"
-        elif engine == ENGINE_WPS:
-            return "KWPP.Application"
-        else:  # ENGINE_MS_OFFICE
-            return "PowerPoint.Application"
+    def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO):
+        """通用初始化逻辑,由 init_word/excel/ppt 复用。"""
+        if sys.platform != "win32":
+            raise RuntimeError("此功能仅支持 Windows 系统")
 
-    def init_word(self, engine: str = "auto"):
+        spec = _APP_CONFIG[kind]
+        current_app = getattr(self, spec.app_attr)
+        target_prog_id = self._get_prog_id(kind, engine)
+
+        # 已有实例且引擎未变:直接复用
+        if current_app is not None and getattr(self, spec.engine_attr) == target_prog_id:
+            return current_app
+
+        # 引擎切换:先释放旧实例
+        if current_app is not None:
+            with contextlib.suppress(Exception):
+                current_app.Quit()
+            setattr(self, spec.app_attr, None)
+            setattr(self, spec.engine_attr, None)
+
+        import win32com.client
+
+        last_error = None
+        for prog_id in self._prog_ids_to_try(kind, engine):
+            try:
+                app = win32com.client.Dispatch(prog_id)
+                app.Visible = False
+                app.DisplayAlerts = False
+                setattr(self, spec.app_attr, app)
+                setattr(self, spec.engine_attr, prog_id)
+                return app
+            except Exception as e:
+                last_error = e
+                continue
+
+        raise RuntimeError(
+            f"无法启动 {spec.label} 应用程序。请确保已安装 Microsoft Office 或 WPS Office。\n"
+            f"详细错误: {last_error}"
+        )
+
+    def init_word(self, engine: str = ENGINE_AUTO):
         """初始化Word应用，支持引擎切换"""
-        if sys.platform != "win32":
-            raise RuntimeError("此功能仅支持 Windows 系统")
+        return self._init_office_app("word", engine)
 
-        target_prog_id = self._get_word_prog_id(engine)
-
-        if self._word_app is not None and self._current_word_engine == target_prog_id:
-            return self._word_app
-
-        if self._word_app is not None:
-            with contextlib.suppress(Exception):
-                self._word_app.Quit()
-            self._word_app = None
-            self._current_word_engine = None
-
-        import win32com.client
-
-        prog_ids_to_try = []
-        if engine == ENGINE_AUTO:
-            prog_ids_to_try = ["Word.Application", "KWPS.Application"]
-        elif engine == ENGINE_WPS:
-            prog_ids_to_try = ["KWPS.Application", "Word.Application"]
-        else:  # ENGINE_MS_OFFICE
-            prog_ids_to_try = ["Word.Application", "KWPS.Application"]
-
-        last_error = None
-        for prog_id in prog_ids_to_try:
-            try:
-                self._word_app = win32com.client.Dispatch(prog_id)
-                self._word_app.Visible = False
-                self._word_app.DisplayAlerts = False
-                self._current_word_engine = prog_id
-                return self._word_app
-            except Exception as e:
-                last_error = e
-                continue
-
-        raise RuntimeError(
-            f"无法启动 Word 应用程序。请确保已安装 Microsoft Office 或 WPS Office。\n"
-            f"详细错误: {last_error}"
-        )
-
-    def init_excel(self, engine: str = "auto"):
+    def init_excel(self, engine: str = ENGINE_AUTO):
         """初始化Excel应用，支持引擎切换"""
-        if sys.platform != "win32":
-            raise RuntimeError("此功能仅支持 Windows 系统")
+        return self._init_office_app("excel", engine)
 
-        target_prog_id = self._get_excel_prog_id(engine)
-
-        if self._excel_app is not None and self._current_excel_engine == target_prog_id:
-            return self._excel_app
-
-        if self._excel_app is not None:
-            with contextlib.suppress(Exception):
-                self._excel_app.Quit()
-            self._excel_app = None
-            self._current_excel_engine = None
-
-        import win32com.client
-
-        prog_ids_to_try = []
-        if engine == ENGINE_AUTO:
-            prog_ids_to_try = ["Excel.Application", "Ket.Application"]
-        elif engine == ENGINE_WPS:
-            prog_ids_to_try = ["Ket.Application", "Excel.Application"]
-        else:  # ENGINE_MS_OFFICE
-            prog_ids_to_try = ["Excel.Application", "Ket.Application"]
-
-        last_error = None
-        for prog_id in prog_ids_to_try:
-            try:
-                self._excel_app = win32com.client.Dispatch(prog_id)
-                self._excel_app.Visible = False
-                self._excel_app.DisplayAlerts = False
-                self._current_excel_engine = prog_id
-                return self._excel_app
-            except Exception as e:
-                last_error = e
-                continue
-
-        raise RuntimeError(
-            f"无法启动 Excel 应用程序。请确保已安装 Microsoft Office 或 WPS Office。\n"
-            f"详细错误: {last_error}"
-        )
-
-    def init_ppt(self, engine: str = "auto"):
+    def init_ppt(self, engine: str = ENGINE_AUTO):
         """初始化PowerPoint应用，支持引擎切换"""
-        if sys.platform != "win32":
-            raise RuntimeError("此功能仅支持 Windows 系统")
-
-        target_prog_id = self._get_ppt_prog_id(engine)
-
-        if self._ppt_app is not None and self._current_ppt_engine == target_prog_id:
-            return self._ppt_app
-
-        if self._ppt_app is not None:
-            with contextlib.suppress(Exception):
-                self._ppt_app.Quit()
-            self._ppt_app = None
-            self._current_ppt_engine = None
-
-        import win32com.client
-
-        prog_ids_to_try = []
-        if engine == ENGINE_AUTO:
-            prog_ids_to_try = ["PowerPoint.Application", "KWPP.Application"]
-        elif engine == ENGINE_WPS:
-            prog_ids_to_try = ["KWPP.Application", "PowerPoint.Application"]
-        else:  # ENGINE_MS_OFFICE
-            prog_ids_to_try = ["PowerPoint.Application", "KWPP.Application"]
-
-        last_error = None
-        for prog_id in prog_ids_to_try:
-            try:
-                self._ppt_app = win32com.client.Dispatch(prog_id)
-                self._current_ppt_engine = prog_id
-                return self._ppt_app
-            except Exception as e:
-                last_error = e
-                continue
-
-        raise RuntimeError(
-            f"无法启动 PowerPoint 应用程序。请确保已安装 Microsoft Office 或 WPS Office。\n"
-            f"详细错误: {last_error}"
-        )
+        return self._init_office_app("ppt", engine)
 
     def close(self):
         """关闭Office应用"""
         import gc
         import time
 
-        try:
-            if self._word_app is not None:
-                self._word_app.Quit()
-                self._word_app = None
-        except Exception as e:
-            self.logger.error(f"关闭Word应用失败: {e}")
-
-        try:
-            if self._excel_app is not None:
-                self._excel_app.Quit()
-                self._excel_app = None
-        except Exception as e:
-            self.logger.error(f"关闭Excel应用失败: {e}")
-
-        try:
-            if self._ppt_app is not None:
-                self._ppt_app.Quit()
-                self._ppt_app = None
-        except Exception as e:
-            self.logger.error(f"关闭PowerPoint应用失败: {e}")
+        for spec in _APP_CONFIG.values():
+            app = getattr(self, spec.app_attr, None)
+            if app is not None:
+                try:
+                    app.Quit()
+                except Exception as e:
+                    self.logger.error(f"关闭{spec.label}应用失败: {e}")
+                setattr(self, spec.app_attr, None)
+                setattr(self, spec.engine_attr, None)
 
         # 强制垃圾回收,确保COM对象被释放
         gc.collect()

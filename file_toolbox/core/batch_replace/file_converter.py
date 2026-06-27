@@ -1,10 +1,28 @@
-"""文件格式转换服务:doc↔docx、xls↔xlsx,通过 Windows COM 调用 Office。"""
+"""文件格式转换服务:doc→docx、xls→xlsx,通过 Windows COM 调用 Office。
+
+每个转换在调用线程内独立初始化 COM 并创建一次性 Office 应用实例,
+用完即关 —— 不复用 batch_pdf 的 EngineManager 缓存实例,因为后者为
+共享/缓存设计,而 COM 应用绑定创建它的 STA 线程,跨线程复用会失效。
+"""
 
 import contextlib
 import sys
-import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class _LegacySpec:
+    """旧格式→新格式转换的规格(差异点参数化,消除两份近乎复制的代码)。"""
+
+    prog_id: str                       # Office 应用 ProgID
+    new_suffix: str                    # 目标扩展名,如 ".docx"
+    file_format: int                   # SaveAs/SaveAs2 的 FileFormat 常量
+    open_doc: Callable                 # open_doc(app, abs_path) -> document/workbook
+    save_doc: Callable                 # save_doc(doc, abs_path, file_format) -> None
+    error_label: str                   # 错误提示名
 
 
 class FileConverterService:
@@ -12,26 +30,6 @@ class FileConverterService:
 
     def __init__(self):
         self.temp_files: list[Path] = []  # 记录临时文件
-        self._word_app = None
-        self._excel_app = None
-        self._thread_id = None  # 记录创建 COM 对象的线程ID
-
-    def _ensure_com_initialized(self):
-        """
-        确保 COM 在当前线程中正确初始化
-        如果线程切换了，需要重新创建 COM 对象
-        """
-        current_thread_id = threading.current_thread().ident
-        if self._thread_id is not None and self._thread_id != current_thread_id:
-            # 线程已切换，需要释放旧的 COM 对象并重新初始化
-            self._release_com_objects()
-        self._thread_id = current_thread_id
-
-    def _release_com_objects(self):
-        """释放 COM 对象（不调用 Quit，因为可能已经失效）"""
-        self._word_app = None
-        self._excel_app = None
-        self._thread_id = None
 
     def is_conversion_needed(self, file_path: Path) -> bool:
         """
@@ -46,6 +44,58 @@ class FileConverterService:
         suffix = file_path.suffix.lower()
         return suffix in [".doc", ".xls"]
 
+    def _convert_legacy_format(
+        self, src_path: Path, spec: _LegacySpec, output_path: Path | None = None
+    ) -> tuple[bool, Path, str]:
+        """doc→docx / xls→xlsx 的通用实现,由两个公开方法复用。
+
+        每次调用:本线程 CoInitialize → 新建一次性 Office 应用 → 转换 → 关闭 → CoUninitialize。
+        """
+        if sys.platform != "win32":
+            return False, src_path, "此功能仅支持 Windows 系统"
+
+        try:
+            import pythoncom
+            import win32com.client
+        except ImportError:
+            return False, src_path, "未安装 pywin32 库，请运行: pip install pywin32"
+
+        app = None
+        try:
+            pythoncom.CoInitialize()
+            try:
+                # 生成输出路径
+                if output_path is None:
+                    output_path = src_path.with_suffix(spec.new_suffix)
+                    # 目标已存在:先尝试删除,被锁定则用时间戳建新文件
+                    if output_path.exists():
+                        try:
+                            output_path.unlink()
+                        except PermissionError:
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            output_path = src_path.with_name(
+                                f"{src_path.stem}_{timestamp}{spec.new_suffix}"
+                            )
+
+                # 每次创建新的应用实例,避免 COM 对象失效问题
+                app = win32com.client.Dispatch(spec.prog_id)
+                app.Visible = False
+                app.DisplayAlerts = False
+
+                doc = spec.open_doc(app, str(src_path.absolute()))
+                spec.save_doc(doc, str(output_path.absolute()), spec.file_format)
+                doc.Close()
+
+                self.temp_files.append(output_path)
+                return True, output_path, ""
+            finally:
+                if app is not None:
+                    with contextlib.suppress(Exception):
+                        app.Quit()
+                pythoncom.CoUninitialize()
+        except Exception as e:
+            return False, src_path, f"{spec.error_label}转换失败: {e!s}"
+
     def convert_doc_to_docx(
         self, doc_path: Path, output_path: Path | None = None
     ) -> tuple[bool, Path, str]:
@@ -59,55 +109,15 @@ class FileConverterService:
         Returns:
             (是否成功, 转换后的文件路径, 错误消息)
         """
-        if sys.platform != "win32":
-            return False, doc_path, "此功能仅支持 Windows 系统"
-
-        word_app = None
-        try:
-            import pythoncom
-            import win32com.client
-
-            # 初始化当前线程的 COM
-            pythoncom.CoInitialize()
-
-            try:
-                # 生成输出路径
-                if output_path is None:
-                    output_path = doc_path.with_suffix(".docx")
-                    # 如果目标文件已存在，先尝试删除旧的临时文件
-                    if output_path.exists():
-                        try:
-                            output_path.unlink()
-                        except PermissionError:
-                            # 文件被锁定，才使用时间戳创建新文件
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            output_path = doc_path.with_name(f"{doc_path.stem}_{timestamp}.docx")
-
-                # 每次创建新的 Word 应用实例，避免 COM 对象失效问题
-                word_app = win32com.client.Dispatch("Word.Application")
-                word_app.Visible = False
-                word_app.DisplayAlerts = False
-
-                # 打开 doc 文件
-                doc = word_app.Documents.Open(str(doc_path.absolute()))
-
-                # 保存为 docx (FileFormat=16 for docx)
-                doc.SaveAs2(str(output_path.absolute()), FileFormat=16)
-                doc.Close()
-
-                self.temp_files.append(output_path)
-                return True, output_path, ""
-            finally:
-                # 关闭 Word 应用
-                if word_app is not None:
-                    with contextlib.suppress(Exception):
-                        word_app.Quit()
-                pythoncom.CoUninitialize()
-
-        except ImportError:
-            return False, doc_path, "未安装 pywin32 库，请运行: pip install pywin32"
-        except Exception as e:
-            return False, doc_path, f"转换失败: {e!s}"
+        spec = _LegacySpec(
+            prog_id="Word.Application",
+            new_suffix=".docx",
+            file_format=16,  # docx
+            open_doc=lambda app, p: app.Documents.Open(p),
+            save_doc=lambda doc, p, fmt: doc.SaveAs2(p, FileFormat=fmt),
+            error_label="doc→docx",
+        )
+        return self._convert_legacy_format(doc_path, spec, output_path)
 
     def convert_xls_to_xlsx(
         self, xls_path: Path, output_path: Path | None = None
@@ -122,55 +132,15 @@ class FileConverterService:
         Returns:
             (是否成功, 转换后的文件路径, 错误消息)
         """
-        if sys.platform != "win32":
-            return False, xls_path, "此功能仅支持 Windows 系统"
-
-        excel_app = None
-        try:
-            import pythoncom
-            import win32com.client
-
-            # 初始化当前线程的 COM
-            pythoncom.CoInitialize()
-
-            try:
-                # 生成输出路径
-                if output_path is None:
-                    output_path = xls_path.with_suffix(".xlsx")
-                    # 如果目标文件已存在，先尝试删除旧的临时文件
-                    if output_path.exists():
-                        try:
-                            output_path.unlink()
-                        except PermissionError:
-                            # 文件被锁定，才使用时间戳创建新文件
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            output_path = xls_path.with_name(f"{xls_path.stem}_{timestamp}.xlsx")
-
-                # 每次创建新的 Excel 应用实例，避免 COM 对象失效问题
-                excel_app = win32com.client.Dispatch("Excel.Application")
-                excel_app.Visible = False
-                excel_app.DisplayAlerts = False
-
-                # 打开 xls 文件
-                wb = excel_app.Workbooks.Open(str(xls_path.absolute()))
-
-                # 保存为 xlsx (FileFormat=51 for xlsx)
-                wb.SaveAs(str(output_path.absolute()), FileFormat=51)
-                wb.Close()
-
-                self.temp_files.append(output_path)
-                return True, output_path, ""
-            finally:
-                # 关闭 Excel 应用
-                if excel_app is not None:
-                    with contextlib.suppress(Exception):
-                        excel_app.Quit()
-                pythoncom.CoUninitialize()
-
-        except ImportError:
-            return False, xls_path, "未安装 pywin32 库，请运行: pip install pywin32"
-        except Exception as e:
-            return False, xls_path, f"转换失败: {e!s}"
+        spec = _LegacySpec(
+            prog_id="Excel.Application",
+            new_suffix=".xlsx",
+            file_format=51,  # xlsx
+            open_doc=lambda app, p: app.Workbooks.Open(p),
+            save_doc=lambda wb, p, fmt: wb.SaveAs(p, FileFormat=fmt),
+            error_label="xls→xlsx",
+        )
+        return self._convert_legacy_format(xls_path, spec, output_path)
 
     def auto_convert_if_needed(self, file_path: Path) -> tuple[bool, Path, str]:
         """
