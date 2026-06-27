@@ -35,9 +35,13 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         layout = QVBoxLayout(central)
+        # 主区域不留外边距,避免标签栏上方出现一片空白带
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # 顶部:历史按钮 + 工具选择
+        # 顶部:历史按钮(右对齐,紧贴标签栏,不撑出一大块空白)
         top = QHBoxLayout()
+        top.setContentsMargins(9, 5, 9, 2)
         top.addStretch(1)
         self.btn_history = QPushButton("历史")
         self.btn_history.clicked.connect(self._open_history)

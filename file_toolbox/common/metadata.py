@@ -15,13 +15,14 @@ LICENSE = "MIT"
 PYTHON_REQUIREMENT = ">=3.11"
 
 # (组件名, 说明)元组列表 —— UI 控制格式化,数据不绑死呈现方式
+# 说明只写用途,不写版本(版本随依赖漂移,易过期;版本要求见"基本信息"区)
 TECH_STACK: list[tuple[str, str]] = [
-    ("Python", ">=3.11"),
-    ("PySide6", ">=6.5 (GUI)"),
-    ("typer", ">=0.9 (CLI)"),
+    ("Python", "(主语言)"),
+    ("PySide6", "(GUI 框架)"),
+    ("typer", "(CLI 框架)"),
     ("pypdf / PyMuPDF", "(PDF 处理)"),
     ("pdfplumber + openpyxl", "(发票识别,可选)"),
-    ("pywin32", ">=306 (Windows COM 自动化,仅 Windows)"),
+    ("pywin32", "(Windows COM 自动化,仅 Windows)"),
 ]
 
 
