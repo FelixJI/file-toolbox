@@ -6,7 +6,8 @@ from enum import Enum
 from pathlib import Path
 
 from file_toolbox.common.base_operation import BaseOperationService
-from file_toolbox.common.file_utils import format_datetime
+from file_toolbox.common.file_utils import get_file_info
+from file_toolbox.common.op_schema import ParamRule, validate_params
 
 
 class OperationType(Enum):
@@ -21,66 +22,62 @@ class OperationType(Enum):
     ADD_DATE = "add_date"  # 添加日期
 
 
+def _validate_add_number(operation: dict, index: int) -> tuple[bool, str]:
+    """add_number 的自定义校验:位数>=1、custom 格式含 {n} 占位符。"""
+    params = operation.get("params", {})
+    n = index + 1
+    try:
+        int(params.get("start", 1))  # 验证参数有效性
+        digits = int(params.get("digits", 3))
+        if digits < 1:
+            return False, f"操作 {n}: 序号位数必须大于0"
+
+        if params.get("format", "bracket") == "custom":
+            custom_template = params.get("custom_template", "")
+            if not custom_template:
+                return False, f"操作 {n}: 自定义格式模板不能为空"
+            if "{n}" not in custom_template:
+                return False, f"操作 {n}: 自定义格式必须包含 {{n}} 作为序号占位符"
+    except ValueError:
+        return False, f"操作 {n}: 序号参数必须是数字"
+    return True, ""
+
+
+# 参数校验规则表(声明式,由 FileRenameService._validate_params 复用)。
+# 简单类型由通用规则覆盖;add_number 的复合校验通过 extra 委托。
+RENAME_PARAM_RULES: dict[str, ParamRule] = {
+    OperationType.ADD_PREFIX.value: ParamRule(
+        required=("text",), empty_messages={"text": "前缀不能为空"}
+    ),
+    OperationType.ADD_SUFFIX.value: ParamRule(
+        required=("text",), empty_messages={"text": "后缀不能为空"}
+    ),
+    OperationType.REPLACE_TEXT.value: ParamRule(
+        required=("find",), empty_messages={"find": "查找文本不能为空"}
+    ),
+    OperationType.REGEX_REPLACE.value: ParamRule(
+        required=("pattern",),
+        empty_messages={"pattern": "正则表达式不能为空"},
+        regex_key="pattern",
+    ),
+    OperationType.ADD_NUMBER.value: ParamRule(extra=_validate_add_number),
+    OperationType.DELETE_CHARS.value: ParamRule(
+        required=("value",), empty_messages={"value": "删除值不能为空"}
+    ),
+    # ADD_DATE 无强制必填字段(格式有默认值)
+}
+
+
 class FileRenameService(BaseOperationService):
     """文件重命名服务"""
-
-    def __init__(self):
-        pass
 
     def get_operation_types(self) -> list[str]:
         """获取支持的操作类型列表"""
         return [t.value for t in OperationType]
 
     def _validate_params(self, operation: dict, index: int) -> tuple[bool, str]:
-        """验证操作参数"""
-        params = operation.get("params", {})
-        op_type = operation.get("type")
-
-        if op_type == OperationType.ADD_PREFIX.value:
-            if not params.get("text"):
-                return False, f"操作 {index + 1}: 前缀不能为空"
-
-        elif op_type == OperationType.ADD_SUFFIX.value:
-            if not params.get("text"):
-                return False, f"操作 {index + 1}: 后缀不能为空"
-
-        elif op_type == OperationType.REPLACE_TEXT.value:
-            if not params.get("find"):
-                return False, f"操作 {index + 1}: 查找文本不能为空"
-
-        elif op_type == OperationType.REGEX_REPLACE.value:
-            pattern = params.get("pattern", "")
-            if not pattern:
-                return False, f"操作 {index + 1}: 正则表达式不能为空"
-            try:
-                re.compile(pattern)
-            except re.error as e:
-                return False, f"操作 {index + 1}: 正则表达式错误 - {e!s}"
-
-        elif op_type == OperationType.ADD_NUMBER.value:
-            try:
-                _start = int(params.get("start", 1))  # 验证参数有效性
-                digits = int(params.get("digits", 3))
-                if digits < 1:
-                    return False, f"操作 {index + 1}: 序号位数必须大于0"
-
-                format_type = params.get("format", "bracket")
-                if format_type == "custom":
-                    custom_template = params.get("custom_template", "")
-                    if not custom_template:
-                        return False, f"操作 {index + 1}: 自定义格式模板不能为空"
-                    if "{n}" not in custom_template:
-                        return (
-                            False,
-                            f"操作 {index + 1}: 自定义格式必须包含 {{n}} 作为序号占位符",
-                        )
-            except ValueError:
-                return False, f"操作 {index + 1}: 序号参数必须是数字"
-
-        elif op_type == OperationType.DELETE_CHARS.value and not params.get("value"):
-            return False, f"操作 {index + 1}: 删除值不能为空"
-
-        return True, ""
+        """验证操作参数(委托给共享的声明式规则表)。"""
+        return validate_params(operation, index, RENAME_PARAM_RULES)
 
     def apply_operations(
         self, files: list[Path], operations: list[dict]
@@ -343,38 +340,6 @@ class FileRenameService(BaseOperationService):
         return success_count, errors
 
     def get_file_info(self, file_path: Path) -> dict:
-        """
-        获取文件信息
+        """获取文件信息(委托给通用工具,保持单一实现)。"""
+        return get_file_info(file_path)
 
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            文件信息字典
-        """
-        try:
-            stat = file_path.stat()
-            return {
-                "size": stat.st_size,
-                "size_str": self._format_size(stat.st_size),
-                "modified": datetime.fromtimestamp(stat.st_mtime),
-                "modified_str": format_datetime(datetime.fromtimestamp(stat.st_mtime)),
-                "is_dir": file_path.is_dir(),
-            }
-        except Exception as e:
-            return {
-                "size": 0,
-                "size_str": "未知",
-                "modified": None,
-                "modified_str": "未知",
-                "is_dir": False,
-                "error": str(e),
-            }
-
-    def _format_size(self, size: float) -> str:
-        """格式化文件大小"""
-        for unit in ["B", "KB", "MB", "GB", "TB"]:
-            if size < 1024.0:
-                return f"{size:.1f} {unit}"
-            size /= 1024.0
-        return f"{size:.1f} PB"
