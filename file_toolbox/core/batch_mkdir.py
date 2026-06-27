@@ -320,21 +320,3 @@ class FolderCreatorService(LoggableMixin):
                 success=False,
                 error_message=f"批量创建文件夹时出错: {e!s}",
             )
-
-    def create_single_folder(self, path: Path) -> tuple[bool, str]:
-        """
-        创建单个文件夹
-
-        Args:
-            path: 文件夹路径
-
-        Returns:
-            (success, message)
-        """
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            self.logger.info(f"创建文件夹: {path}")
-            return True, f"成功创建文件夹: {path}"
-        except Exception as e:
-            self.logger.error(f"创建文件夹失败: {path}, {e}")
-            return False, f"创建文件夹失败: {path}\n{e!s}"

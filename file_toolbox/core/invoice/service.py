@@ -66,3 +66,8 @@ class InvoiceService:
     @staticmethod
     def supported_dedupe_strategies() -> list[str]:
         return [KEEP_ALL, DEDUPE, MARK]
+
+    @staticmethod
+    def supported_formats() -> list[str]:
+        """支持导出的格式。"""
+        return ["excel", "json", "both"]

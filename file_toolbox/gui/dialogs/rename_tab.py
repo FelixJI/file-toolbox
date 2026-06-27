@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService, OperationType
+from file_toolbox.core.rename_template import RenameTemplateService
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.generated.ui_rename_dialog import Ui_FileRenamerDialog
 
@@ -25,6 +26,17 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
 
     SUPPORTED_FORMATS: set[str] = set()
 
+    # 操作类型 -> 中文标签(操作列表展示、模板描述共用)
+    _OP_LABELS: dict[str, str] = {
+        OperationType.ADD_PREFIX.value: "添加前缀",
+        OperationType.ADD_SUFFIX.value: "添加后缀",
+        OperationType.REPLACE_TEXT.value: "替换字符",
+        OperationType.REGEX_REPLACE.value: "正则替换",
+        OperationType.ADD_NUMBER.value: "添加序号",
+        OperationType.DELETE_CHARS.value: "删除字符",
+        OperationType.ADD_DATE.value: "添加日期",
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._init_batch_dialog()
@@ -33,6 +45,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
 
         self._svc = FileRenameService()
         self._history = JsonHistoryStore()
+        self._template_svc = RenameTemplateService()
         self.operations: list[dict] = []
 
         # 隐藏 Tab 场景下不需要的按钮
@@ -74,6 +87,8 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         self.ui.btn_refresh_preview.clicked.connect(self._do_refresh_preview)
         self.ui.btn_execute.clicked.connect(self._execute)
         self.ui.btn_show_history.clicked.connect(self._show_history)
+        self.ui.btn_load_template.clicked.connect(self._load_template)
+        self.ui.btn_save_template.clicked.connect(self._save_template)
 
     # ---------- 操作管理 ----------
     def _add_operation(self, op_type: str):
@@ -106,17 +121,8 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
 
     def _refresh_operation_list(self):
         self.ui.list_operations.clear()
-        names = {
-            OperationType.ADD_PREFIX.value: "添加前缀",
-            OperationType.ADD_SUFFIX.value: "添加后缀",
-            OperationType.REPLACE_TEXT.value: "替换字符",
-            OperationType.REGEX_REPLACE.value: "正则替换",
-            OperationType.ADD_NUMBER.value: "添加序号",
-            OperationType.DELETE_CHARS.value: "删除字符",
-            OperationType.ADD_DATE.value: "添加日期",
-        }
         for op in self.operations:
-            label = names.get(op["type"], op["type"])
+            label = self._OP_LABELS.get(op["type"], op["type"])
             item = QListWidgetItem(f"{label}: {op['params']}")
             self.ui.list_operations.addItem(item)
 
@@ -201,12 +207,11 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
     def _render_preview(self, result: dict):
         self.ui.table_preview.setRowCount(len(result))
         for row, (old, (new, status)) in enumerate(result.items()):
+            info = self._svc.get_file_info(old)
             self.ui.table_preview.setItem(row, 0, QTableWidgetItem(old.name))
             self.ui.table_preview.setItem(row, 1, QTableWidgetItem(new.name))
-            self.ui.table_preview.setItem(
-                row, 2, QTableWidgetItem(self._format_size(old.stat().st_size if old.exists() else 0))
-            )
-            self.ui.table_preview.setItem(row, 3, QTableWidgetItem(""))
+            self.ui.table_preview.setItem(row, 2, QTableWidgetItem(info["size_str"]))
+            self.ui.table_preview.setItem(row, 3, QTableWidgetItem(info["modified_str"]))
             self.ui.table_preview.setItem(row, 4, QTableWidgetItem(status))
 
     def _execute(self):
@@ -242,6 +247,56 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
             return
         lines = [f"#{r['id']} {r['timestamp'][:19]}  {len(r['data'].get('rename_map', {}))} 个文件" for r in records]
         QMessageBox.information(self, "历史", "\n".join(lines))
+
+    # ---------- 模板管理 ----------
+    def _load_template(self):
+        """加载已保存的重命名模板,替换当前操作列表。"""
+        templates = self._template_svc.get_all_templates()
+        if not templates:
+            QMessageBox.information(self, "加载模板", "暂无已保存的模板。")
+            return
+        # 显示名:模板名 + 操作描述
+        labels = []
+        for t in templates:
+            ops_desc = ", ".join(self._op_label(o) for o in t["operations"])
+            labels.append(f"{t['name']}  ({ops_desc})")
+        choice, ok = QInputDialog.getItem(
+            self, "加载模板", "选择模板:", labels, 0, editable=False
+        )
+        if not ok:
+            return
+        idx = labels.index(choice)
+        chosen = templates[idx]
+        # 替换当前操作列表
+        self.operations = [dict(o) for o in chosen["operations"]]
+        self._refresh_operation_list()
+        self._refresh_preview()
+        QMessageBox.information(self, "加载模板", f"已加载模板「{chosen['name']}」。")
+
+    def _save_template(self):
+        """把当前操作列表保存为模板。同名时提示覆盖。"""
+        if not self.operations:
+            QMessageBox.information(self, "保存模板", "当前没有操作可保存。")
+            return
+        name, ok = QInputDialog.getText(self, "保存模板", "模板名称:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        exists = self._template_svc.template_exists(name)
+        if exists:
+            reply = QMessageBox.question(
+                self, "覆盖确认", f"模板「{name}」已存在,是否覆盖?"
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self._template_svc.update_template(name, self.operations)
+        else:
+            self._template_svc.add_template(name, self.operations)
+        QMessageBox.information(self, "保存模板", f"已保存模板「{name}」。")
+
+    def _op_label(self, op: dict) -> str:
+        """操作转简短描述(供模板列表展示)。"""
+        return self._OP_LABELS.get(op.get("type", ""), op.get("type", ""))
 
     # ---------- 文件列表变更后刷新状态/预览 ----------
     def _update_status(self):

@@ -1,12 +1,17 @@
 """依赖更新:封装 uv lock --upgrade,输出升级摘要。
 
-运行方式:uv run --extra dev python scripts/update_deps.py [update <pkg>|check]
+运行方式:
+  uv run scripts/update_deps.py            # 交互式菜单
+  uv run scripts/update_deps.py check      # dry-run 检测可升级包
+  uv run scripts/update_deps.py update     # 全量升级
+  uv run scripts/update_deps.py update <pkg>  # 单包升级
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import typer
@@ -109,5 +114,45 @@ def check() -> None:
     typer.echo(f"\n共 {len(changes)} 个包可升级。运行 update-deps update 升级。")
 
 
+# ---------------------------------------------------------------------------
+# 交互式菜单(无子命令时调用)
+# ---------------------------------------------------------------------------
+
+
+def _interactive_menu() -> None:
+    """无子命令时弹出菜单让用户选择操作。"""
+    typer.echo("file-toolbox 依赖更新工具")
+    typer.echo("请选择操作:")
+    typer.echo("  1) check    - 检测哪些包有新版(不改 uv.lock)")
+    typer.echo("  2) update   - 全量升级(修改 uv.lock)")
+    typer.echo("  3) update <包名> - 只升级指定包")
+    typer.echo("  q) 退出")
+    try:
+        choice = input("选择 [1]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print("\n已取消。")
+        sys.exit(0)
+
+    if choice in ("q", "quit", "exit"):
+        sys.exit(0)
+    if choice == "1":
+        check()
+    elif choice == "2":
+        update()
+    elif choice == "3":
+        package = input("输入要升级的包名: ").strip()
+        if not package:
+            print("错误: 包名不能为空。")
+            sys.exit(2)
+        update(package)
+    else:
+        print(f"错误: 无效选择 {choice}")
+        sys.exit(2)
+
+
 if __name__ == "__main__":
-    cli()
+    # 无子命令时进入交互式菜单
+    if len(sys.argv) == 1:
+        _interactive_menu()
+    else:
+        cli()

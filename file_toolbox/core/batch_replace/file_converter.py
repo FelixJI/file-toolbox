@@ -5,19 +5,10 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
 
 
 class FileConverterService:
     """文件格式转换服务"""
-
-    # 支持的转换格式
-    SUPPORTED_CONVERSIONS: ClassVar[dict[str, str]] = {
-        ".doc": ".docx",
-        ".xls": ".xlsx",
-        ".docx": ".doc",
-        ".xlsx": ".xls",
-    }
 
     def __init__(self):
         self.temp_files: list[Path] = []  # 记录临时文件
@@ -54,19 +45,6 @@ class FileConverterService:
         """
         suffix = file_path.suffix.lower()
         return suffix in [".doc", ".xls"]
-
-    def get_target_format(self, file_path: Path) -> str | None:
-        """
-        获取目标转换格式
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            目标格式后缀，如果不支持转换返回 None
-        """
-        suffix = file_path.suffix.lower()
-        return self.SUPPORTED_CONVERSIONS.get(suffix)
 
     def convert_doc_to_docx(
         self, doc_path: Path, output_path: Path | None = None
@@ -194,114 +172,6 @@ class FileConverterService:
         except Exception as e:
             return False, xls_path, f"转换失败: {e!s}"
 
-    def convert_docx_to_doc(
-        self, docx_path: Path, output_path: Path | None = None
-    ) -> tuple[bool, Path, str]:
-        """
-        将 .docx 转换为 .doc
-
-        Args:
-            docx_path: docx文件路径
-            output_path: 输出路径（可选）
-
-        Returns:
-            (是否成功, 转换后的文件路径, 错误消息)
-        """
-        if sys.platform != "win32":
-            return False, docx_path, "此功能仅支持 Windows 系统"
-
-        word_app = None
-        try:
-            import pythoncom
-            import win32com.client
-
-            # 初始化当前线程的 COM
-            pythoncom.CoInitialize()
-
-            try:
-                # 生成输出路径
-                if output_path is None:
-                    output_path = docx_path.with_suffix(".doc")
-
-                # 每次创建新的 Word 应用实例，避免 COM 对象失效问题
-                word_app = win32com.client.Dispatch("Word.Application")
-                word_app.Visible = False
-                word_app.DisplayAlerts = False
-
-                # 打开 docx 文件
-                doc = word_app.Documents.Open(str(docx_path.absolute()))
-
-                # 保存为 doc (FileFormat=0 for doc)
-                doc.SaveAs2(str(output_path.absolute()), FileFormat=0)
-                doc.Close()
-
-                return True, output_path, ""
-            finally:
-                # 关闭 Word 应用
-                if word_app is not None:
-                    with contextlib.suppress(Exception):
-                        word_app.Quit()
-                pythoncom.CoUninitialize()
-
-        except ImportError:
-            return False, docx_path, "未安装 pywin32 库，请运行: pip install pywin32"
-        except Exception as e:
-            return False, docx_path, f"转换失败: {e!s}"
-
-    def convert_xlsx_to_xls(
-        self, xlsx_path: Path, output_path: Path | None = None
-    ) -> tuple[bool, Path, str]:
-        """
-        将 .xlsx 转换为 .xls
-
-        Args:
-            xlsx_path: xlsx文件路径
-            output_path: 输出路径（可选）
-
-        Returns:
-            (是否成功, 转换后的文件路径, 错误消息)
-        """
-        if sys.platform != "win32":
-            return False, xlsx_path, "此功能仅支持 Windows 系统"
-
-        excel_app = None
-        try:
-            import pythoncom
-            import win32com.client
-
-            # 初始化当前线程的 COM
-            pythoncom.CoInitialize()
-
-            try:
-                # 生成输出路径
-                if output_path is None:
-                    output_path = xlsx_path.with_suffix(".xls")
-
-                # 每次创建新的 Excel 应用实例，避免 COM 对象失效问题
-                excel_app = win32com.client.Dispatch("Excel.Application")
-                excel_app.Visible = False
-                excel_app.DisplayAlerts = False
-
-                # 打开 xlsx 文件
-                wb = excel_app.Workbooks.Open(str(xlsx_path.absolute()))
-
-                # 保存为 xls (FileFormat=56 for xls)
-                wb.SaveAs(str(output_path.absolute()), FileFormat=56)
-                wb.Close()
-
-                return True, output_path, ""
-            finally:
-                # 关闭 Excel 应用
-                if excel_app is not None:
-                    with contextlib.suppress(Exception):
-                        excel_app.Quit()
-                pythoncom.CoUninitialize()
-
-        except ImportError:
-            return False, xlsx_path, "未安装 pywin32 库，请运行: pip install pywin32"
-        except Exception as e:
-            return False, xlsx_path, f"转换失败: {e!s}"
-
     def auto_convert_if_needed(self, file_path: Path) -> tuple[bool, Path, str]:
         """
         自动判断并转换文件（如果需要）
@@ -321,28 +191,6 @@ class FileConverterService:
         else:
             # 不需要转换
             return True, file_path, ""
-
-    def convert_back(self, converted_path: Path, original_path: Path) -> tuple[bool, str]:
-        """
-        将转换后的文件转回原格式，并覆盖原文件
-
-        Args:
-            converted_path: 转换后的文件路径
-            original_path: 原始文件路径
-
-        Returns:
-            (是否成功, 错误消息)
-        """
-        original_suffix = original_path.suffix.lower()
-
-        if original_suffix == ".doc":
-            success, _, error = self.convert_docx_to_doc(converted_path, original_path)
-            return success, error
-        elif original_suffix == ".xls":
-            success, _, error = self.convert_xlsx_to_xls(converted_path, original_path)
-            return success, error
-        else:
-            return False, "不支持的转换格式"
 
     def cleanup_temp_files(self):
         """清理临时转换文件"""

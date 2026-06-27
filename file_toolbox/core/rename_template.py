@@ -4,17 +4,22 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from file_toolbox.common.paths import get_data_dir
+
 
 class RenameTemplateService:
     """重命名模板服务"""
 
-    def __init__(self, config_path: str = "rename_templates.json"):
+    def __init__(self, config_path: str | Path | None = None):
         """
         初始化模板服务
 
         Args:
-            config_path: 配置文件路径
+            config_path: 配置文件路径(默认落到 DATA_DIR,与 history/backup 一致,
+                避免从不同工作目录启动时找不到模板)
         """
+        if config_path is None:
+            config_path = get_data_dir() / "rename_templates.json"
         self.config_path = Path(config_path)
         self._templates = None  # 延迟加载，使用时才读取
 

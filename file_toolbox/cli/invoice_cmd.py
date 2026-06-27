@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from file_toolbox.core.invoice.dedupe import DEDUPE, KEEP_ALL, MARK
+from file_toolbox.core.invoice.dedupe import KEEP_ALL
 from file_toolbox.core.invoice.service import InvoiceService
 
 _DEFAULT_OUTPUT = "发票结果.xlsx"
@@ -43,8 +43,22 @@ def invoice(
         typer.secho("错误:未选择任何文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    if dedupe not in (KEEP_ALL, DEDUPE, MARK):
-        typer.secho(f"错误:无效的 --dedupe 策略: {dedupe}", fg=typer.colors.RED, err=True)
+    valid_dedupe = InvoiceService.supported_dedupe_strategies()
+    if dedupe not in valid_dedupe:
+        typer.secho(
+            f"错误:无效的 --dedupe 策略: {dedupe}(可选: {', '.join(valid_dedupe)})",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    valid_fmt = InvoiceService.supported_formats()
+    if fmt not in valid_fmt:
+        typer.secho(
+            f"错误:无效的 --format: {fmt}(可选: {', '.join(valid_fmt)})",
+            fg=typer.colors.RED,
+            err=True,
+        )
         raise typer.Exit(1)
 
     svc = InvoiceService()

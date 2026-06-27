@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.invoice.dedupe import DEDUPE, KEEP_ALL, MARK
 from file_toolbox.core.invoice.service import InvoiceService
 from file_toolbox.core.invoice.types import ParseResult
@@ -49,6 +50,7 @@ class InvoiceTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._svc = InvoiceService()
+        self._history = JsonHistoryStore()
         self._result: ParseResult | None = None
         self._files: list[Path] = []
         self._init_ui()
@@ -223,6 +225,18 @@ class InvoiceTab(QWidget):
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "导出失败", str(e))
             return
+        # 记录历史(发票识别结果不可逆,仅供审计/复现)
+        assert self._result is not None
+        self._history.add_record(
+            "invoice",
+            {
+                "file_count": len(self._files),
+                "invoice_count": len(self._result.invoices),
+                "dedupe_strategy": self._dedupe_strategy(),
+                "fmt": self._format(),
+                "outputs": [str(w) for w in written],
+            },
+        )
         QMessageBox.information(
             self, "完成", "已导出:\n" + "\n".join(str(w) for w in written)
         )

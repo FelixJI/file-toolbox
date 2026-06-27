@@ -191,6 +191,21 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
                     continue
 
+                # 占用检查:文件被其它程序打开/只读/不存在时跳过,避免 COM Open 抛错或卡住
+                locked, lock_reason = self.is_file_locked(file_path)
+                if locked:
+                    result[file_path] = {
+                        "match_count": 0,
+                        "status": f"❌ {lock_reason}",
+                        "needs_conversion": False,
+                        "file_size": (
+                            self._format_size(file_path.stat().st_size)
+                            if file_path.exists()
+                            else "未知"
+                        ),
+                    }
+                    continue
+
                 needs_conversion = self.converter.is_conversion_needed(file_path)
 
                 if needs_conversion:
@@ -306,6 +321,12 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         for file_path in files:
             if not self.is_supported_file(file_path):
                 errors.append(f"{file_path.name}: 不支持的格式")
+                continue
+
+            # 占用检查:被锁定/不存在的文件跳过,避免 COM Open 卡住或抛异常
+            locked, lock_reason = self.is_file_locked(file_path)
+            if locked:
+                errors.append(f"{file_path.name}: {lock_reason}")
                 continue
 
             suffix = file_path.suffix.lower()

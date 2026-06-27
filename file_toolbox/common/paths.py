@@ -7,6 +7,12 @@ BACKUP_DIR = DATA_DIR / "backups"
 HISTORY_DIR = DATA_DIR / "history"
 
 
+def get_data_dir() -> Path:
+    """获取(并创建)数据根目录。供模板等持久化文件落位。"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return DATA_DIR
+
+
 def get_backup_dir() -> Path:
     """获取(并创建)备份目录。"""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
