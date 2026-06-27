@@ -188,6 +188,15 @@ class BatchDialogMixin:
         """获取文件信息"""
         return get_file_info(file_path)
 
+    def _update_status(self):
+        """文件列表变更后的钩子(选择/清空文件后由 mixin 自动调用)。
+
+        默认空实现;子类按需覆盖(如更新"已选择 N 个文件"标签)。
+        旧实现需在每个子类里重写 _select_files/_select_folder/_clear_files
+        仅为了转发到本方法 —— 现在子类只需实现这一个钩子。
+        """
+        pass
+
     def _cleanup_batch_dialog(self):
         """清理批处理对话框资源（在closeEvent中调用）"""
         self._preview_timer.stop()

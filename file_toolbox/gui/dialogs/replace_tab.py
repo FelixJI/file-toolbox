@@ -1,7 +1,5 @@
 """内容替换 Tab:批量替换 Word/Excel/txt 文档内容(简单+正则),自动备份。"""
 
-from pathlib import Path
-
 from PySide6.QtWidgets import (
     QDialog,
     QInputDialog,
@@ -173,18 +171,6 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
 
     def _update_status(self):
         self.ui.label_status.setText(f"已选择 {len(self.selected_files)} 个文件")
-
-    def _select_files(self, list_widget=None, auto_preview=True):
-        super()._select_files(list_widget, auto_preview)
-        self._update_status()
-
-    def _select_folder(self, list_widget=None, ask_recursive=True, auto_preview=True):
-        super()._select_folder(list_widget, ask_recursive, auto_preview)
-        self._update_status()
-
-    def _clear_files(self, list_widget=None, table_widget=None):
-        super()._clear_files(list_widget, table_widget)
-        self._update_status()
 
     def closeEvent(self, event):
         self._cleanup_batch_dialog()

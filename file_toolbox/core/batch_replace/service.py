@@ -2,7 +2,6 @@
 
 import contextlib
 import gc
-import re
 import shutil
 import subprocess
 import threading
@@ -12,13 +11,14 @@ from pathlib import Path
 from typing import ClassVar
 
 from file_toolbox.common.base_operation import BaseOperationService
+from file_toolbox.common.file_utils import format_file_size
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.paths import get_backup_dir
 from file_toolbox.core.batch_replace.file_converter import FileConverterService
 from file_toolbox.core.batch_replace.handlers.excel_handler import ExcelHandler
 from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
 from file_toolbox.core.batch_replace.handlers.word_handler import WordHandler
-from file_toolbox.core.batch_replace.types import ReplaceOperationType
+from file_toolbox.core.batch_replace.types import REPLACE_PARAM_RULES, ReplaceOperationType
 
 # 子进程超时(秒)
 SUBPROCESS_TIMEOUT_SECONDS = 5
@@ -57,26 +57,10 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         return [t.value for t in ReplaceOperationType]
 
     def _validate_params(self, operation: dict, index: int) -> tuple[bool, str]:
-        """验证操作参数"""
-        params = operation.get("params", {})
-        op_type = operation.get("type")
+        """验证操作参数(委托给共享的声明式规则表)。"""
+        from file_toolbox.common.op_schema import validate_params
 
-        if op_type == ReplaceOperationType.SIMPLE_REPLACE.value:
-            if not params.get("find"):
-                return False, f"操作 {index + 1}: 查找文本不能为空"
-
-        elif op_type == ReplaceOperationType.REGEX_REPLACE.value:
-            pattern = params.get("pattern", "")
-
-            if not pattern:
-                return False, f"操作 {index + 1}: 正则表达式不能为空"
-
-            try:
-                re.compile(pattern)
-            except re.error as e:
-                return False, f"操作 {index + 1}: 正则表达式错误 - {e!s}"
-
-        return True, ""
+        return validate_params(operation, index, REPLACE_PARAM_RULES)
 
     def _get_office_pids(self, process_name: str) -> list[int]:
         """获取指定 Office 进程的 PID 列表"""
@@ -183,7 +167,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                         "status": "❌ 不支持的格式",
                         "needs_conversion": False,
                         "file_size": (
-                            self._format_size(file_path.stat().st_size)
+                            format_file_size(file_path.stat().st_size)
                             if file_path.exists()
                             else "未知"
                         ),
@@ -199,7 +183,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                         "status": f"❌ {lock_reason}",
                         "needs_conversion": False,
                         "file_size": (
-                            self._format_size(file_path.stat().st_size)
+                            format_file_size(file_path.stat().st_size)
                             if file_path.exists()
                             else "未知"
                         ),
@@ -219,7 +203,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                             "status": f"❌ {error}",
                             "needs_conversion": True,
                             "file_size": (
-                                self._format_size(file_path.stat().st_size)
+                                format_file_size(file_path.stat().st_size)
                                 if file_path.exists()
                                 else "未知"
                             ),
@@ -234,7 +218,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                         "status": "✓ 准备就绪" if match_count > 0 else "ℹ️ 无匹配",
                         "needs_conversion": True,
                         "converted_path": converted_path,
-                        "file_size": self._format_size(file_path.stat().st_size),
+                        "file_size": format_file_size(file_path.stat().st_size),
                     }
 
                 else:
@@ -244,7 +228,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                         "match_count": match_count,
                         "status": "✓ 准备就绪" if match_count > 0 else "ℹ️ 无匹配",
                         "needs_conversion": False,
-                        "file_size": self._format_size(file_path.stat().st_size),
+                        "file_size": format_file_size(file_path.stat().st_size),
                     }
 
             except Exception as e:
@@ -470,17 +454,6 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
             self.logger.error(f"读取文件失败: {file_path} - {e}")
 
             return None
-
-    def _format_size(self, size: float) -> str:
-        """格式化文件大小"""
-
-        for unit in ["B", "KB", "MB", "GB", "TB"]:
-            if size < 1024.0:
-                return f"{size:.1f} {unit}"
-
-            size /= 1024.0
-
-        return f"{size:.1f} PB"
 
     def close(self):
         """关闭服务，释放资源"""

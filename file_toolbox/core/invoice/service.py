@@ -15,9 +15,6 @@ from file_toolbox.core.invoice.types import FailedFile, Invoice, ParseResult
 class InvoiceService:
     """发票识别编排服务:解析文件 -> 去重 -> 导出。"""
 
-    def __init__(self):
-        pass
-
     def parse_files(
         self,
         files: list[Path],

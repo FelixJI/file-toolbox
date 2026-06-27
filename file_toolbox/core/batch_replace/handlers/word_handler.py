@@ -76,22 +76,7 @@ class WordHandler(LoggableMixin):
 
             doc = word_app.Documents.Open(str(file_path.absolute()), ReadOnly=True)
 
-            text_parts = []
-
-            # 获取正文内容
-
-            if doc.Content.Text:
-                text_parts.append(doc.Content.Text)
-
-            # 获取页眉页脚内容
-
-            text_parts.extend(self._get_headers_footers_text(doc))
-
-            # 获取文本框和形状内容
-
-            text_parts.extend(self._get_shapes_text(doc))
-
-            return "\n".join(text_parts)
+            return self._extract_all_text(doc)
 
         except Exception as e:
             self.logger.error(f"读取Word文档失败: {file_path} - {e}")
@@ -114,6 +99,18 @@ class WordHandler(LoggableMixin):
             if com_initialized:
                 with contextlib.suppress(Exception):
                     pythoncom.CoUninitialize()
+
+    def _extract_all_text(self, doc) -> str:
+        """提取文档全文:正文 + 页眉页脚 + 文本框/形状。
+
+        read_content 与 batch_replace 共用此逻辑,避免两处复制粘贴。
+        """
+        text_parts = []
+        if doc.Content.Text:
+            text_parts.append(doc.Content.Text)
+        text_parts.extend(self._get_headers_footers_text(doc))
+        text_parts.extend(self._get_shapes_text(doc))
+        return "\n".join(text_parts)
 
     def batch_replace(
         self,
@@ -211,22 +208,13 @@ class WordHandler(LoggableMixin):
 
                     check_timeout()
 
-                    text_parts = []
-
-                    if doc.Content.Text:
-                        text_parts.append(doc.Content.Text)
-
-                    text_parts.extend(self._get_headers_footers_text(doc))
-
-                    text_parts.extend(self._get_shapes_text(doc))
+                    full_text = self._extract_all_text(doc)
 
                     doc.Close(False)
 
                     doc = None
 
                     check_timeout()
-
-                    full_text = "\n".join(text_parts)
 
                     match_count = self._count_matches_in_text(full_text, operations)
 

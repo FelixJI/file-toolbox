@@ -40,23 +40,39 @@ class JsonHistoryStore:
             for rec in records:
                 fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
-    def _next_id(self, tool: str) -> int:
-        records = self._read_all(tool)
-        return (records[-1]["id"] + 1) if records else 1
+    def _last_id(self, tool: str) -> int:
+        """仅读取最后一行得到当前最大 id(O(1) append 路径使用)。
+
+        末行损坏时回退到全量扫描的最大 id,保证 id 单调递增不冲突。
+        """
+        f = self._file(tool)
+        if not f.exists():
+            return 0
+        last_line = None
+        for line in f.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                last_line = line
+        if last_line:
+            try:
+                return json.loads(last_line).get("id", 0)
+            except json.JSONDecodeError:
+                return max((r["id"] for r in self._read_all(tool)), default=0)
+        return 0
 
     def add_record(self, tool: str, data: dict) -> int:
-        """追加一条记录，返回自增 id。"""
-        rid = self._next_id(tool)
-        records = self._read_all(tool)
-        records.append(
-            {
-                "id": rid,
-                "timestamp": datetime.now().isoformat(),
-                "data": data,
-                "undone": False,
-            }
-        )
-        self._write_all(tool, records)
+        """追加一条记录(O(1) append,不全量重写),返回自增 id。"""
+        self._dir.mkdir(parents=True, exist_ok=True)
+        rid = self._last_id(tool) + 1
+        rec = {
+            "id": rid,
+            "timestamp": datetime.now().isoformat(),
+            "data": data,
+            "undone": False,
+        }
+        f = self._file(tool)
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
         return rid
 
     def get_records(self, tool: str, limit: int = 100) -> list[dict]:

@@ -18,6 +18,8 @@ from .constants import (
     SCALE_FIT_MARGIN,
 )
 
+from file_toolbox.common.file_utils import format_file_size
+
 
 def convert_pdf_to_image_pdf(
     input_pdf: Path,
@@ -294,13 +296,7 @@ def get_file_info(file_path: Path, supported_formats: dict) -> dict:
         if file_path.exists():
             size = file_path.stat().st_size
             info["size"] = size
-
-            if size < 1024:
-                info["size_str"] = f"{size} B"
-            elif size < 1024 * 1024:
-                info["size_str"] = f"{size / 1024:.1f} KB"
-            else:
-                info["size_str"] = f"{size / 1024 / 1024:.1f} MB"
+            info["size_str"] = format_file_size(size)
     except Exception:
         pass
 
