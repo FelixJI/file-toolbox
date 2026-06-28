@@ -238,3 +238,47 @@ class TestInteractiveFlow:
         assert run_called["n"] == 0
         out = capsys.readouterr().out
         assert "取消" in out
+
+
+def _args_of(a):
+    """把 _run 的位置参数拍平成 list 便于断言。"""
+    return list(a)
+
+
+class TestExecuteRelease:
+    """_execute_release:验证子进程调用参数 + 从不 push。"""
+
+    def test_part_bumps_without_build(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(rel, "_run", lambda *a, **k: calls.append(_args_of(a)))
+        rel._execute_release("minor", "0.2.0", do_build=False)
+        # 应调 bump_version.py bump minor
+        assert len(calls) == 1
+        args = calls[0]
+        assert "bump_version.py" in args[0]
+        assert "bump" in args
+        assert "minor" in args
+        # 不调 build,不调 push
+
+    def test_custom_set_uses_set_flag(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(rel, "_run", lambda *a, **k: calls.append(_args_of(a)))
+        rel._execute_release(None, "1.2.3", do_build=False)
+        args = calls[0]
+        assert "--set" in args
+        assert "1.2.3" in args
+
+    def test_build_called_when_requested(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(rel, "_run", lambda *a, **k: calls.append(_args_of(a)))
+        rel._execute_release("patch", "0.1.1", do_build=True)
+        # 两次:bump + build_exe
+        assert len(calls) == 2
+        assert any("build_exe.py" in c[0] for c in calls)
+
+    def test_never_pushes(self, monkeypatch, capsys):
+        monkeypatch.setattr(rel, "_run", lambda *a, **k: None)
+        rel._execute_release("patch", "0.1.1", do_build=False)
+        out = capsys.readouterr().out
+        # 提示用户手动 push,但自身不 push
+        assert "git push --tags" in out

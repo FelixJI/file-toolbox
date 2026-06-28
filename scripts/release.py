@@ -213,8 +213,22 @@ def _run_interactive_inner() -> None:
 
 
 def _execute_release(part: str | None, new_version: str, do_build: bool) -> None:
-    """Step 4: 真正写盘 bump(+ 可选 build),从不自动 push。Task 5 填充。"""
-    raise NotImplementedError  # Task 5 替换
+    """Step 4: 真正写盘 bump(+ 可选 build),从不自动 push。"""
+    # 1. bump(commit + tag,经子进程,与非交互路径一致)
+    typer.echo("=== bump 版本 ===")
+    if part is None:
+        _run("bump_version.py", "bump", "--set", new_version)
+    else:
+        _run("bump_version.py", "bump", part)
+
+    # 2. 可选打包(本地,不带 --ci)
+    if do_build:
+        typer.echo("=== Nuitka 打包 ===")
+        _run("build_exe.py")
+
+    # 3. 收尾:从不自动 push
+    typer.secho(f"\n✓ 发版准备完成: v{new_version}", fg=typer.colors.GREEN)
+    typer.echo(f"下一步: git push --tags  (触发 CI 出 GitHub Release v{new_version})")
 
 
 if __name__ == "__main__":
