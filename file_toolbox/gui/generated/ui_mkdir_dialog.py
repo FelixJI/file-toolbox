@@ -160,7 +160,7 @@ class Ui_BatchFolderCreatorDialog:
             )
         )
         self.btn_browse_root.setText(
-            QCoreApplication.translate("BatchFolderCreatorDialog", "\u6d4f\u89c8...", None)
+            QCoreApplication.translate("BatchFolderCreatorDialog", "\u6d4f\u89c8", None)
         )
         self.label_error.setText("")
         self.btn_fix_special_chars.setText(

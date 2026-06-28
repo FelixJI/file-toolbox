@@ -60,8 +60,8 @@ class InvoiceTab(QWidget):
 
         # 文件选择
         file_row = QHBoxLayout()
-        self._btn_add_files = QPushButton("+添加文件")
-        self._btn_add_folder = QPushButton("+添加文件夹")
+        self._btn_add_files = QPushButton("添加文件")
+        self._btn_add_folder = QPushButton("添加文件夹")
         self._btn_clear = QPushButton("清空")
         self._list_files = QListWidget()
         for btn in (self._btn_add_files, self._btn_add_folder, self._btn_clear):
@@ -91,7 +91,7 @@ class InvoiceTab(QWidget):
         opt_row.addWidget(QLabel("输出目录:"))
         self._edit_outdir = QLineEdit()
         self._edit_outdir.setPlaceholderText("选择或输入输出目录")
-        self._btn_browse = QPushButton("...")
+        self._btn_browse = QPushButton("浏览")
         opt_row.addWidget(self._edit_outdir)
         opt_row.addWidget(self._btn_browse)
         opt_row.addStretch(1)
@@ -136,11 +136,26 @@ class InvoiceTab(QWidget):
 
     def _add_folder(self):
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
-        if d:
-            for p in Path(d).iterdir():
-                if p.is_file() and p.suffix.lower() in _INVOICE_EXTS:
-                    self._files.append(p)
-                    self._list_files.addItem(p.name)
+        if not d:
+            return
+        recursive = QMessageBox.question(
+            self,
+            "选择模式",
+            "是否包含子文件夹中的发票文件？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        ) == QMessageBox.StandardButton.Yes
+        root = Path(d)
+        candidates = root.rglob("*") if recursive else root.iterdir()
+        seen = {p.resolve() for p in self._files}
+        for p in candidates:
+            if not (p.is_file() and p.suffix.lower() in _INVOICE_EXTS):
+                continue
+            if p.resolve() in seen:
+                continue
+            seen.add(p.resolve())
+            self._files.append(p)
+            self._list_files.addItem(p.name)
 
     def _clear(self):
         self._files.clear()
