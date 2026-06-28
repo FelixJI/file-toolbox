@@ -39,6 +39,10 @@ def release(
     ci: bool = typer.Option(False, "--ci", help="CI 模式:非交互"),
 ) -> None:
     """bump 版本 → build → 提示推送。"""
+    if not part and not set_version and not ci:
+        # 无参数运行 → 交互模式(后续任务填充内部逻辑)
+        run_interactive()
+        return
     if not part and not set_version:
         typer.secho("错误:需要 <part> 或 --set", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -69,6 +73,11 @@ def release(
             "\n发版准备完成。下一步: git push --tags  (CI 会自动出 GitHub Release)"
         )
     typer.secho("✓ release 流程结束", fg=typer.colors.GREEN)
+
+
+def run_interactive() -> None:
+    """交互式发版向导(无参数运行 release.py 时进入)。"""
+    typer.secho("(交互模式占位 — 待 Task 2+ 实现)", fg=typer.colors.YELLOW)
 
 
 if __name__ == "__main__":
