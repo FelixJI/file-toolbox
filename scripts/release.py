@@ -24,6 +24,12 @@ _PY = [sys.executable]
 sys.path.insert(0, str(_ROOT / "scripts"))
 import bump_version as _bv  # noqa: E402
 
+# 模块级别名:让编排函数通过这些名字引用,便于测试 monkeypatch 桩掉。
+_compute_next = _bv.bump_version
+validate_pep440 = _bv.validate_pep440
+working_tree_clean = _bv.working_tree_clean
+read_pyproject_version = _bv.read_pyproject_version
+
 cli = typer.Typer(add_completion=False, help="file-toolbox 一键发版")
 
 
@@ -67,13 +73,13 @@ def _resolve_version_choice(choice: str, current: str) -> tuple[str, str] | None
     part = _CHOICES.get(choice)
     if part is None:
         return None
-    return (part, _bv.bump_version(current, part))
+    return (part, _compute_next(current, part))
 
 
 def _validate_custom_version(raw: str) -> str | None:
     """校验自定义版本号合规。合规返回原值,否则 None。"""
     raw = raw.strip()
-    return raw if _bv.validate_pep440(raw) else None
+    return raw if validate_pep440(raw) else None
 
 
 @cli.command()
@@ -123,9 +129,92 @@ def release(
     typer.secho("✓ release 流程结束", fg=typer.colors.GREEN)
 
 
+def _print_step0_abort(msg: str) -> None:
+    typer.secho(f"✗ {msg}", fg=typer.colors.RED, err=True)
+
+
 def run_interactive() -> None:
-    """交互式发版向导(无参数运行 release.py 时进入)。"""
-    typer.secho("(交互模式占位 — 待 Task 2+ 实现)", fg=typer.colors.YELLOW)
+    """交互式发版向导(无参数运行 release.py 时进入)。
+
+    Step 0 前置检查 → Step 1 选版本 → Step 2 选 build → Step 3 总览确认 → Step 4 执行。
+    Ctrl+C 在交互阶段(Step 0-3,不写盘)友好退出;Step 4 已 commit 后不再拦截。
+    """
+    try:
+        _run_interactive_inner()
+    except KeyboardInterrupt:
+        # 交互阶段取消:此时未启动任何子进程,无残留改动
+        typer.secho("\n已取消(Ctrl+C),未做任何改动。", fg=typer.colors.YELLOW)
+        raise typer.Exit(130)
+
+
+def _run_interactive_inner() -> None:
+    """run_interactive 的主体(被 try 包裹,便于统一拦 KeyboardInterrupt)。"""
+    # ---- Step 0: 前置严格检查 ----
+    if not working_tree_clean(_ROOT):
+        _print_step0_abort("git 工作区不干净,请先 commit/stash 当前改动")
+        raise typer.Exit(1)
+
+    branch = _git_branch(_ROOT)
+    if branch != "main":
+        typer.secho(f"⚠ 当前分支非 main(在 {branch})", fg=typer.colors.YELLOW)
+        if not typer.confirm("仍要在此分支发版?", default=False):
+            typer.echo("已取消。")
+            return
+
+    unpushed = _unpushed_commits(_ROOT)
+    if unpushed:
+        typer.secho(f"⚠ 本地有 {len(unpushed)} 个未推送提交", fg=typer.colors.YELLOW)
+        if not typer.confirm("仍要继续发版?", default=False):
+            typer.echo("已取消。")
+            return
+
+    # ---- Step 1: 选版本类型 ----
+    current_ver = read_pyproject_version(_ROOT / "pyproject.toml")
+    while True:
+        typer.secho(f"\nfile-toolbox 发版   当前 v{current_ver}", fg=typer.colors.CYAN)
+        typer.echo("选择版本类型:")
+        typer.echo(f"  [1] patch       → {_compute_next(current_ver, 'patch')}")
+        typer.echo(f"  [2] minor       → {_compute_next(current_ver, 'minor')}")
+        typer.echo(f"  [3] major       → {_compute_next(current_ver, 'major')}")
+        typer.echo(f"  [4] prerelease  → {_compute_next(current_ver, 'prerelease')}")
+        typer.echo("  [5] 自定义版本号 --set")
+        choice = typer.prompt("> ", default="1")
+        resolved = _resolve_version_choice(choice, current_ver)
+        if resolved is None:
+            typer.secho("无效选择,请输入 1-5", fg=typer.colors.RED)
+            continue
+        part, new_ver = resolved
+        if part == "__custom__":
+            while True:
+                raw = typer.prompt("输入版本号(PEP 440)")
+                ok = _validate_custom_version(raw)
+                if ok:
+                    new_ver = ok
+                    part = None  # 自定义,走 --set
+                    break
+                typer.secho("版本号不合规(PEP 440),重试", fg=typer.colors.RED)
+        break
+
+    # ---- Step 2: 选附加动作(打包,不预选) ----
+    do_build = typer.confirm("是否同步 Nuitka 打包 build_exe?", default=False)
+
+    # ---- Step 3: 总览确认 ----
+    typer.echo("\n即将执行:")
+    typer.echo(f"  • pyproject.toml: {current_ver} → {new_ver}")
+    typer.echo(f"  • CHANGELOG.md: 迁移 [Unreleased] 段到 {new_ver}")
+    typer.echo(f"  • git commit + tag v{new_ver}")
+    typer.echo(f"  • Nuitka 打包   {'(将执行)' if do_build else '— 跳过 —'}")
+    if not typer.confirm("\n确认执行?", default=False):
+        typer.echo("已取消,未做任何改动。")
+        return
+
+    # ---- Step 4: 执行(Task 5 实现 build 选择 + 收尾) ----
+    _execute_release(part, new_ver, do_build)
+
+
+def _execute_release(part: str | None, new_version: str, do_build: bool) -> None:
+    """Step 4: 真正写盘 bump(+ 可选 build),从不自动 push。Task 5 填充。"""
+    raise NotImplementedError  # Task 5 替换
 
 
 if __name__ == "__main__":

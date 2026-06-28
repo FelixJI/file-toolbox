@@ -7,6 +7,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
 # 让 tests 能 import scripts 包
@@ -171,3 +173,68 @@ class TestCustomVersionValidate:
     def test_invalid_returns_none(self):
         assert rel._validate_custom_version("not-a-ver") is None
         assert rel._validate_custom_version("1.2.x") is None
+
+
+class TestInteractiveFlow:
+    """run_interactive 编排:用 monkeypatch 桩掉所有 IO 与子进程,验证分支与调用。"""
+
+    def _stub_clean_state(self, monkeypatch, tmp_path):
+        """桩掉 Step 0 所有检查为「干净 main 无未推送」状态。"""
+        monkeypatch.setattr(rel, "_ROOT", tmp_path)
+        monkeypatch.setattr(rel, "working_tree_clean", lambda root: True)
+        monkeypatch.setattr(rel, "_git_branch", lambda root: "main")
+        monkeypatch.setattr(rel, "_unpushed_commits", lambda root: [])
+        monkeypatch.setattr(rel, "read_pyproject_version", lambda p: "0.1.0")
+
+    def test_dirty_workspace_aborts(self, monkeypatch, tmp_path, capsys):
+        # 工作区脏 → 直接退出,不进菜单、不调 _run
+        monkeypatch.setattr(rel, "_ROOT", tmp_path)
+        monkeypatch.setattr(rel, "working_tree_clean", lambda root: False)
+        run_called = {"n": 0}
+        monkeypatch.setattr(
+            rel, "_run", lambda *a, **k: run_called.__setitem__("n", run_called["n"] + 1)
+        )
+
+        with pytest.raises(typer.Exit) as exc:
+            rel.run_interactive()
+        assert exc.value.exit_code == 1
+        assert run_called["n"] == 0
+        captured = capsys.readouterr()
+        out = captured.out + captured.err
+        assert "工作区" in out or "干净" in out  # 错误提示
+
+    def test_confirm_no_runs_nothing(self, monkeypatch, tmp_path):
+        """确认=否 → 不调用任何 _run(bump/build 都不跑)。"""
+        self._stub_clean_state(monkeypatch, tmp_path)
+        run_called = {"n": 0}
+        monkeypatch.setattr(
+            rel, "_run", lambda *a, **k: run_called.__setitem__("n", run_called["n"] + 1)
+        )
+
+        # 序列:选 minor(2) → 不打包(N) → 总览确认否(N)
+        inputs = iter(["2", "N", "N"])
+        monkeypatch.setattr(rel.typer, "prompt", lambda *a, **k: next(inputs))
+        monkeypatch.setattr(rel.typer, "confirm", lambda *a, **k: next(inputs) in ("y", "Y"))
+
+        rel.run_interactive()
+        assert run_called["n"] == 0
+
+    def test_ctrl_c_aborts_cleanly(self, monkeypatch, tmp_path, capsys):
+        """交互阶段 Ctrl+C → 退出码 130,不调 _run,提示已取消。"""
+        self._stub_clean_state(monkeypatch, tmp_path)
+        run_called = {"n": 0}
+        monkeypatch.setattr(
+            rel, "_run", lambda *a, **k: run_called.__setitem__("n", run_called["n"] + 1)
+        )
+        # prompt 抛 KeyboardInterrupt(模拟用户在选版本时 Ctrl+C)
+        def raise_kb(*a, **k):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(rel.typer, "prompt", raise_kb)
+
+        with pytest.raises(typer.Exit) as exc:
+            rel.run_interactive()
+        assert exc.value.exit_code == 130
+        assert run_called["n"] == 0
+        out = capsys.readouterr().out
+        assert "取消" in out
