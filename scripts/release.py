@@ -1,6 +1,11 @@
-"""一键发版编排:bump → (可选依赖升级) → build → 提示推送。
+"""一键发版编排:bump → (可选 build) → 提示推送。
 
-本地:
+本地交互式(推荐,无参数运行):
+    uv run --extra dev python scripts/release.py
+    # 进入彩色向导:选版本类型 → 选是否打包 → 总览确认 → bump/build
+    # 完成后提示手动 git push --tags 触发 CI
+
+本地非交互:
     uv run --extra dev python scripts/release.py patch
     # 等价: bump → build,完成后提示 git push --tags
 

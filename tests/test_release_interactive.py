@@ -282,3 +282,29 @@ class TestExecuteRelease:
         out = capsys.readouterr().out
         # 提示用户手动 push,但自身不 push
         assert "git push --tags" in out
+
+
+class TestEndToEndStubbed:
+    """端到端:前置OK → 选 minor → 不打包 → 确认是 → 调 bump 子进程。"""
+
+    def test_full_path_minor_confirm_yes(self, monkeypatch, tmp_path):
+        # 桩 Step 0 为干净状态
+        monkeypatch.setattr(rel, "_ROOT", tmp_path)
+        monkeypatch.setattr(rel, "working_tree_clean", lambda root: True)
+        monkeypatch.setattr(rel, "_git_branch", lambda root: "main")
+        monkeypatch.setattr(rel, "_unpushed_commits", lambda root: [])
+        monkeypatch.setattr(rel, "read_pyproject_version", lambda p: "0.1.0")
+
+        calls = []
+        monkeypatch.setattr(rel, "_run", lambda *a, **k: calls.append(list(a)))
+
+        # 序列:prompt 返回选 minor(2);confirm 第一次(打包)返回 N,第二次(总览)返回 y
+        inputs = iter(["2", "N", "y"])
+        monkeypatch.setattr(rel.typer, "prompt", lambda *a, **k: next(inputs))
+        monkeypatch.setattr(rel.typer, "confirm", lambda *a, **k: next(inputs) in ("y", "Y"))
+
+        rel.run_interactive()
+        # 调了一次 _run(bump),没调 build(因为 do_build=False)
+        assert len(calls) == 1
+        flat = calls[0]
+        assert "bump" in flat and "minor" in flat
