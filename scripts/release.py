@@ -28,6 +28,25 @@ def _run(script: str, *args: str, check: bool = True) -> None:
     subprocess.run(cmd, cwd=str(_ROOT), check=check)
 
 
+def _git_output(*args: str, cwd: Path) -> str:
+    """跑 git 命令,返回 stdout(strip)。失败(check=False)返回空串。"""
+    res = subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False
+    )
+    return res.stdout.strip()
+
+
+def _git_branch(root: Path) -> str:
+    """当前分支名。"""
+    return _git_output("rev-parse", "--abbrev-ref", "HEAD", cwd=root)
+
+
+def _unpushed_commits(root: Path) -> list[str]:
+    """本地领先上游的提交(@{u}..HEAD)。无上游或查询失败 → 空列表(不报错)。"""
+    out = _git_output("log", "@{u}..HEAD", "--oneline", cwd=root)
+    return [line for line in out.splitlines() if line.strip()]
+
+
 @cli.command()
 def release(
     part: str = typer.Argument(None, help="major/minor/patch/prerelease(与 --set 二选一)"),
