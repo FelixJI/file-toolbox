@@ -137,3 +137,37 @@ class TestGitQueries:
         commits = rel._unpushed_commits(root)
         assert len(commits) == 1
         assert "unpushed" in commits[0]
+
+
+class TestVersionChoice:
+    """Step 1: 数字选择 → (part, new_version) 映射。part='__custom__' 表示自定义版本。"""
+
+    def test_patch(self):
+        assert rel._resolve_version_choice("1", "0.1.0") == ("patch", "0.1.1")
+
+    def test_minor(self):
+        assert rel._resolve_version_choice("2", "0.1.0") == ("minor", "0.2.0")
+
+    def test_major(self):
+        assert rel._resolve_version_choice("3", "0.1.0") == ("major", "1.0.0")
+
+    def test_prerelease(self):
+        assert rel._resolve_version_choice("4", "0.1.0") == ("prerelease", "0.1.1a1")
+
+    def test_custom_marker(self):
+        # 选 5 → 返回特殊标记,具体版本号由后续 prompt+校验处理
+        assert rel._resolve_version_choice("5", "0.1.0") == ("__custom__", None)
+
+    def test_invalid_choice_returns_none(self):
+        # 非法输入(非 1-5)→ None,调用方负责重新提示
+        assert rel._resolve_version_choice("9", "0.1.0") is None
+        assert rel._resolve_version_choice("abc", "0.1.0") is None
+
+
+class TestCustomVersionValidate:
+    def test_valid(self):
+        assert rel._validate_custom_version("1.2.3") == "1.2.3"
+
+    def test_invalid_returns_none(self):
+        assert rel._validate_custom_version("not-a-ver") is None
+        assert rel._validate_custom_version("1.2.x") is None

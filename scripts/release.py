@@ -19,6 +19,11 @@ import typer
 _ROOT = Path(__file__).resolve().parents[1]
 _PY = [sys.executable]
 
+# 复用 bump_version 的纯函数(版本计算/校验/工作区检查),保持单一真相源。
+# 运行 `python scripts/release.py` 时 scripts/ 不在 sys.path,需显式注入。
+sys.path.insert(0, str(_ROOT / "scripts"))
+import bump_version as _bv  # noqa: E402
+
 cli = typer.Typer(add_completion=False, help="file-toolbox 一键发版")
 
 
@@ -45,6 +50,30 @@ def _unpushed_commits(root: Path) -> list[str]:
     """本地领先上游的提交(@{u}..HEAD)。无上游或查询失败 → 空列表(不报错)。"""
     out = _git_output("log", "@{u}..HEAD", "--oneline", cwd=root)
     return [line for line in out.splitlines() if line.strip()]
+
+
+_CHOICES = {
+    "1": "patch",
+    "2": "minor",
+    "3": "major",
+    "4": "prerelease",
+}
+
+
+def _resolve_version_choice(choice: str, current: str) -> tuple[str, str] | None:
+    """菜单数字 → (part, new_version)。选 5(自定义)→ ('__custom__', None)。非法 → None。"""
+    if choice == "5":
+        return ("__custom__", None)
+    part = _CHOICES.get(choice)
+    if part is None:
+        return None
+    return (part, _bv.bump_version(current, part))
+
+
+def _validate_custom_version(raw: str) -> str | None:
+    """校验自定义版本号合规。合规返回原值,否则 None。"""
+    raw = raw.strip()
+    return raw if _bv.validate_pep440(raw) else None
 
 
 @cli.command()
