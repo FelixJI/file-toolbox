@@ -99,7 +99,7 @@ def release(
 ) -> None:
     """bump 版本 → build → 提示推送。"""
     if not part and not set_version and not ci:
-        # 无参数运行 → 交互模式(后续任务填充内部逻辑)
+        # 无参数运行 → 交互模式
         run_interactive()
         return
     if not part and not set_version:
@@ -213,7 +213,7 @@ def _run_interactive_inner() -> None:
         typer.echo("已取消,未做任何改动。")
         return
 
-    # ---- Step 4: 执行(Task 5 实现 build 选择 + 收尾) ----
+    # ---- Step 4: 执行(bump + 可选 build,从不 push) ----
     _execute_release(part, new_ver, do_build)
 
 
