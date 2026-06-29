@@ -33,3 +33,23 @@ def parse_owner_repo(remote_url: str) -> tuple[str, str]:
     if not m:
         raise ValueError(f"无法解析 owner/repo: {remote_url!r}")
     return (m.group("owner"), m.group("repo"))
+
+
+def version_to_tag(version: str) -> str:
+    """版本号 → tag(加 v 前缀)。"""
+    return f"v{version}"
+
+
+def build_push_url(remote_url: str, token: str, platform: str) -> str:
+    """构造带认证的 HTTPS 推送 URL。
+
+    platform:
+      - 'gitee': https://{token}@gitee.com/{owner}/{repo}.git
+      - 'cnb':   https://cnb:{token}@cnb.cool/{owner}/{repo}(用户名固定 cnb)
+    """
+    owner, repo = parse_owner_repo(remote_url)
+    if platform == "gitee":
+        return f"https://{token}@gitee.com/{owner}/{repo}.git"
+    if platform == "cnb":
+        return f"https://cnb:{token}@cnb.cool/{owner}/{repo}"
+    raise ValueError(f"不支持的 platform: {platform!r}")

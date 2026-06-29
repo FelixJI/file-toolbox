@@ -31,3 +31,29 @@ class TestParseOwnerRepo:
     def test_unparseable_raises(self):
         with pytest.raises(ValueError):
             parse_owner_repo("not-a-url")
+
+
+from scripts.sync_mirrors import version_to_tag, build_push_url  # noqa: E402
+
+
+class TestVersionToTag:
+    def test_plain_release(self):
+        assert version_to_tag("1.2.3") == "v1.2.3"
+
+    def test_prerelease(self):
+        assert version_to_tag("1.2.3a1") == "v1.2.3a1"
+
+
+class TestBuildPushUrl:
+    def test_gitee_url(self):
+        url = build_push_url("https://gitee.com/felixjii/file-toolbox.git", "TOK", "gitee")
+        assert url == "https://TOK@gitee.com/felixjii/file-toolbox.git"
+
+    def test_cnb_url(self):
+        url = build_push_url("https://cnb.cool/feljii/file-toolbox", "TOK", "cnb")
+        # CNB 用户名固定为 cnb
+        assert url == "https://cnb:TOK@cnb.cool/feljii/file-toolbox"
+
+    def test_unknown_platform_raises(self):
+        with pytest.raises(ValueError):
+            build_push_url("https://example.com/a/b", "TOK", "weird")
