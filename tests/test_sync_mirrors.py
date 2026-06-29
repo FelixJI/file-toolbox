@@ -275,6 +275,38 @@ class TestListReleases:
         monkeypatch.setattr(sm, "_http", lambda *a, **k: (200, []))
         assert list_releases("TOK", "github", "o", "r") == []
 
+    def test_paginates_until_short_page(self, monkeypatch):
+        """超过一页(per_page=100)的 release 必须全部拉取,否则清理会漏删旧版。"""
+        import re as _re
+
+        calls = []
+
+        def page_of(url):
+            m = _re.search(r"[?&]page=(\d+)", url)
+            return int(m.group(1)) if m else 1
+
+        def fake_http(method, url, token=None, **kw):
+            calls.append(url)
+            pg = page_of(url)
+            if pg == 1:
+                return 200, [
+                    {"id": i, "created_at": f"2026-01-{i:02d}T00:00:00Z"} for i in range(1, 101)
+                ]
+            if pg == 2:
+                return 200, [
+                    {"id": 101, "created_at": "2025-12-31T00:00:00Z"},
+                    {"id": 102, "created_at": "2025-12-30T00:00:00Z"},
+                    {"id": 103, "created_at": "2025-12-29T00:00:00Z"},
+                ]
+            return 200, []
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        rels = list_releases("TOK", "gitee", "o", "r")
+        assert len(rels) == 103
+        # 确实请求了 page=1 和 page=2
+        assert any("page=1" in u for u in calls)
+        assert any("page=2" in u for u in calls)
+
 
 class TestDeleteRelease:
     def test_gitee_delete(self, monkeypatch):

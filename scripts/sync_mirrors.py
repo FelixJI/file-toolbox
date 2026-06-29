@@ -156,11 +156,26 @@ def _releases_endpoint(platform: str, owner: str, repo: str) -> str:
 
 
 def list_releases(token: str, platform: str, owner: str, repo: str) -> list[dict]:
-    """列出某平台全部 Release,归一化为 [{id, created_at}, ...]。"""
-    _, data = _http("GET", _releases_endpoint(platform, owner, repo), token=token)
-    if not isinstance(data, list):
-        return []
-    return [{"id": r["id"], "created_at": r["created_at"]} for r in data]
+    """列出某平台全部 Release,归一化为 [{id, created_at}, ...]。
+
+    分页拉取(per_page=100),直到某页返回不足 100 个为止。
+    Gitee/GitHub 默认每页 20/30,不翻页会漏掉旧 Release 导致清理失效。
+    """
+    base = _releases_endpoint(platform, owner, repo)
+    out: list[dict] = []
+    page = 1
+    per_page = 100
+    while True:
+        sep = "&" if "?" in base else "?"
+        url = f"{base}{sep}page={page}&per_page={per_page}"
+        _, data = _http("GET", url, token=token)
+        if not isinstance(data, list) or not data:
+            break
+        out.extend({"id": r["id"], "created_at": r["created_at"]} for r in data)
+        if len(data) < per_page:
+            break
+        page += 1
+    return out
 
 
 def delete_release(token: str, platform: str, owner: str, repo: str, release_id: int) -> None:
