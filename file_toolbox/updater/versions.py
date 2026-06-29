@@ -50,6 +50,9 @@ def _normalize_segments(version: str) -> list[int]:
     "1.2.3" → [1, 2, 3]
     "1.2"   → [1, 2]
     "1.0.0+unknown" → [1, 0, 0]  (+ 后整段丢弃)
+
+    遇到第一个非数字段(如 prerelease 段 "3a1")即停止,后续段不解析。
+    本函数仅供已过滤 prerelease 的正式版比对使用(见 is_newer 契约)。
     """
     base = version.split("+", 1)[0]  # 去掉 +local
     segs: list[int] = []
@@ -57,7 +60,7 @@ def _normalize_segments(version: str) -> list[int]:
         try:
             segs.append(int(part))
         except ValueError:
-            # 非数字段(如 prerelease 段)忽略
+            # 非数字段(如 prerelease 段)→ 停止解析后续段
             break
     return segs
 
@@ -66,6 +69,10 @@ def is_newer(remote: str, local: str) -> bool:
     """remote 版本号是否比 local 新(逐段数字比较)。
 
     段数不同时短的补 0(1.2 视作 1.2.0)。
+
+    契约:仅用于正式版比对(调用方应先用 _is_prerelease 过滤)。
+    传入 prerelease 版本号(如 "1.2.3a1")时,非数字段会被截断,
+    可能得出错误结论 —— 但自更新流程已在 fetch_latest 阶段过滤掉 prerelease。
     """
     r = _normalize_segments(remote)
     l = _normalize_segments(local)
