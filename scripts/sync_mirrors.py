@@ -142,3 +142,25 @@ def _http(
     except ValueError:
         parsed = text
     return status, parsed
+
+
+def _releases_endpoint(platform: str, owner: str, repo: str) -> str:
+    if platform == "gitee":
+        return f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases"
+    if platform == "github":
+        return f"https://api.github.com/repos/{owner}/{repo}/releases"
+    raise ValueError(f"不支持的 platform: {platform!r}")
+
+
+def list_releases(token: str, platform: str, owner: str, repo: str) -> list[dict]:
+    """列出某平台全部 Release,归一化为 [{id, created_at}, ...]。"""
+    _, data = _http("GET", _releases_endpoint(platform, owner, repo), token=token)
+    if not isinstance(data, list):
+        return []
+    return [{"id": r["id"], "created_at": r["created_at"]} for r in data]
+
+
+def delete_release(token: str, platform: str, owner: str, repo: str, release_id: int) -> None:
+    """删除单个 Release。失败抛 RuntimeError(由调用方决定是否继续)。"""
+    url = f"{_releases_endpoint(platform, owner, repo)}/{release_id}"
+    _http("DELETE", url, token=token)

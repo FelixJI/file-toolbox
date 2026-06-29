@@ -233,3 +233,70 @@ class TestHttp:
         with pytest.raises(RuntimeError) as exc:
             _http("GET", "https://example.com/api", token="TOK")
         assert "404" in str(exc.value)
+
+
+import scripts.sync_mirrors as sm  # noqa: E402
+from scripts.sync_mirrors import list_releases, delete_release  # noqa: E402
+
+
+class TestListReleases:
+    def test_gitee_normalizes_fields(self, monkeypatch):
+        """Gitee 返回的 created_at → 统一 {id, created_at} 字典。"""
+        captured = {}
+
+        def fake_http(method, url, token=None, **kw):
+            captured["url"] = url
+            captured["method"] = method
+            return 200, [
+                {"id": 11, "tag_name": "v1", "created_at": "2026-01-01T00:00:00+08:00"},
+                {"id": 22, "tag_name": "v2", "created_at": "2026-02-01T00:00:00+08:00"},
+            ]
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        rels = list_releases("TOK", "gitee", "felixjii", "file-toolbox")
+        assert rels == [
+            {"id": 11, "created_at": "2026-01-01T00:00:00+08:00"},
+            {"id": 22, "created_at": "2026-02-01T00:00:00+08:00"},
+        ]
+        assert "gitee.com/api/v5/repos/felixjii/file-toolbox/releases" in captured["url"]
+
+    def test_github_normalizes_fields(self, monkeypatch):
+        def fake_http(method, url, token=None, **kw):
+            assert "api.github.com/repos/felixjii/file-toolbox/releases" in url
+            return 200, [
+                {"id": 9, "created_at": "2026-01-01T00:00:00Z"},
+            ]
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        rels = list_releases("TOK", "github", "felixjii", "file-toolbox")
+        assert rels == [{"id": 9, "created_at": "2026-01-01T00:00:00Z"}]
+
+    def test_empty_list(self, monkeypatch):
+        monkeypatch.setattr(sm, "_http", lambda *a, **k: (200, []))
+        assert list_releases("TOK", "github", "o", "r") == []
+
+
+class TestDeleteRelease:
+    def test_gitee_delete(self, monkeypatch):
+        captured = {}
+
+        def fake_http(method, url, token=None, **kw):
+            captured["method"] = method
+            captured["url"] = url
+            return 204, None
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        delete_release("TOK", "gitee", "felixjii", "file-toolbox", 99)
+        assert captured["method"] == "DELETE"
+        assert "gitee.com/api/v5/repos/felixjii/file-toolbox/releases/99" in captured["url"]
+
+    def test_github_delete(self, monkeypatch):
+        captured = {}
+
+        def fake_http(method, url, token=None, **kw):
+            captured["url"] = url
+            return 204, None
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        delete_release("TOK", "github", "felixjii", "file-toolbox", 7)
+        assert "api.github.com/repos/felixjii/file-toolbox/releases/7" in captured["url"]
