@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self._update_banner.clicked.connect(self._start_download)
         self._pending_release: RemoteRelease | None = None
         self._update_dialog: QProgressDialog | None = None
+        self._download_cancelled = False  # 用户取消下载后抑制后续 verified/failed 弹窗
 
         if updater_pkg.is_portable_exe():
             # 启动 worker 线程(事件循环),稍后投递检查(不阻塞 UI)
@@ -129,6 +130,7 @@ class MainWindow(QMainWindow):
             return
         self._update_banner.hide()
         release = self._pending_release
+        self._download_cancelled = False  # 新一轮下载,清除取消标记
         dlg = QProgressDialog(f"正在下载 v{release.version}…", "取消", 0, 100, self)
         dlg.setWindowTitle("更新")
         dlg.setMinimumDuration(0)
@@ -147,7 +149,8 @@ class MainWindow(QMainWindow):
         )
 
     def _on_download_cancel(self) -> None:
-        """用户取消下载(当前实现:仅关对话框,下载由其完成或超时)。"""
+        """用户取消下载:抑制后续 verified/failed 弹窗(下载本身无法中断,任其完成)。"""
+        self._download_cancelled = True
         self._update_dialog = None
 
     def _on_update_progress(self, downloaded: int, total: int) -> None:
@@ -165,10 +168,12 @@ class MainWindow(QMainWindow):
                 self._update_dialog.setLabelText("正在校验完整性…")
 
     def _on_update_verified(self, zip_path) -> None:
-        """下载校验完成 → 提示用户应用更新。"""
+        """下载校验完成 → 提示用户应用更新(用户已取消则静默)。"""
         if self._update_dialog is not None:
             self._update_dialog.close()
             self._update_dialog = None
+        if self._download_cancelled:
+            return
         ret = QMessageBox.information(
             self,
             "更新就绪",
@@ -179,10 +184,12 @@ class MainWindow(QMainWindow):
             self._apply_update(zip_path)
 
     def _on_update_failed(self, msg: str) -> None:
-        """下载/校验失败 → 中文友好弹窗,不暴露 traceback。"""
+        """下载/校验失败 → 中文友好弹窗,不暴露 traceback(用户已取消则静默)。"""
         if self._update_dialog is not None:
             self._update_dialog.close()
             self._update_dialog = None
+        if self._download_cancelled:
+            return
         QMessageBox.warning(
             self, "更新失败", f"{msg}\n\n请稍后重试,或前往开源仓库手动下载。"
         )
