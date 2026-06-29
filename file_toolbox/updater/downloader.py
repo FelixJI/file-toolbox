@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+import tempfile
+import urllib.request
 from pathlib import Path
 
+from file_toolbox.updater.errors import ChecksumMismatchError, NetworkError
 from file_toolbox.updater.versions import RemoteRelease
 
 # 下载超时(秒):便携包几十 MB,给足
@@ -43,11 +46,6 @@ def sha256_file(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-
-import tempfile  # noqa: E402
-import urllib.request  # noqa: E402
-
-from file_toolbox.updater.errors import ChecksumMismatchError, NetworkError  # noqa: E402
 
 # 模块级别名,便于测试 monkeypatch
 _urlopen = urllib.request.urlopen
@@ -94,7 +92,7 @@ def _other_source_checksum_url(release: RemoteRelease) -> str | None:
     """
     import json as _json
 
-    from file_toolbox.updater.versions import GITHUB_REPO, GITEE_REPO, _build_release_url
+    from file_toolbox.updater.versions import _build_release_url
 
     if release.source == "github":
         platform = "gitee"
