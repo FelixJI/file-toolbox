@@ -204,3 +204,32 @@ class TestFetchLatest:
 
         monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
         assert vmod.fetch_latest() is None
+
+
+from file_toolbox.updater import is_portable_exe  # noqa: E402
+import file_toolbox.updater as upkg  # noqa: E402
+
+
+class TestIsPortableExe:
+    def test_returns_bool(self):
+        assert isinstance(is_portable_exe(), bool)
+
+    def test_dev_env_is_false(self, monkeypatch, tmp_path):
+        """开发环境(非 Nuitka,可执行名非 FileToolbox.exe)→ False。"""
+        monkeypatch.setattr(upkg.sys, "executable", str(tmp_path / "python.exe"))
+        assert is_portable_exe() is False
+
+    def test_portable_layout_detected(self, monkeypatch, tmp_path):
+        """exe 名为 FileToolbox.exe 且同目录有 python3.dll → True。"""
+        exe = tmp_path / "FileToolbox.exe"
+        exe.touch()
+        (tmp_path / "python3.dll").touch()
+        monkeypatch.setattr(upkg.sys, "executable", str(exe))
+        assert is_portable_exe() is True
+
+    def test_no_dll_returns_false(self, monkeypatch, tmp_path):
+        """exe 名对但无 python3.dll → False(非 standalone)。"""
+        exe = tmp_path / "FileToolbox.exe"
+        exe.touch()
+        monkeypatch.setattr(upkg.sys, "executable", str(exe))
+        assert is_portable_exe() is False
