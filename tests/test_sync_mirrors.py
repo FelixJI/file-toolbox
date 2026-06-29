@@ -57,3 +57,53 @@ class TestBuildPushUrl:
     def test_unknown_platform_raises(self):
         with pytest.raises(ValueError):
             build_push_url("https://example.com/a/b", "TOK", "weird")
+
+
+from scripts.sync_mirrors import releases_to_delete  # noqa: E402
+
+
+class TestReleasesToDelete:
+    def _rel(self, rid, created_at):
+        return {"id": rid, "created_at": created_at}
+
+    def test_keeps_latest_five(self):
+        """7 个 release,保留最近 5 个(created_at 降序),删 2 个最旧。"""
+        rels = [
+            self._rel(1, "2026-01-01T00:00:00Z"),
+            self._rel(2, "2026-02-01T00:00:00Z"),
+            self._rel(3, "2026-03-01T00:00:00Z"),
+            self._rel(4, "2026-04-01T00:00:00Z"),
+            self._rel(5, "2026-05-01T00:00:00Z"),
+            self._rel(6, "2026-06-01T00:00:00Z"),
+            self._rel(7, "2026-07-01T00:00:00Z"),
+        ]
+        to_delete = releases_to_delete(rels, keep=5)
+        # 保留 7,6,5,4,3;删 1,2
+        assert set(to_delete) == {1, 2}
+
+    def test_under_five_deletes_none(self):
+        rels = [self._rel(1, "2026-01-01T00:00:00Z"), self._rel(2, "2026-02-01T00:00:00Z")]
+        assert releases_to_delete(rels, keep=5) == []
+
+    def test_exactly_five_deletes_none(self):
+        rels = [self._rel(i, f"2026-0{i}-01T00:00:00Z") for i in range(1, 6)]
+        assert releases_to_delete(rels, keep=5) == []
+
+    def test_empty_list(self):
+        assert releases_to_delete([], keep=5) == []
+
+    def test_includes_prereleases(self):
+        """预发布版同样计入保留窗口(按 created_at 排序,不区分类型)。"""
+        rels = [
+            self._rel(1, "2026-01-01T00:00:00Z"),
+            self._rel(2, "2026-02-01T00:00:00Z"),
+            self._rel(3, "2026-03-01T00:00:00Z"),
+            self._rel(4, "2026-04-01T00:00:00Z"),
+            self._rel(5, "2026-05-01T00:00:00Z"),
+            self._rel(6, "2026-06-01T00:00:00Z"),
+        ]
+        assert releases_to_delete(rels, keep=5) == [1]
+
+    def test_custom_keep(self):
+        rels = [self._rel(i, f"2026-0{i}-01T00:00:00Z") for i in range(1, 5)]
+        assert releases_to_delete(rels, keep=2) == [1, 2]

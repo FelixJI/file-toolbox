@@ -53,3 +53,16 @@ def build_push_url(remote_url: str, token: str, platform: str) -> str:
     if platform == "cnb":
         return f"https://cnb:{token}@cnb.cool/{owner}/{repo}"
     raise ValueError(f"不支持的 platform: {platform!r}")
+
+
+def releases_to_delete(releases: list[dict], keep: int = 5) -> list[int]:
+    """计算需要删除的 release id(保留最近 keep 个,删其余)。
+
+    按 created_at 升序(最旧在前)排,删掉前 (len - keep) 个;返回待删 id 列表。
+    不区分正式版/预发布版(均按时间计入)。空输入或不足 keep 个 → 返回 []。
+    """
+    if len(releases) <= keep:
+        return []
+    # 升序排(最旧在前),删前 (len - keep) 个
+    ordered = sorted(releases, key=lambda r: r["created_at"])
+    return [r["id"] for r in ordered[: len(releases) - keep]]
