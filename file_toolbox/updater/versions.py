@@ -75,11 +75,11 @@ def is_newer(remote: str, local: str) -> bool:
     可能得出错误结论 —— 但自更新流程已在 fetch_latest 阶段过滤掉 prerelease。
     """
     r = _normalize_segments(remote)
-    l = _normalize_segments(local)
-    n = max(len(r), len(l))
+    loc = _normalize_segments(local)
+    n = max(len(r), len(loc))
     r += [0] * (n - len(r))
-    l += [0] * (n - len(l))
-    return r > l
+    loc += [0] * (n - len(loc))
+    return r > loc
 
 
 # ---------------------------------------------------------------------------
