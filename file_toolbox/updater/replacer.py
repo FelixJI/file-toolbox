@@ -10,6 +10,9 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+import zipfile
 from pathlib import Path
 
 # 重启的目标 exe 名(便携包产物)
@@ -92,3 +95,64 @@ echo [%time%] update FAILED, manual intervention needed >> "%LOG%"
 mshta "javascript:var s=new ActiveXObject('WScript.Shell');s.Popup('更新失败,请查看 %TEMP%\\ftb_update_{pid}.log',0,'File Toolbox 更新',16);close()"
 (goto) 2>nul & del "%~f0"
 """
+
+
+# 模块级别名,便于测试 monkeypatch(os.startfile 仅 Windows 存在)
+_startfile = os.startfile  # type: ignore[attr-defined]
+
+
+def _extract_portable_zip(zip_path: Path, dest_dir: Path) -> None:
+    """解压便携 zip 到 dest_dir。
+
+    build_exe 产物结构:FileToolbox-{ver}-win64.zip 内顶层为 FileToolbox/ 目录。
+    本函数把 FileToolbox/ 内的内容解压到 dest_dir(即新目录本体)。
+    """
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as zf:
+        for member in zf.namelist():
+            # zip 内路径形如 FileToolbox/xxx(或 FileToolbox/sub/xxx)
+            parts = member.split("/")
+            if len(parts) < 2 or parts[0] != "FileToolbox":
+                continue
+            rel = "/".join(parts[1:])
+            if not rel:
+                continue
+            target = dest_dir / rel
+            if member.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(zf.read(member))
+
+
+def replace_dir(zip_path: Path, exe_path: Path) -> Path:
+    """解压新 zip + 生成 .bat helper + 启动 helper。
+
+    主程序调用本函数后应立即退出(QApplication.quit / sys.exit),
+    由 helper 完成整目录替换 + 重启。
+
+    zip_path: 校验过的便携 zip(来自 download_and_verify)
+    exe_path: 当前运行的 exe 路径(sys.executable)
+    返回: 生成的 .bat helper 路径
+    """
+    import shutil
+
+    old_dir = Path(exe_path).parent
+    new_dir = old_dir.parent / "FileToolbox.new"
+    # 清理可能残留的旧 .new(上次更新中断遗留)
+    if new_dir.exists():
+        shutil.rmtree(new_dir, ignore_errors=True)
+
+    _extract_portable_zip(zip_path, new_dir)
+
+    bat_content = build_bat_content(
+        old_dir=str(old_dir),
+        new_dir=str(new_dir),
+        pid=os.getpid(),
+    )
+    pid = os.getpid()
+    bat_path = Path(tempfile.gettempdir()) / f"ftb_update_{pid}.bat"
+    bat_path.write_text(bat_content, encoding="utf-8")
+
+    _startfile(str(bat_path))
+    return bat_path
