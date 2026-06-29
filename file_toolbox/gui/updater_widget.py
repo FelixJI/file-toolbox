@@ -1,13 +1,10 @@
 """自更新 GUI 组件:UpdateWorker(后台检查/下载)+ UpdateBanner(状态栏提示)。
 
-线程模型:
-  - 检查阶段:do_check() 调 updater.check_update(),有新版 emit ready
-  - 下载阶段:do_download(release) 调 downloader.download_and_verify(on_progress=...)
-             emit progress(downloaded, total) / verified(zip_path) / failed(msg)
-  - 替换阶段:由主窗口在 verified 后触发(调 replacer)
-
-do_check/do_download 为同步方法,由主窗口调度到子线程或事件循环空闲时调用,
-避免阻塞 UI(网络请求约 1s,检查失败静默)。
+线程模型(QThread 事件循环):
+  - 检查:主窗口 start() → run() → exec() 启动事件循环;
+         主窗口用 invokeMethod(do_check, QueuedConnection) 投递检查。
+  - 下载:主窗口用 invokeMethod(do_download, QueuedConnection, release) 投递下载。
+  两者都在 worker 线程执行,不阻塞 UI。progress/verified/failed 跨线程经信号回主线程。
 """
 
 from __future__ import annotations
@@ -45,13 +42,21 @@ class UpdateBanner(QLabel):
 
 
 class UpdateWorker(QThread):
-    """后台检查 + 下载 worker。
+    """后台检查 + 下载 worker(运行自身事件循环,接收跨线程方法投递)。
 
-    信号:
+    信号(均跨线程安全投递回主线程):
       ready(RemoteRelease)    — 检查到新版本
       progress(int, int)      — 下载进度(downloaded, total; total=-1 表未知)
       verified(Path)          — 下载校验完成(zip 路径)
       failed(str)             — 任一阶段失败(中文友好提示)
+
+    用法(主线程):
+      worker.start()                                  # 启动线程 + 事件循环
+      QMetaObject.invokeMethod(worker, "do_check",
+                               Qt.ConnectionType.QueuedConnection)
+      # 用户点击后:
+      QMetaObject.invokeMethod(worker, "do_download",
+                               Qt.ConnectionType.QueuedConnection, Q_ARG(...))
     """
 
     ready = Signal(RemoteRelease)
@@ -62,10 +67,15 @@ class UpdateWorker(QThread):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+    def run(self) -> None:
+        """启动事件循环,等待方法投递(do_check / do_download)。"""
+        self.exec()
+
     def do_check(self) -> None:
-        """检查更新(同步,应由主窗口调度到非阻塞时机)。
+        """检查更新(在 worker 线程执行)。
 
         检查失败静默(不打扰用户);有新版 emit ready。
+        本方法亦保留同步可调性(测试直接调,验证逻辑)。
         """
         from file_toolbox import updater as updater_pkg
 
@@ -78,7 +88,7 @@ class UpdateWorker(QThread):
             self.ready.emit(rel)
 
     def do_download(self, release: RemoteRelease) -> None:
-        """下载并校验(同步,主窗口在用户点击后调度)。
+        """下载并校验(在 worker 线程执行)。
 
         emit progress(下载进度) / verified(zip 路径) / failed(中文提示)。
         """

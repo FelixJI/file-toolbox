@@ -78,6 +78,10 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 ],
                 capture_output=True,
                 text=True,
+                # tasklist CSV 输出含本地编码字符(GBK),text=True 默认 UTF-8
+                # 解码会抛 UnicodeDecodeError 导致子线程崩溃。errors=ignore 容错:
+                # PID 解析只需 ASCII 数字部分,丢失个别非 ASCII 字符不影响。
+                errors="ignore",
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
             )
 

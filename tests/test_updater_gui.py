@@ -1,6 +1,11 @@
 """updater GUI 组件冒烟测试:验证信号连接 + Banner 控件,不真做网络请求。"""
 
-import pytest
+import os
+
+# GUI 测试用离屏平台,避免弹窗干扰
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import pytest  # noqa: E402
 
 pytest.importorskip("PySide6")
 
@@ -77,3 +82,43 @@ class TestUpdateWorker:
         w.do_check()
         assert got == []
         w.deleteLater()
+
+
+from file_toolbox.gui.main_window import MainWindow  # noqa: E402
+
+
+class TestMainWindowIntegration:
+    def test_banner_added(self, app):
+        """主窗口实例化后含 UpdateBanner(默认隐藏)。"""
+        win = MainWindow()
+        assert hasattr(win, "_update_banner")
+        assert win._update_banner.isHidden() is True
+        win.deleteLater()
+
+    def test_worker_added(self, app):
+        win = MainWindow()
+        assert hasattr(win, "_update_worker")
+        win.deleteLater()
+
+    def test_banner_shows_on_ready(self, app, monkeypatch):
+        """worker ready 信号 → banner 显示。"""
+        import file_toolbox.updater as upkg
+
+        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
+        monkeypatch.setattr(upkg, "check_update", lambda: rel)
+
+        win = MainWindow()
+        win._update_worker.do_check()
+        app.processEvents()
+        # isVisible() 在父窗口未 show 时恒为 False;改用 isHidden()(show() 后为 False)
+        assert win._update_banner.isHidden() is False
+        win.deleteLater()
+
+    def test_no_check_when_not_portable(self, app, monkeypatch):
+        """非便携形态(pip 安装)→ 不启动检查,banner 保持隐藏。"""
+        import file_toolbox.updater as upkg
+
+        monkeypatch.setattr(upkg, "is_portable_exe", lambda: False)
+        win = MainWindow()
+        assert win._update_banner.isHidden() is True
+        win.deleteLater()
