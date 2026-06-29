@@ -405,3 +405,56 @@ class TestCleanupOldReleases:
         )
         cleanup_old_releases("TOK", "github", "o", "r", keep=5)
         assert called["delete"] == 0
+
+
+from scripts.sync_mirrors import push_to_remote, resolve_github_repo  # noqa: E402
+
+
+class TestPushToRemote:
+    def test_pushes_branch_and_tag(self, monkeypatch):
+        """验证推送 main 分支 + tag,且 url 带认证(不含 token 泄漏到 stderr)。"""
+        calls = []
+
+        def fake_run(cmd, cwd=None, check=True, capture_output=True, text=True):
+            calls.append(cmd)
+            import subprocess
+
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(sm.subprocess, "run", fake_run)
+        push_to_remote(
+            "https://TOK@gitee.com/felixjii/file-toolbox.git",
+            ["main", "refs/tags/v1.2.3"],
+        )
+        # 一次 push,目标 url 带认证,refspec 含 main + tag
+        assert len(calls) == 1
+        git_cmd = calls[0]
+        assert git_cmd[0] == "git"
+        assert git_cmd[1] == "push"
+        assert "https://TOK@gitee.com/felixjii/file-toolbox.git" in git_cmd
+        assert "main" in git_cmd
+        assert "refs/tags/v1.2.3" in git_cmd
+
+    def test_push_failure_raises(self, monkeypatch):
+        import subprocess
+
+        def fake_run(cmd, cwd=None, check=True, capture_output=True, text=True):
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="denied")
+
+        monkeypatch.setattr(sm.subprocess, "run", fake_run)
+        with pytest.raises(RuntimeError):
+            push_to_remote("https://x@y/z.git", ["main"])
+
+
+class TestResolveGithubRepo:
+    def test_from_env(self, monkeypatch):
+        monkeypatch.setenv("GITHUB_REPOSITORY", "FelixJI/file-toolbox")
+        assert resolve_github_repo() == ("FelixJI", "file-toolbox")
+
+    def test_from_remote_fallback(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        # 桩 _git_remote_url
+        monkeypatch.setattr(
+            sm, "_git_remote_url", lambda name="origin": "https://github.com/FelixJI/file-toolbox.git"
+        )
+        assert resolve_github_repo() == ("FelixJI", "file-toolbox")

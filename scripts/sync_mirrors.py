@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json as _json
 import mimetypes
+import os
 import re
+import subprocess
 import uuid
 from pathlib import Path
 from urllib import error as _urlerror
@@ -212,3 +214,30 @@ def cleanup_old_releases(
             print(f"  ✓ 删除 {platform} release {rid}")
         except RuntimeError as e:
             print(f"  警告:删除 {platform} release {rid} 失败: {e}")
+
+
+def push_to_remote(remote_url_with_auth: str, refspecs: list[str]) -> None:
+    """git push <url> <refspecs>。失败抛 RuntimeError(stderr 不含明文 url 之外的敏感信息)。"""
+    cmd = ["git", "push", remote_url_with_auth, *refspecs]
+    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if res.returncode != 0:
+        # 不打印 url(含 token),只报失败
+        raise RuntimeError(f"git push 失败(returncode={res.returncode}): {res.stderr.strip()}")
+
+
+def _git_remote_url(name: str = "origin") -> str:
+    """读取某 remote 的 URL。失败返回空串。"""
+    res = subprocess.run(
+        ["git", "remote", "get-url", name], capture_output=True, text=True, check=False
+    )
+    return res.stdout.strip()
+
+
+def resolve_github_repo() -> tuple[str, str]:
+    """解析 GitHub owner/repo:优先 GITHUB_REPOSITORY 环境变量,否则 git remote。"""
+    env = os.environ.get("GITHUB_REPOSITORY", "")
+    if "/" in env:
+        owner, repo = env.split("/", 1)
+        return (owner, repo)
+    url = _git_remote_url("origin")
+    return parse_owner_repo(url)
