@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from urllib import request as urlrequest
 
 # owner/repo 硬编码常量(与 git remote 一致,不引入配置真相源)
 GITHUB_REPO = ("FelixJI", "file-toolbox")
@@ -16,6 +19,9 @@ GITEE_REPO = ("felixjii", "file-toolbox")
 
 # 预发布后缀(PEP 440 prerelease 段)
 _PRERELEASE_RE = re.compile(r"(a|b|rc|dev|alpha|beta)\d*$", re.IGNORECASE)
+
+# 检查超时(秒):双源并发取版本信息,给 10s 足够
+_FETCH_TIMEOUT = 10
 
 
 @dataclass(frozen=True)
@@ -67,3 +73,85 @@ def is_newer(remote: str, local: str) -> bool:
     r += [0] * (n - len(r))
     l += [0] * (n - len(l))
     return r > l
+
+
+# ---------------------------------------------------------------------------
+# HTTP 取数(模块级别名,便于测试 monkeypatch)
+# ---------------------------------------------------------------------------
+_urlopen = urlrequest.urlopen
+
+
+def _build_release_url(platform: str) -> str:
+    """构造某平台 releases/latest API URL。"""
+    if platform == "github":
+        owner, repo = GITHUB_REPO
+        return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    if platform == "gitee":
+        owner, repo = GITEE_REPO
+        return f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/latest"
+    raise ValueError(f"不支持的 platform: {platform!r}")
+
+
+def _parse_release(payload: bytes, platform: str) -> RemoteRelease | None:
+    """从 API JSON 解析出 RemoteRelease。无效(无 zip asset)→ None。"""
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    tag = data.get("tag_name")
+    if not tag:
+        return None
+    version = strip_v_prefix(tag)
+
+    zip_url = ""
+    checksum_url = ""
+    for asset in data.get("assets", []):
+        name = asset.get("name", "")
+        url = asset.get("browser_download_url", "")
+        if name.endswith("-win64.zip"):
+            zip_url = url
+        elif name == "checksums.txt":
+            checksum_url = url
+
+    if not zip_url or not checksum_url:
+        return None
+    return RemoteRelease(
+        version=version, zip_url=zip_url, checksum_url=checksum_url, source=platform
+    )
+
+
+def _fetch(platform: str) -> RemoteRelease | None:
+    """从单个平台拉取并解析最新 Release。失败返回 None(不抛)。"""
+    url = _build_release_url(platform)
+    req = urlrequest.Request(url, headers={"Accept": "application/json"})
+    try:
+        with _urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
+            payload = resp.read()
+    except Exception:
+        # 网络/超时/HTTP 错误统一视为该源无结果
+        return None
+    return _parse_release(payload, platform)
+
+
+def fetch_latest() -> RemoteRelease | None:
+    """双源并发取最新正式版 Release,先到先得。
+
+    Gitee + GitHub 并发,谁先返回有效(且非 prerelease)结果就用谁。
+    单源失败不影响另一源。两源全失败/全为 prerelease → 返回 None。
+    """
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            pool.submit(_fetch, "github"): "github",
+            pool.submit(_fetch, "gitee"): "gitee",
+        }
+        for fut in as_completed(futures):
+            try:
+                rel = fut.result()
+            except Exception:
+                continue
+            if rel and not _is_prerelease(rel.version):
+                return rel
+    return None
