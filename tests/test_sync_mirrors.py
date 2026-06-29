@@ -458,3 +458,126 @@ class TestResolveGithubRepo:
             sm, "_git_remote_url", lambda name="origin": "https://github.com/FelixJI/file-toolbox.git"
         )
         assert resolve_github_repo() == ("FelixJI", "file-toolbox")
+
+
+from typer.testing import CliRunner  # noqa: E402
+
+from scripts.sync_mirrors import cli  # noqa: E402
+
+runner = CliRunner()
+
+
+class TestSyncCommand:
+    """端到端桩测:桩掉所有网络/git,验证编排顺序、跳过逻辑、token 缺失处理。"""
+
+    def _stubs(self, monkeypatch, tmp_path):
+        calls = []
+
+        def fake_push(url, refspecs):
+            calls.append(("push", url, tuple(refspecs)))
+
+        def fake_create(token, owner, repo, tag, name, body):
+            calls.append(("create_gitee", tag))
+            return 100
+
+        def fake_upload(token, owner, repo, rid, fpath):
+            calls.append(("upload", rid, str(fpath)))
+
+        def fake_cleanup(token, platform, owner, repo, keep=5):
+            calls.append(("cleanup", platform, keep))
+
+        monkeypatch.setattr(sm, "push_to_remote", fake_push)
+        monkeypatch.setattr(sm, "create_gitee_release", fake_create)
+        monkeypatch.setattr(sm, "upload_gitee_asset", fake_upload)
+        monkeypatch.setattr(sm, "cleanup_old_releases", fake_cleanup)
+        monkeypatch.setattr(sm, "resolve_github_repo", lambda: ("FelixJI", "file-toolbox"))
+        monkeypatch.setattr(sm, "_git_remote_url", lambda name: {
+            "gitee": "https://gitee.com/felixjii/file-toolbox.git",
+            "cnb": "https://cnb.cool/feljii/file-toolbox",
+        }[name])
+        # 造产物文件
+        arts = tmp_path / "artifacts"
+        arts.mkdir()
+        (arts / "FileToolbox-1.2.3-win64.zip").write_bytes(b"ZIP")
+        (arts / "checksums.txt").write_text("hash zip", encoding="utf-8")
+        notes = tmp_path / "release_notes.md"
+        notes.write_text("# v1.2.3\n- new", encoding="utf-8")
+        monkeypatch.setenv("GITEE_TOKEN", "GTOK")
+        monkeypatch.setenv("CNB_TOKEN", "CTOK")
+        monkeypatch.setenv("GH_TOKEN", "GHTOK")
+        return calls, arts, notes
+
+    def test_full_sync_runs_all_steps(self, monkeypatch, tmp_path):
+        calls, arts, notes = self._stubs(monkeypatch, tmp_path)
+        r = runner.invoke(
+            cli,
+            ["--version", "1.2.3", "--notes-file", str(notes), "--artifacts-dir", str(arts)],
+        )
+        assert r.exit_code == 0, r.output
+        # 推 gitee + 推 cnb(各含 main + tag)
+        pushes = [c for c in calls if c[0] == "push"]
+        assert len(pushes) == 2
+        refspecs = {c[2] for c in pushes}
+        assert ("main", "refs/tags/v1.2.3") in refspecs
+        # 创建 gitee release
+        assert ("create_gitee", "v1.2.3") in calls
+        # 上传 2 个产物
+        uploads = [c for c in calls if c[0] == "upload"]
+        assert len(uploads) == 2
+        # 清理 github + gitee
+        cleanups = [c for c in calls if c[0] == "cleanup"]
+        platforms = {c[1] for c in cleanups}
+        assert platforms == {"github", "gitee"}
+
+    def test_missing_gitee_token_skips_gitee(self, monkeypatch, tmp_path):
+        calls, arts, notes = self._stubs(monkeypatch, tmp_path)
+        monkeypatch.delenv("GITEE_TOKEN", raising=False)
+        r = runner.invoke(
+            cli, ["--version", "1.2.3", "--notes-file", str(notes), "--artifacts-dir", str(arts)]
+        )
+        assert r.exit_code == 0, r.output
+        # 不创建 gitee release,不清理 gitee;但仍推 cnb、清理 github
+        assert not any(c[0] == "create_gitee" for c in calls)
+        assert not any(c[0] == "cleanup" and c[1] == "gitee" for c in calls)
+        assert any(c[0] == "push" and "cnb" in c[1] for c in calls)
+
+    def test_missing_cnb_token_skips_cnb_push(self, monkeypatch, tmp_path):
+        calls, arts, notes = self._stubs(monkeypatch, tmp_path)
+        monkeypatch.delenv("CNB_TOKEN", raising=False)
+        r = runner.invoke(
+            cli, ["--version", "1.2.3", "--notes-file", str(notes), "--artifacts-dir", str(arts)]
+        )
+        assert r.exit_code == 0, r.output
+        # 推 gitee 但不推 cnb
+        push_urls = [c[1] for c in calls if c[0] == "push"]
+        assert any("gitee" in u for u in push_urls)
+        assert not any("cnb" in u for u in push_urls)
+
+    def test_missing_gh_token_skips_github_cleanup(self, monkeypatch, tmp_path):
+        calls, arts, notes = self._stubs(monkeypatch, tmp_path)
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        r = runner.invoke(
+            cli, ["--version", "1.2.3", "--notes-file", str(notes), "--artifacts-dir", str(arts)]
+        )
+        assert r.exit_code == 0, r.output
+        assert not any(c[0] == "cleanup" and c[1] == "github" for c in calls)
+        # gitee 清理仍跑
+        assert any(c[0] == "cleanup" and c[1] == "gitee" for c in calls)
+
+    def test_push_failure_does_not_abort_others(self, monkeypatch, tmp_path):
+        calls, arts, notes = self._stubs(monkeypatch, tmp_path)
+
+        def fake_push(url, refspecs):
+            if "cnb" in url:
+                raise RuntimeError("cnb push failed")
+            calls.append(("push", url, tuple(refspecs)))
+
+        monkeypatch.setattr(sm, "push_to_remote", fake_push)
+        r = runner.invoke(
+            cli, ["--version", "1.2.3", "--notes-file", str(notes), "--artifacts-dir", str(arts)]
+        )
+        # 仍 exit 0(continue-on-error 语义:单步失败警告,不崩)
+        assert r.exit_code == 0, r.output
+        assert "cnb" in r.output  # 错误信息提到 cnb
+        # gitee 推送/创建/清理仍执行
+        assert any(c[0] == "push" and "gitee" in c[1] for c in calls)

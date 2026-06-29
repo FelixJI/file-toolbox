@@ -241,3 +241,105 @@ def resolve_github_repo() -> tuple[str, str]:
         return (owner, repo)
     url = _git_remote_url("origin")
     return parse_owner_repo(url)
+
+
+# ---------------------------------------------------------------------------
+# typer CLI
+# ---------------------------------------------------------------------------
+
+import typer  # noqa: E402
+
+cli = typer.Typer(add_completion=False, help="镜像同步与 Release 清理")
+
+
+def _read_notes(path: Path) -> str:
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def _artifact_files(artifacts_dir: Path) -> list[Path]:
+    """收集 artifacts 目录下的 zip + checksums.txt。"""
+    if not artifacts_dir.exists():
+        return []
+    files = sorted(artifacts_dir.glob("*.zip"))
+    cs = artifacts_dir / "checksums.txt"
+    if cs.exists():
+        files.append(cs)
+    return files
+
+
+@cli.command()
+def sync(
+    version: str = typer.Option(..., "--version", help="版本号(不带 v)"),
+    notes_file: Path = typer.Option(..., "--notes-file", help="Release notes 文件"),
+    artifacts_dir: Path = typer.Option(..., "--artifacts-dir", help="产物目录(zip+checksums)"),
+    keep: int = typer.Option(5, "--keep", help="保留最近 N 个 Release"),
+) -> None:
+    """同步代码到 gitee/cnb + Gitee 建 Release + 清理旧 Release。"""
+    tag = version_to_tag(version)
+    body = _read_notes(notes_file)
+    arts = _artifact_files(artifacts_dir)
+    refspecs = ["main", f"refs/tags/{tag}"]
+
+    gitee_token = os.environ.get("GITEE_TOKEN", "")
+    cnb_token = os.environ.get("CNB_TOKEN", "")
+    gh_token = os.environ.get("GH_TOKEN", "")
+    gitee_url = _git_remote_url("gitee")
+    cnb_url = _git_remote_url("cnb")
+    gh_owner, gh_repo = resolve_github_repo()
+
+    # ---- 1. 推送 gitee ----
+    if gitee_token and gitee_url:
+        try:
+            push_to_remote(build_push_url(gitee_url, gitee_token, "gitee"), refspecs)
+            typer.secho("✓ 推送 gitee", fg=typer.colors.GREEN)
+        except RuntimeError as e:
+            typer.secho(f"✗ 推送 gitee 失败: {e}", fg=typer.colors.RED, err=True)
+    elif not gitee_token:
+        typer.secho("⚠ GITEE_TOKEN 未配置,跳过 gitee 同步", fg=typer.colors.YELLOW)
+
+    # ---- 2. 推送 cnb ----
+    if cnb_token and cnb_url:
+        try:
+            push_to_remote(build_push_url(cnb_url, cnb_token, "cnb"), refspecs)
+            typer.secho("✓ 推送 cnb", fg=typer.colors.GREEN)
+        except RuntimeError as e:
+            typer.secho(f"✗ 推送 cnb 失败: {e}", fg=typer.colors.RED, err=True)
+    elif not cnb_token:
+        typer.secho("⚠ CNB_TOKEN 未配置,跳过 cnb 同步", fg=typer.colors.YELLOW)
+
+    # ---- 3. Gitee 创建 Release + 上传产物 ----
+    if gitee_token and gitee_url:
+        try:
+            owner, repo = parse_owner_repo(gitee_url)
+            rid = create_gitee_release(gitee_token, owner, repo, tag, tag, body)
+            if rid is not None:
+                typer.secho(f"✓ 创建 Gitee Release {tag}(id={rid})", fg=typer.colors.GREEN)
+                for f in arts:
+                    upload_gitee_asset(gitee_token, owner, repo, rid, f)
+                typer.secho(f"✓ 上传 {len(arts)} 个产物到 Gitee", fg=typer.colors.GREEN)
+            else:
+                typer.secho(f"⚠ Gitee Release {tag} 已存在,跳过创建", fg=typer.colors.YELLOW)
+        except RuntimeError as e:
+            typer.secho(f"✗ Gitee Release 操作失败: {e}", fg=typer.colors.RED, err=True)
+
+    # ---- 4. 清理旧 Release ----
+    if gh_token:
+        try:
+            cleanup_old_releases(gh_token, "github", gh_owner, gh_repo, keep=keep)
+        except RuntimeError as e:
+            typer.secho(f"✗ 清理 GitHub Release 失败: {e}", fg=typer.colors.RED, err=True)
+    else:
+        typer.secho("⚠ GH_TOKEN 未配置,跳过 GitHub Release 清理", fg=typer.colors.YELLOW)
+
+    if gitee_token and gitee_url:
+        try:
+            owner, repo = parse_owner_repo(gitee_url)
+            cleanup_old_releases(gitee_token, "gitee", owner, repo, keep=keep)
+        except RuntimeError as e:
+            typer.secho(f"✗ 清理 Gitee Release 失败: {e}", fg=typer.colors.RED, err=True)
+
+    typer.secho("✓ sync 完成", fg=typer.colors.GREEN)
+
+
+if __name__ == "__main__":
+    cli()
