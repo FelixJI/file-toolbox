@@ -300,3 +300,108 @@ class TestDeleteRelease:
         monkeypatch.setattr(sm, "_http", fake_http)
         delete_release("TOK", "github", "felixjii", "file-toolbox", 7)
         assert "api.github.com/repos/felixjii/file-toolbox/releases/7" in captured["url"]
+
+
+from scripts.sync_mirrors import (  # noqa: E402
+    create_gitee_release,
+    upload_gitee_asset,
+    cleanup_old_releases,
+)
+
+
+class TestCreateGiteeRelease:
+    def test_creates_and_returns_id(self, monkeypatch):
+        captured = {}
+
+        def fake_http(method, url, token=None, data=None, **kw):
+            captured["method"] = method
+            captured["url"] = url
+            captured["data"] = data
+            if method == "GET":
+                # 查重:该 tag 不存在 → Gitee 返回 404,经 _http 转为 RuntimeError
+                raise RuntimeError("HTTP 404 ...: b''")
+            return 201, {"id": 555}
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        rid = create_gitee_release("TOK", "felixjii", "file-toolbox", "v1.2.3", "v1.2.3", "notes")
+        assert rid == 555
+        assert captured["method"] == "POST"
+        assert captured["data"]["tag_name"] == "v1.2.3"
+        assert captured["data"]["body"] == "notes"
+
+    def test_returns_none_if_already_exists(self, monkeypatch):
+        """重跑:Gitee 该 tag 已有 Release → 查重返回 None(跳过创建)。"""
+        calls = []
+
+        def fake_http(method, url, token=None, data=None, **kw):
+            calls.append((method, url))
+            # 第一次 GET 查重返回已存在
+            if method == "GET":
+                return 200, {"id": 7, "tag_name": "v1.2.3"}
+            return 201, {"id": 99}
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        rid = create_gitee_release("TOK", "felixjii", "file-toolbox", "v1.2.3", "v1.2.3", "notes")
+        assert rid is None
+        # 只 GET 查重,未 POST 创建
+        assert all(m == "GET" for m, _ in calls)
+
+
+class TestUploadGiteeAsset:
+    def test_uploads_file(self, monkeypatch, tmp_path):
+        captured = {}
+
+        def fake_http(method, url, token=None, files=None, **kw):
+            captured["url"] = url
+            captured["files"] = files
+            return 201, {"name": "x"}
+
+        monkeypatch.setattr(sm, "_http", fake_http)
+        f = tmp_path / "checksums.txt"
+        f.write_text("abc123  pkg.zip", encoding="utf-8")
+        upload_gitee_asset("TOK", "felixjii", "file-toolbox", 555, f)
+        assert "releases/555/attach_files" in captured["url"]
+        assert "checksums.txt" in captured["files"]["file"][0]
+
+
+class TestCleanupOldReleases:
+    def test_deletes_old_keeps_recent(self, monkeypatch, capsys):
+        rels = [
+            {"id": i, "created_at": f"2026-0{i}-01T00:00:00Z"} for i in range(1, 8)
+        ]
+        deleted = []
+
+        def fake_list(token, platform, owner, repo):
+            return rels
+
+        def fake_delete(token, platform, owner, repo, rid):
+            deleted.append(rid)
+
+        monkeypatch.setattr(sm, "list_releases", fake_list)
+        monkeypatch.setattr(sm, "delete_release", fake_delete)
+        cleanup_old_releases("TOK", "github", "o", "r", keep=5)
+        # 7 个 → 删最旧 2 个(id 1,2)
+        assert set(deleted) == {1, 2}
+
+    def test_delete_failure_warns_not_raises(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            sm, "list_releases", lambda *a: [{"id": i, "created_at": f"2026-0{i}-01"} for i in range(1, 8)]
+        )
+
+        def fake_delete(*a):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(sm, "delete_release", fake_delete)
+        # 不抛
+        cleanup_old_releases("TOK", "github", "o", "r", keep=5)
+        out = capsys.readouterr().out
+        assert "警告" in out or "失败" in out
+
+    def test_nothing_to_delete(self, monkeypatch):
+        called = {"delete": 0}
+        monkeypatch.setattr(sm, "list_releases", lambda *a: [])
+        monkeypatch.setattr(
+            sm, "delete_release", lambda *a: called.__setitem__("delete", called["delete"] + 1)
+        )
+        cleanup_old_releases("TOK", "github", "o", "r", keep=5)
+        assert called["delete"] == 0

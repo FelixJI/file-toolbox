@@ -17,6 +17,7 @@ import json as _json
 import mimetypes
 import re
 import uuid
+from pathlib import Path
 from urllib import error as _urlerror
 from urllib import request as _urlrequest
 from urllib.parse import urlencode, urlparse
@@ -164,3 +165,50 @@ def delete_release(token: str, platform: str, owner: str, repo: str, release_id:
     """删除单个 Release。失败抛 RuntimeError(由调用方决定是否继续)。"""
     url = f"{_releases_endpoint(platform, owner, repo)}/{release_id}"
     _http("DELETE", url, token=token)
+
+
+def create_gitee_release(
+    token: str, owner: str, repo: str, tag: str, name: str, body: str
+) -> int | None:
+    """在 Gitee 创建 Release。已存在(同 tag)→ 返回 None(幂等跳过)。成功 → 返回 release_id。"""
+    # 先查重(幂等):GET 该 tag 的 release;404(不存在)→ RuntimeError,视作可创建。
+    check_url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/tags/{tag}"
+    try:
+        _, existing = _http("GET", check_url, token=token)
+    except RuntimeError:
+        existing = None
+    if existing:
+        return None
+    _, data = _http(
+        "POST",
+        _releases_endpoint("gitee", owner, repo),
+        token=token,
+        data={"tag_name": tag, "name": name, "body": body, "target_commitish": "main"},
+    )
+    return data["id"] if isinstance(data, dict) else None
+
+
+def upload_gitee_asset(
+    token: str, owner: str, repo: str, release_id: int, file_path: Path
+) -> None:
+    """上传单个文件到 Gitee Release 附件。"""
+    content = file_path.read_bytes()
+    url = f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/{release_id}/attach_files"
+    _http("POST", url, token=token, files={"file": (file_path.name, content)})
+
+
+def cleanup_old_releases(
+    token: str, platform: str, owner: str, repo: str, keep: int = 5
+) -> None:
+    """列出某平台 Release,删除超出 keep 的旧版(单删失败仅警告)。"""
+    rels = list_releases(token, platform, owner, repo)
+    to_delete = releases_to_delete(rels, keep=keep)
+    if not to_delete:
+        return
+    print(f"[cleanup] {platform} 待删 {len(to_delete)} 个旧 Release(保留最近 {keep})")
+    for rid in to_delete:
+        try:
+            delete_release(token, platform, owner, repo, rid)
+            print(f"  ✓ 删除 {platform} release {rid}")
+        except RuntimeError as e:
+            print(f"  警告:删除 {platform} release {rid} 失败: {e}")
