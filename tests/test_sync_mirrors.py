@@ -107,3 +107,129 @@ class TestReleasesToDelete:
     def test_custom_keep(self):
         rels = [self._rel(i, f"2026-0{i}-01T00:00:00Z") for i in range(1, 5)]
         assert releases_to_delete(rels, keep=2) == [1, 2]
+
+
+from scripts.sync_mirrors import _http, _build_multipart  # noqa: E402
+
+
+class TestBuildMultipart:
+    def test_boundary_present(self):
+        body, content_type = _build_multipart({"name": ("f.zip", b"DATA")})
+        assert content_type.startswith("multipart/form-data; boundary=")
+        # body 含文件名与内容
+        assert b"f.zip" in body
+        assert b"DATA" in body
+
+    def test_multiple_files(self):
+        body, content_type = _build_multipart(
+            {"a": ("a.txt", b"AAA"), "b": ("b.txt", b"BBB")}
+        )
+        assert b"AAA" in body and b"BBB" in body
+
+
+class TestHttp:
+    def test_get_returns_json(self, monkeypatch):
+        """桩 urlopen,验证 GET 返回解析后的 JSON + 状态码。"""
+        import io
+
+        captured = {}
+
+        class FakeResp:
+            def __init__(self):
+                self._buf = io.BytesIO(b'{"ok": true}')
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return self._buf.read()
+
+            @property
+            def status(self):
+                return 200
+
+        def fake_urlopen(req, timeout=None):
+            captured["method"] = req.get_method()
+            captured["url"] = req.full_url
+            captured["headers"] = dict(req.header_items())
+            return FakeResp()
+
+        monkeypatch.setattr("scripts.sync_mirrors._urlopen", fake_urlopen)
+        status, data = _http("GET", "https://example.com/api", token="TOK")
+        assert status == 200
+        assert data == {"ok": True}
+        assert captured["method"] == "GET"
+        # token 应出现在 Authorization header
+        assert any("token" in v.lower() or "bearer" in v.lower() for v in captured["headers"].values())
+
+    def test_post_with_form_data(self, monkeypatch):
+        import io
+
+        captured = {}
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return io.BytesIO(b'{"id": 42}').read()
+
+            @property
+            def status(self):
+                return 201
+
+        def fake_urlopen(req, timeout=None):
+            captured["method"] = req.get_method()
+            captured["data"] = req.data
+            return FakeResp()
+
+        monkeypatch.setattr("scripts.sync_mirrors._urlopen", fake_urlopen)
+        status, data = _http("POST", "https://example.com/api", token="TOK", data={"name": "v1"})
+        assert status == 201
+        assert data == {"id": 42}
+        assert captured["method"] == "POST"
+        assert captured["data"] is not None  # 有 body
+
+    def test_delete(self, monkeypatch):
+        import io
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return io.BytesIO(b"").read()
+
+            @property
+            def status(self):
+                return 204
+
+        monkeypatch.setattr(
+            "scripts.sync_mirrors._urlopen",
+            lambda req, timeout=None: FakeResp(),
+        )
+        status, data = _http("DELETE", "https://example.com/api/1", token="TOK")
+        assert status == 204
+
+    def test_http_error_raises(self, monkeypatch):
+        import io
+        import urllib.error
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.HTTPError(
+                req.full_url, 404, "Not Found", {}, io.BytesIO(b'{"message": "nope"}')
+            )
+
+        monkeypatch.setattr("scripts.sync_mirrors._urlopen", fake_urlopen)
+        with pytest.raises(RuntimeError) as exc:
+            _http("GET", "https://example.com/api", token="TOK")
+        assert "404" in str(exc.value)
