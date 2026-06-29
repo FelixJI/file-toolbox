@@ -71,6 +71,21 @@ class TestBuildBatContent:
         )
         assert "rollback" in bat.lower() or "FileToolbox.old" in bat
 
+    def test_log_path_single_backslash(self):
+        """LOG 变量与 mshta 提示路径一致:都是 %TEMP%\\ftb_update<pid>.log(单反斜杠)。
+
+        回归测试:此前 LOG 行误写为双反斜杠,与 mshta 行不一致。
+        """
+        bat = build_bat_content(
+            old_dir=r"C:\app\FileToolbox",
+            new_dir=r"C:\app\FileToolbox.new",
+            pid=7,
+        )
+        # f-string 输出里:Windows 路径分隔应为单个反斜杠
+        assert 'set "LOG=%TEMP%\\ftb_update_7.log"' in bat
+        # mshta 弹窗提示的路径与 LOG 一致
+        assert "%TEMP%\\ftb_update_7.log" in bat
+
 
 import zipfile  # noqa: E402
 

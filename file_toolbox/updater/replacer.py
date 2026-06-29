@@ -42,7 +42,7 @@ def build_bat_content(old_dir: str, new_dir: str, pid: int) -> str:
     """
     parent = Path(old_dir).parent
     old_dir_name = Path(old_dir).name
-    log = f"%TEMP%\\\\ftb_update_{pid}.log"
+    log = f"%TEMP%\\ftb_update_{pid}.log"
     # set "VAR=value" 语法:引号包裹整个赋值,含空格/特殊字符的路径被正确保护,
     # 引用时统一用 "%VAR%"(变量值本身不带引号,避免双引号嵌套)。
     return f"""@echo off
@@ -54,6 +54,8 @@ set "LOG={log}"
 echo [%date% %time%] update start > "%LOG%"
 
 :: 1. 循环等待旧 exe 退出(每 200ms,最多 {_WAIT_TRIES} 次约 30s)
+::    注意:下方 if 用单行形式(非多行块),每轮循环重新解析 %TRIES%,
+::    故无需 setlocal enabledelayedexpansion。切勿改成多行 if 块。
 set TRIES=0
 :wait
 tasklist /FI "PID eq %OLD_PID%" 2>nul | find "%OLD_PID%" >nul
@@ -91,7 +93,7 @@ start "" "%OLD_DIR%\\{_EXE_NAME}"
 
 :fail_no_rollback
 echo [%time%] update FAILED, manual intervention needed >> "%LOG%"
-:: 失败弹窗提示(不静默消失),保留 .bat 供排错后自删
+:: 失败弹窗提示用户(模态,点击后继续),日志已留 %TEMP% 供排错,随后 helper 自删
 mshta "javascript:var s=new ActiveXObject('WScript.Shell');s.Popup('更新失败,请查看 %TEMP%\\ftb_update_{pid}.log',0,'File Toolbox 更新',16);close()"
 (goto) 2>nul & del "%~f0"
 """
