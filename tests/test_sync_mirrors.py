@@ -447,7 +447,7 @@ class TestPushToRemote:
         """验证推送 main 分支 + tag,且 url 带认证(不含 token 泄漏到 stderr)。"""
         calls = []
 
-        def fake_run(cmd, cwd=None, check=True, capture_output=True, text=True):
+        def fake_run(cmd, cwd=None, check=True, capture_output=True, text=True, **kw):
             calls.append(cmd)
             import subprocess
 
@@ -470,7 +470,7 @@ class TestPushToRemote:
     def test_push_failure_raises(self, monkeypatch):
         import subprocess
 
-        def fake_run(cmd, cwd=None, check=True, capture_output=True, text=True):
+        def fake_run(cmd, cwd=None, check=True, capture_output=True, text=True, **kw):
             return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="denied")
 
         monkeypatch.setattr(sm.subprocess, "run", fake_run)

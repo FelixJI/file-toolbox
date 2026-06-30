@@ -47,7 +47,13 @@ def _run(script: str, *args: str, check: bool = True) -> None:
 def _git_output(*args: str, cwd: Path) -> str:
     """跑 git 命令,返回 stdout(strip)。失败(check=False)返回空串。"""
     res = subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
     return res.stdout.strip()
 

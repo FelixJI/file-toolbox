@@ -136,7 +136,13 @@ class GitError(RuntimeError):
 
 def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=check
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=check,
     )
 
 
@@ -188,7 +194,13 @@ def update_uv_lock(root: Path) -> tuple[bool, str]:
     """
     try:
         res = subprocess.run(
-            ["uv", "lock"], cwd=str(root), capture_output=True, text=True, check=False
+            ["uv", "lock"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
     except FileNotFoundError:
         return (False, "uv 可执行文件不在 PATH")

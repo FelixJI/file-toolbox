@@ -234,7 +234,14 @@ def cleanup_old_releases(
 def push_to_remote(remote_url_with_auth: str, refspecs: list[str]) -> None:
     """git push <url> <refspecs>。失败抛 RuntimeError(stderr 不含明文 url 之外的敏感信息)。"""
     cmd = ["git", "push", remote_url_with_auth, *refspecs]
-    res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    res = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     if res.returncode != 0:
         # 不打印 url(含 token),只报失败
         raise RuntimeError(f"git push 失败(returncode={res.returncode}): {res.stderr.strip()}")
@@ -243,7 +250,12 @@ def push_to_remote(remote_url_with_auth: str, refspecs: list[str]) -> None:
 def _git_remote_url(name: str = "origin") -> str:
     """读取某 remote 的 URL。失败返回空串。"""
     res = subprocess.run(
-        ["git", "remote", "get-url", name], capture_output=True, text=True, check=False
+        ["git", "remote", "get-url", name],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
     )
     return res.stdout.strip()
 

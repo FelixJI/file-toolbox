@@ -101,6 +101,8 @@ def check() -> None:
         cwd=str(_ROOT),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     # uv lock --dry-run:exit code 0 表示无变化,非 0 表示有变化(或错误)
