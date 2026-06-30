@@ -34,6 +34,54 @@ class TestBumpVersion:
             bump_version("1.2.3", "bogus")
 
 
+class TestUpdateUvLock:
+    """update_uv_lock 失败时必须优雅降级(返回 False),不得抛异常。
+
+    成功路径依赖真实 uv,无法在无 uv 的环境里测,故只覆盖失败降级:
+    uv 不在 PATH(FileNotFoundError)、以及 uv lock 非零退出。
+    """
+
+    def test_missing_uv_returns_false(self, tmp_path, monkeypatch):
+        # 让 PATH 里找不到任何可执行文件
+        monkeypatch.setenv("PATH", "")
+        from scripts.bump_version import update_uv_lock
+
+        ok, msg = update_uv_lock(tmp_path)
+        assert ok is False
+        assert "PATH" in msg
+
+    def test_uv_nonzero_exit_returns_false(self, tmp_path, monkeypatch):
+        # 桩掉 subprocess.run,模拟 uv lock 失败
+        import scripts.bump_version as mod
+
+        class _Fake:
+            returncode = 2
+            stderr = "resolution failed"
+
+        def fake_run(cmd, **kw):
+            assert cmd == ["uv", "lock"]
+            return _Fake()
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+        ok, msg = mod.update_uv_lock(tmp_path)
+        assert ok is False
+        assert "resolution failed" in msg
+
+    def test_uv_success_returns_true(self, tmp_path, monkeypatch):
+        import scripts.bump_version as mod
+
+        class _Fake:
+            returncode = 0
+            stderr = ""
+
+        monkeypatch.setattr(
+            mod.subprocess, "run", lambda cmd, **kw: _Fake()
+        )
+        ok, msg = mod.update_uv_lock(tmp_path)
+        assert ok is True
+        assert msg == ""
+
+
 class TestValidatePEP440:
     def test_valid_release(self):
         assert validate_pep440("1.2.3") is True

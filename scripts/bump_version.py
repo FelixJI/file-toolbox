@@ -176,6 +176,27 @@ def push_tags(root: Path) -> None:
     _git("push", "--tags", cwd=root)
 
 
+def update_uv_lock(root: Path) -> tuple[bool, str]:
+    """跑 `uv lock` 让 lockfile 的 file-toolbox 版本与 pyproject 对齐。
+
+    发版改了 pyproject version 但 uv.lock 不会自动跟上(历史 bug:v0.1.1
+    发版时 uv.lock 滞留 0.1.0)。这里显式重锁。
+
+    返回 (是否成功, 失败时的原因);成功时原因为空串。失败不抛异常——
+    版本号已写入 pyproject,lock 可后续手动补,由调用方据返回值决定是否纳入 commit。
+    失败情形:uv 不在 PATH(FileNotFoundError)、或 `uv lock` 返回非零。
+    """
+    try:
+        res = subprocess.run(
+            ["uv", "lock"], cwd=str(root), capture_output=True, text=True, check=False
+        )
+    except FileNotFoundError:
+        return (False, "uv 可执行文件不在 PATH")
+    if res.returncode != 0:
+        return (False, res.stderr.strip())
+    return (True, "")
+
+
 # ---------------------------------------------------------------------------
 # typer CLI
 # ---------------------------------------------------------------------------
@@ -218,9 +239,12 @@ def bump(
     no_commit: bool = typer.Option(False, "--no-commit", help="只改文件,不 git commit"),
     no_tag: bool = typer.Option(False, "--no-tag", help="不打 git tag"),
     push: bool = typer.Option(False, "--push", help="commit+tag 后自动 git push --tags"),
+    no_update_lock: bool = typer.Option(
+        False, "--no-update-lock", help="跳过 uv lock(离线/无 uv 时)"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="预览,不写盘不动 git"),
 ) -> None:
-    """bump 版本号 + 改 pyproject + 迁移 CHANGELOG + git commit + tag。"""
+    """bump 版本号 + 改 pyproject + 同步 uv.lock + 迁移 CHANGELOG + git commit + tag。"""
     if not part and not set_version:
         typer.secho("错误:需要 <part> 或 --set", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -238,7 +262,7 @@ def bump(
 
     if dry_run:
         typer.echo(f"[dry-run] {current_ver} → {new_ver} ({date})")
-        typer.echo(f"[dry-run] 将迁移 CHANGELOG,commit + tag v{new_ver}")
+        typer.echo("[dry-run] 将同步 uv.lock、迁移 CHANGELOG,commit + tag")
         return
 
     # 工作区清洁检查(commit 前提下)
@@ -252,6 +276,20 @@ def bump(
     write_pyproject_version(_PYPROJECT, new_ver)
     typer.secho(f"✓ pyproject.toml: {current_ver} → {new_ver}", fg=typer.colors.GREEN)
 
+    # 同步 uv.lock(pyproject version 已改,需重锁让 lockfile 对齐)
+    lock_ok = True
+    if not no_update_lock:
+        lock_ok, lock_err = update_uv_lock(_ROOT)
+        if lock_ok:
+            typer.secho("✓ uv.lock: 已同步", fg=typer.colors.GREEN)
+        else:
+            # 不阻塞:版本号已入 pyproject,提示手动补 lock,不纳入本次 commit
+            typer.secho(
+                f"⚠ uv lock 失败,跳过 lockfile 同步(后续可手动补):\n  {lock_err}",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+
     # 迁移 CHANGELOG
     cl_text = _CHANGELOG.read_text(encoding="utf-8")
     new_cl = migrate_changelog(cl_text, new_ver, date)
@@ -260,6 +298,8 @@ def bump(
 
     # git commit + tag
     files = ["pyproject.toml", "CHANGELOG.md"]
+    if lock_ok and not no_update_lock:
+        files.append("uv.lock")
     try:
         git_commit_and_tag(_ROOT, files, new_ver, commit=not no_commit, tag=not no_tag)
     except GitError as e:
