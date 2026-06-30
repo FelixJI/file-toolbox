@@ -182,31 +182,30 @@ def push_tags(root: Path) -> None:
     _git("push", "--tags", cwd=root)
 
 
-def update_uv_lock(root: Path) -> tuple[bool, str]:
-    """跑 `uv lock` 让 lockfile 的 file-toolbox 版本与 pyproject 对齐。
+def update_uv_lock_version(root: Path, new_version: str) -> None:
+    """把 uv.lock 里 file-toolbox 段的 version 行改成 new_version。
 
-    发版改了 pyproject version 但 uv.lock 不会自动跟上(历史 bug:v0.1.1
-    发版时 uv.lock 滞留 0.1.0)。这里显式重锁。
+    本项目是 `source = { editable = "." }`,uv.lock 里 file-toolbox 只记版本号,
+    没有 sdist/wheel 的 hash 绑定,依赖列表也不随自身版本变。所以改版本号时,
+    精确替换 lockfile 中 file-toolbox 段的 version 行,与 `uv lock` 等价
+    (v0.1.0→0.1.1 的真实 uv lock diff 已验证:仅 version 行变动)。
 
-    返回 (是否成功, 失败时的原因);成功时原因为空串。失败不抛异常——
-    版本号已写入 pyproject,lock 可后续手动补,由调用方据返回值决定是否纳入 commit。
-    失败情形:uv 不在 PATH(FileNotFoundError)、或 `uv lock` 返回非零。
+    好处:不依赖 uv 是否在 PATH(本地 .venv 直跑 python 发版时 uv 常不在子进程 PATH)。
+
+    抛 ValueError:找不到 file-toolbox 段或其后的 version 行(lockfile 结构异常)。
     """
-    try:
-        res = subprocess.run(
-            ["uv", "lock"],
-            cwd=str(root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    except FileNotFoundError:
-        return (False, "uv 可执行文件不在 PATH")
-    if res.returncode != 0:
-        return (False, res.stderr.strip())
-    return (True, "")
+    lock = root / "uv.lock"
+    text = lock.read_text(encoding="utf-8")
+    # 锁定 file-toolbox 段:其 `version = "..."` 紧跟 name 行之后。
+    # (?m) 多行;(?s) 让 .* 跨行;非贪婪 + 仅匹配紧跟的 version 行,不误伤其他包。
+    pattern = re.compile(
+        r'(\[\[package\]\]\s*\nname = "file-toolbox"\s*\nversion = )"([^"]*)"',
+        re.DOTALL,
+    )
+    new_text, n = pattern.subn(rf'\g<1>"{new_version}"', text, count=1)
+    if n == 0:
+        raise ValueError("uv.lock 中未找到 file-toolbox 段的 version 行")
+    lock.write_text(new_text, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -288,19 +287,15 @@ def bump(
     write_pyproject_version(_PYPROJECT, new_ver)
     typer.secho(f"✓ pyproject.toml: {current_ver} → {new_ver}", fg=typer.colors.GREEN)
 
-    # 同步 uv.lock(pyproject version 已改,需重锁让 lockfile 对齐)
-    lock_ok = True
+    # 同步 uv.lock(文本替换 file-toolbox 段 version 行,与 uv lock 等价且不依赖 PATH)
     if not no_update_lock:
-        lock_ok, lock_err = update_uv_lock(_ROOT)
-        if lock_ok:
+        try:
+            update_uv_lock_version(_ROOT, new_ver)
             typer.secho("✓ uv.lock: 已同步", fg=typer.colors.GREEN)
-        else:
-            # 不阻塞:版本号已入 pyproject,提示手动补 lock,不纳入本次 commit
-            typer.secho(
-                f"⚠ uv lock 失败,跳过 lockfile 同步(后续可手动补):\n  {lock_err}",
-                fg=typer.colors.YELLOW,
-                err=True,
-            )
+        except (ValueError, OSError) as e:
+            # lockfile 结构异常或读写失败:作为硬错误中止,避免发版后 lock 滞后
+            typer.secho(f"✗ 同步 uv.lock 失败: {e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
 
     # 迁移 CHANGELOG
     cl_text = _CHANGELOG.read_text(encoding="utf-8")
@@ -310,7 +305,7 @@ def bump(
 
     # git commit + tag
     files = ["pyproject.toml", "CHANGELOG.md"]
-    if lock_ok and not no_update_lock:
+    if not no_update_lock:
         files.append("uv.lock")
     try:
         git_commit_and_tag(_ROOT, files, new_ver, commit=not no_commit, tag=not no_tag)

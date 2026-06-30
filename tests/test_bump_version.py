@@ -35,51 +35,75 @@ class TestBumpVersion:
 
 
 class TestUpdateUvLock:
-    """update_uv_lock 失败时必须优雅降级(返回 False),不得抛异常。
+    """update_uv_lock_version: 文本替换 uv.lock 中 file-toolbox 段的 version 行。
 
-    成功路径依赖真实 uv,无法在无 uv 的环境里测,故只覆盖失败降级:
-    uv 不在 PATH(FileNotFoundError)、以及 uv lock 非零退出。
+    本项目 editable 安装,改自身版本号只需替换 lockfile 的 version 行,与 uv lock 等价。
+    关键不变量:只改 file-toolbox 段,绝不误伤其他包(即使别处也有相同版本字符串)。
     """
 
-    def test_missing_uv_returns_false(self, tmp_path, monkeypatch):
-        # 让 PATH 里找不到任何可执行文件
-        monkeypatch.setenv("PATH", "")
-        from scripts.bump_version import update_uv_lock
+    _LOCK_HEAD = """version = 1
 
-        ok, msg = update_uv_lock(tmp_path)
-        assert ok is False
-        assert "PATH" in msg
+[[package]]
+name = "other-pkg"
+version = "0.1.2"
+source = { registry = "..." }
 
-    def test_uv_nonzero_exit_returns_false(self, tmp_path, monkeypatch):
-        # 桩掉 subprocess.run,模拟 uv lock 失败
-        import scripts.bump_version as mod
+[[package]]
+name = "file-toolbox"
+version = "0.1.1"
+source = { editable = "." }
+dependencies = [
+    { name = "typer" },
+]
 
-        class _Fake:
-            returncode = 2
-            stderr = "resolution failed"
+[package.optional-dependencies]
+dev = []
 
-        def fake_run(cmd, **kw):
-            assert cmd == ["uv", "lock"]
-            return _Fake()
+[package.metadata]
 
-        monkeypatch.setattr(mod.subprocess, "run", fake_run)
-        ok, msg = mod.update_uv_lock(tmp_path)
-        assert ok is False
-        assert "resolution failed" in msg
+[[package]]
+name = "yet-another"
+version = "0.1.2"
+source = { registry = "..." }
+"""
 
-    def test_uv_success_returns_true(self, tmp_path, monkeypatch):
-        import scripts.bump_version as mod
+    def test_replaces_file_toolbox_version(self, tmp_path):
+        from scripts.bump_version import update_uv_lock_version
 
-        class _Fake:
-            returncode = 0
-            stderr = ""
+        (tmp_path / "uv.lock").write_text(self._LOCK_HEAD, encoding="utf-8")
+        update_uv_lock_version(tmp_path, "1.2.3")
+        text = (tmp_path / "uv.lock").read_text(encoding="utf-8")
+        # file-toolbox 段已更新
+        assert 'name = "file-toolbox"\nversion = "1.2.3"' in text
 
-        monkeypatch.setattr(
-            mod.subprocess, "run", lambda cmd, **kw: _Fake()
+    def test_does_not_touch_other_packages(self, tmp_path):
+        """other-pkg / yet-another 的 version 行(同为 0.1.2)必须原样保留。"""
+        from scripts.bump_version import update_uv_lock_version
+
+        (tmp_path / "uv.lock").write_text(self._LOCK_HEAD, encoding="utf-8")
+        update_uv_lock_version(tmp_path, "9.9.9")
+        text = (tmp_path / "uv.lock").read_text(encoding="utf-8")
+        # 其余段的 0.1.2 不应被改成 9.9.9(段内 version 行已被 file-toolbox 消耗)
+        assert text.count('version = "9.9.9"') == 1
+        assert text.count('version = "0.1.2"') == 2  # other-pkg + yet-another
+
+    def test_missing_file_toolbox_raises(self, tmp_path):
+        import pytest
+        from scripts.bump_version import update_uv_lock_version
+
+        (tmp_path / "uv.lock").write_text(
+            '[[package]]\nname = "other"\nversion = "1.0"\n', encoding="utf-8"
         )
-        ok, msg = mod.update_uv_lock(tmp_path)
-        assert ok is True
-        assert msg == ""
+        with pytest.raises(ValueError):
+            update_uv_lock_version(tmp_path, "2.0")
+
+    def test_missing_uv_lock_raises(self, tmp_path):
+        # 目录里没有 uv.lock → OSError(读失败),而非静默通过
+        import pytest
+        from scripts.bump_version import update_uv_lock_version
+
+        with pytest.raises(OSError):
+            update_uv_lock_version(tmp_path, "2.0")
 
 
 class TestValidatePEP440:
