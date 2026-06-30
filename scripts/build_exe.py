@@ -26,6 +26,14 @@ from pathlib import Path
 
 import typer
 
+# CI(如 GitHub Actions windows-latest,英文区域)控制台默认 cp1252,
+# 无法编码脚本里的中文/✓/✗ 字符 → typer.echo 抛 UnicodeEncodeError。
+# 把标准流重配为 UTF-8,使脚本不依赖控制台代码页(reconfigure 原地生效,
+# Click 缓存的 sys.stdout 引用同样受益)。Python 3.7+。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 _ROOT = Path(__file__).resolve().parents[1]
 _DIST = _ROOT / "dist"
 _ENTRY = _ROOT / "file_toolbox" / "gui_entry.py"

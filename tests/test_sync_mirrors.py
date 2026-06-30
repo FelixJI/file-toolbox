@@ -613,3 +613,27 @@ class TestSyncCommand:
         assert "cnb" in r.output  # 错误信息提到 cnb
         # gitee 推送/创建/清理仍执行
         assert any(c[0] == "push" and "gitee" in c[1] for c in calls)
+
+    def test_gitee_remote_missing_warns_and_skips(self, monkeypatch, tmp_path):
+        """回归:token 在但 gitee remote 缺失(CI checkout 只配 origin)→
+        跳过 gitee 全部步骤,但不静默,而是打告警;cnb 不受影响。"""
+        calls, arts, notes = self._stubs(monkeypatch, tmp_path)
+        # 让 gitee remote 缺失,cnb 正常
+        monkeypatch.setattr(
+            sm,
+            "_git_remote_url",
+            lambda name: "" if name == "gitee" else "https://cnb.cool/feljii/file-toolbox",
+        )
+        r = runner.invoke(
+            cli, ["--version", "1.2.3", "--notes-file", str(notes), "--artifacts-dir", str(arts)]
+        )
+        assert r.exit_code == 0, r.output
+        # gitee 推送/建 Release/清理 全部不执行
+        assert not any(c[0] == "push" and "gitee" in c[1] for c in calls)
+        assert not any(c[0] == "create_gitee" for c in calls)
+        assert not any(c[0] == "cleanup" and c[1] == "gitee" for c in calls)
+        # 但有显式告警(不是静默跳过)
+        assert "gitee remote" in r.output
+        # cnb 不受影响
+        assert any(c[0] == "push" and "cnb" in c[1] for c in calls)
+

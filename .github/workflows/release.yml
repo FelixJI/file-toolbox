@@ -95,6 +95,14 @@ jobs:
       - name: 提取 Release notes
         run: uv run --extra dev python scripts/extract_changelog.py "${{ steps.ver.outputs.version }}" --out release_notes.md
 
+      - name: 注册 gitee/cnb remote
+        # actions/checkout 只配 origin;sync_mirrors 靠 git remote 发现镜像地址,
+        # 缺失时 gitee 同步会被静默跳过。这里补上(URL 不含敏感信息,认证靠 token)。
+        run: |
+          git remote add gitee https://gitee.com/felixjii/file-toolbox.git 2>/dev/null || true
+          git remote add cnb   https://cnb.cool/feljii/file-toolbox        2>/dev/null || true
+          git remote -v
+
       - name: 同步到 gitee/cnb + 清理旧 Release
         run: |
           uv run --extra dev python scripts/sync_mirrors.py \

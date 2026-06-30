@@ -289,7 +289,7 @@ def sync(
     artifacts_dir: Path = typer.Option(..., "--artifacts-dir", help="产物目录(zip+checksums)"),
     keep: int = typer.Option(5, "--keep", help="保留最近 N 个 Release"),
 ) -> None:
-    """同步代码到 gitee/cnb + Gitee 建 Release + 清理旧 Release。"""
+    """同步代码到 gitee/cnb(仅镜像,不建 Release)+ Gitee 建 Release + 清理旧 Release(GitHub+Gitee)。"""
     tag = version_to_tag(version)
     body = _read_notes(notes_file)
     arts = _artifact_files(artifacts_dir)
@@ -311,6 +311,13 @@ def sync(
             typer.secho(f"✗ 推送 gitee 失败: {e}", fg=typer.colors.RED, err=True)
     elif not gitee_token:
         typer.secho("⚠ GITEE_TOKEN 未配置,跳过 gitee 同步", fg=typer.colors.YELLOW)
+    elif not gitee_url:
+        # token 在但没 gitee remote → CI checkout 缺 remote 时会落到这里(本次 bug 根因)
+        typer.secho(
+            "⚠ GITEE_TOKEN 已配置但未找到 gitee remote(git remote add gitee <url>?)"
+            ",跳过 gitee 同步",
+            fg=typer.colors.YELLOW,
+        )
 
     # ---- 2. 推送 cnb ----
     if cnb_token and cnb_url:
@@ -321,6 +328,12 @@ def sync(
             typer.secho(f"✗ 推送 cnb 失败: {e}", fg=typer.colors.RED, err=True)
     elif not cnb_token:
         typer.secho("⚠ CNB_TOKEN 未配置,跳过 cnb 同步", fg=typer.colors.YELLOW)
+    elif not cnb_url:
+        typer.secho(
+            "⚠ CNB_TOKEN 已配置但未找到 cnb remote(git remote add cnb <url>?)"
+            ",跳过 cnb 同步",
+            fg=typer.colors.YELLOW,
+        )
 
     # ---- 3. Gitee 创建 Release + 上传产物 ----
     if gitee_token and gitee_url:
