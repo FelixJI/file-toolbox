@@ -81,56 +81,16 @@ def _download_streaming(url: str, dest: Path, on_progress=None) -> int:
     return total
 
 
-def _other_source_checksum_url(release: RemoteRelease) -> str | None:
-    """从另一源的 releases/latest API 解析出 checksums.txt 的 asset URL。
-
-    主源 checksum 拉取失败时用于兜底。返回该 asset 的 browser_download_url,
-    或 None(另一源也拿不到/解析失败)。
-
-    注意:不使用 versions._parse_release(它要求 zip+checksum 两 asset 齐全),
-    兜底场景另一源可能只有部分 asset,这里仅提取 checksums.txt。
-    """
-    import json as _json
-
-    from file_toolbox.updater.versions import _build_release_url
-
-    if release.source == "github":
-        platform = "gitee"
-    elif release.source == "gitee":
-        platform = "github"
-    else:
-        return None
-
-    url = _build_release_url(platform)
-    try:
-        payload = _download_bytes(url)
-    except Exception:
-        return None
-    try:
-        data = _json.loads(payload.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    for asset in data.get("assets", []):
-        if asset.get("name") == "checksums.txt":
-            u = asset.get("browser_download_url")
-            if u:
-                return u
-    return None
-
-
 def _fetch_checksum(release: RemoteRelease) -> tuple[str, str] | None:
     """获取 checksums 并解析出 expected sha + zip 文件名。
 
-    先用 release 自身的 checksum_url;拿不到则换另一源解析 checksums.txt URL 重试。
+    用 release 自身的 checksum_url 拉取 checksums.txt 并解析。
     解析失败返回 None。
 
     返回 (expected_sha_lowercased, zip_name)。
     """
     zip_name = release.zip_url.rsplit("/", 1)[-1]
 
-    # 主源 checksums
     try:
         data = _download_bytes(release.checksum_url)
         text = data.decode("utf-8", errors="replace")
@@ -139,18 +99,6 @@ def _fetch_checksum(release: RemoteRelease) -> tuple[str, str] | None:
             return (sha, zip_name)
     except Exception:
         pass
-
-    # 双源兜底:从另一源 API 解析 checksums.txt URL
-    other_cs = _other_source_checksum_url(release)
-    if other_cs:
-        try:
-            data = _download_bytes(other_cs)
-            text = data.decode("utf-8", errors="replace")
-            sha = parse_checksums(text, zip_name)
-            if sha:
-                return (sha, zip_name)
-        except Exception:
-            pass
     return None
 
 
@@ -161,7 +109,7 @@ def download_and_verify(
     """下载便携 zip + 强制 SHA256 校验。返回已校验的本地 zip 路径。
 
     流程:
-      1. 拉取 checksums(主源失败换另一源兜底)→ 解析 expected sha
+      1. 拉取 checksums → 解析 expected sha
       2. 流式下载 zip 到临时目录,边写边校验
       3. 实际 sha == expected?匹配返回路径;不匹配删 zip 抛 ChecksumMismatchError
 
@@ -169,7 +117,7 @@ def download_and_verify(
     """
     got = _fetch_checksum(release)
     if got is None:
-        raise NetworkError("无法获取 checksums(两源均失败)")
+        raise NetworkError("无法获取 checksums")
     expected_sha, zip_name = got
 
     tmp_dir = Path(_mkdtemp(prefix="ftb_update_"))

@@ -1,4 +1,4 @@
-"""版本来源层:从 Gitee+GitHub 并发获取最新正式版 Release。
+"""版本来源层:从 GitHub 获取最新正式版 Release。
 
 本模块只负责"拿版本信息 + 比对版本号",不下载、不替换。
 零第三方依赖:版本号解析与比对用轻量正则 + 数字比较,
@@ -9,13 +9,11 @@ from __future__ import annotations
 
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from urllib import request as urlrequest
 
 # owner/repo 硬编码常量(与 git remote 一致,不引入配置真相源)
 GITHUB_REPO = ("FelixJI", "file-toolbox")
-GITEE_REPO = ("felixjii", "file-toolbox")
 
 # 预发布后缀(PEP 440 prerelease 段)
 _PRERELEASE_RE = re.compile(r"(a|b|rc|dev|alpha|beta)\d*$", re.IGNORECASE)
@@ -31,7 +29,7 @@ class RemoteRelease:
     version: str          # PEP 440 正式版号,如 "1.2.0"(无 v 前缀)
     zip_url: str          # 便携 zip 下载地址
     checksum_url: str     # checksums.txt 地址
-    source: str           # "gitee" | "github",用于日志/排错
+    source: str           # "github",用于日志/排错
 
 
 def strip_v_prefix(version: str) -> str:
@@ -93,9 +91,6 @@ def _build_release_url(platform: str) -> str:
     if platform == "github":
         owner, repo = GITHUB_REPO
         return f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-    if platform == "gitee":
-        owner, repo = GITEE_REPO
-        return f"https://gitee.com/api/v5/repos/{owner}/{repo}/releases/latest"
     raise ValueError(f"不支持的 platform: {platform!r}")
 
 
@@ -144,21 +139,11 @@ def _fetch(platform: str) -> RemoteRelease | None:
 
 
 def fetch_latest() -> RemoteRelease | None:
-    """双源并发取最新正式版 Release,先到先得。
+    """从 GitHub 取最新正式版 Release。
 
-    Gitee + GitHub 并发,谁先返回有效(且非 prerelease)结果就用谁。
-    单源失败不影响另一源。两源全失败/全为 prerelease → 返回 None。
+    仅返回正式版(过滤 prerelease)。源失败/为 prerelease/无 zip asset → 返回 None。
     """
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {
-            pool.submit(_fetch, "github"): "github",
-            pool.submit(_fetch, "gitee"): "gitee",
-        }
-        for fut in as_completed(futures):
-            try:
-                rel = fut.result()
-            except Exception:
-                continue
-            if rel and not _is_prerelease(rel.version):
-                return rel
+    rel = _fetch("github")
+    if rel and not _is_prerelease(rel.version):
+        return rel
     return None

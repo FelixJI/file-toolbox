@@ -4,7 +4,6 @@ import pytest
 
 from file_toolbox.updater.versions import (
     GITHUB_REPO,
-    GITEE_REPO,
     RemoteRelease,
     _is_prerelease,
     is_newer,
@@ -58,9 +57,6 @@ class TestIsNewer:
 class TestRepoConstants:
     def test_github_repo(self):
         assert GITHUB_REPO == ("FelixJI", "file-toolbox")
-
-    def test_gitee_repo(self):
-        assert GITEE_REPO == ("felixjii", "file-toolbox")
 
 
 class TestRemoteRelease:
@@ -117,81 +113,41 @@ def _make_github_payload(tag: str) -> bytes:
     ).encode()
 
 
-def _make_gitee_payload(tag: str) -> bytes:
-    """构造 Gitee releases/latest 的 JSON(字段名与 GitHub 一致)。"""
-    return _json.dumps(
-        {
-            "tag_name": tag,
-            "assets": [
-                {
-                    "name": f"FileToolbox-{tag.lstrip('v')}-win64.zip",
-                    "browser_download_url": (
-                        f"https://gitee.com/felixjii/file-toolbox/releases/download/"
-                        f"{tag}/FileToolbox-{tag.lstrip('v')}-win64.zip"
-                    ),
-                },
-                {
-                    "name": "checksums.txt",
-                    "browser_download_url": (
-                        "https://gitee.com/felixjii/file-toolbox/releases/download/checksums.txt"
-                    ),
-                },
-            ],
-        }
-    ).encode()
-
-
 class TestFetchLatest:
     def test_returns_first_available(self, monkeypatch):
-        """两源都能返回时,fetch_latest 返回有效结果(版本/URL 正确)。"""
-        calls: list[str] = []
+        """GitHub 返回有效 Release 时,fetch_latest 返回正确结果(版本/URL)。"""
 
         def fake_urlopen(req, timeout=None):
             url = req.full_url if hasattr(req, "full_url") else str(req)
-            calls.append(url)
             if "github.com" in url:
                 return _FakeResp(_make_github_payload("v2.0.0"))
-            if "gitee.com" in url:
-                return _FakeResp(_make_gitee_payload("v2.0.0"))
             raise AssertionError(f"unexpected url: {url}")
 
         monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
         rel = vmod.fetch_latest()
         assert rel is not None
         assert rel.version == "2.0.0"
-        assert rel.source in ("github", "gitee")
+        assert rel.source == "github"
         assert rel.zip_url.endswith("-win64.zip")
         assert rel.checksum_url.endswith("checksums.txt")
 
-    def test_one_source_fails_other_succeeds(self, monkeypatch):
-        """一源抛异常时,另一源仍能返回。"""
+    def test_source_fails_returns_none(self, monkeypatch):
+        """GitHub 抛异常时返回 None。"""
 
         def fake_urlopen(req, timeout=None):
-            url = req.full_url if hasattr(req, "full_url") else str(req)
-            if "github.com" in url:
-                raise urlerror.URLError("conn refused")
-            return _FakeResp(_make_gitee_payload("v2.0.0"))
-
-        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
-        rel = vmod.fetch_latest()
-        assert rel is not None
-        assert rel.source == "gitee"
-
-    def test_both_fail_returns_none(self, monkeypatch):
-        def fake_urlopen(req, timeout=None):
-            raise urlerror.URLError("no network")
+            raise urlerror.URLError("conn refused")
 
         monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
         assert vmod.fetch_latest() is None
 
     def test_prerelease_filtered(self, monkeypatch):
-        """两源都返回 prerelease → 过滤后返回 None。"""
+        """GitHub 返回 prerelease → 过滤后返回 None。"""
 
         def fake_urlopen(req, timeout=None):
             url = req.full_url if hasattr(req, "full_url") else str(req)
             if "github.com" in url:
                 return _FakeResp(_make_github_payload("v2.0.0a1"))
-            return _FakeResp(_make_gitee_payload("v2.0.0b1"))
+            raise AssertionError(f"unexpected url: {url}")
 
         monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
         assert vmod.fetch_latest() is None

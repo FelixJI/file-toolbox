@@ -59,7 +59,6 @@ class TestSha256File:
 
 
 import io  # noqa: E402
-import json as _json  # noqa: E402
 import pytest  # noqa: E402
 from urllib import error as urlerror  # noqa: E402
 
@@ -151,44 +150,8 @@ class TestDownloadAndVerify:
         with pytest.raises(ChecksumMismatchError):
             dmod.download_and_verify(_make_release())
 
-    def test_checksum_fallback_to_other_source(self, monkeypatch, tmp_path):
-        """主源 checksum 拿不到 → 从另一源 API 解析 checksums.txt URL 兜底。"""
-        import hashlib
-
-        zip_bytes = b"good"
-        expected_sha = hashlib.sha256(zip_bytes).hexdigest()
-        # 主源 checksums URL 失败;另一源 API 返回含 checksums.txt asset 的 JSON
-        other_api = _json.dumps(
-            {
-                "tag_name": "v1.2.0",
-                "assets": [
-                    {
-                        "name": "checksums.txt",
-                        "browser_download_url": "https://gitee.com/x/checksums.txt",
-                    }
-                ],
-            }
-        ).encode()
-        cs_text = f"{expected_sha}  FileToolbox-1.2.0-win64.zip\n"
-
-        def fake_urlopen(req, timeout=None):
-            url = req.full_url if hasattr(req, "full_url") else str(req)
-            if url == "http://github/checksums.txt":
-                raise urlerror.URLError("fail")
-            if "releases/latest" in url:  # 另一源 API
-                return _StreamResp(other_api)
-            if url == "https://gitee.com/x/checksums.txt":
-                return _StreamResp(cs_text.encode())
-            return _StreamResp(zip_bytes)  # zip 下载
-
-        monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
-        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
-
-        path = dmod.download_and_verify(_make_release())
-        assert path.exists()
-
-    def test_no_checksum_any_source(self, monkeypatch, tmp_path):
-        """两源 checksum 都拿不到 → NetworkError。"""
+    def test_checksum_fetch_fails_raises_network_error(self, monkeypatch, tmp_path):
+        """checksum 拉取失败 → NetworkError。"""
 
         def fake_urlopen(req, timeout=None):
             raise urlerror.URLError("fail")
