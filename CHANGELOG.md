@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.1.1 - 2026-06-30
+
 ### Added
 - 打包与发版工具链:
   - Nuitka `--standalone` 打包脚本(`scripts/build_exe.py`),产出 Windows 便携 exe + zip + 校验和。
