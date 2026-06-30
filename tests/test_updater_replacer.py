@@ -89,6 +89,8 @@ class TestBuildBatContent:
 
 import zipfile  # noqa: E402
 
+import pytest  # noqa: E402
+
 from file_toolbox.updater import replacer as rmod  # noqa: E402
 
 
@@ -161,3 +163,32 @@ class TestReplaceDir:
         bat = Path(bat_paths[0]).read_text(encoding="utf-8")
         assert str(old_dir) in bat
         assert "FileToolbox.new" in bat
+
+    def test_aborts_when_zip_missing_exe(self, tmp_path, monkeypatch):
+        """zip 解压后无 FileToolbox.exe → 抛 ReplaceError,不启动 helper,清理 .new。
+
+        防御:zip 结构异常时绝不把好程序目录替换成空目录。
+        """
+        from file_toolbox.updater.errors import ReplaceError
+
+        old_dir = tmp_path / "FileToolbox"
+        old_dir.mkdir()
+        exe = old_dir / "FileToolbox.exe"
+        exe.write_bytes(b"OLD")
+
+        # 造一个缺 exe 的 zip(只含无关文件)
+        zip_path = tmp_path / "bad.zip"
+        with __import__("zipfile").ZipFile(zip_path, "w") as zf:
+            zf.writestr("FileToolbox/readme.txt", b"no exe here")
+
+        started: list[str] = []
+        monkeypatch.setattr(rmod, "_startfile", lambda p: started.append(p))
+        monkeypatch.setattr(rmod.os, "getpid", lambda: 4242)
+
+        with pytest.raises(ReplaceError):
+            rmod.replace_dir(Path(zip_path), exe_path=exe)
+        # 未启动 helper,且旁路 .new 已清理
+        assert started == []
+        assert not (tmp_path / "FileToolbox.new").exists()
+        # 原程序完好
+        assert exe.read_bytes() == b"OLD"

@@ -11,9 +11,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
+
+from file_toolbox.updater.errors import ReplaceError
 
 # 重启的目标 exe 名(便携包产物)
 _EXE_NAME = "FileToolbox.exe"
@@ -137,8 +140,6 @@ def replace_dir(zip_path: Path, exe_path: Path) -> Path:
     exe_path: 当前运行的 exe 路径(sys.executable)
     返回: 生成的 .bat helper 路径
     """
-    import shutil
-
     old_dir = Path(exe_path).parent
     new_dir = old_dir.parent / "FileToolbox.new"
     # 清理可能残留的旧 .new(上次更新中断遗留)
@@ -146,6 +147,14 @@ def replace_dir(zip_path: Path, exe_path: Path) -> Path:
         shutil.rmtree(new_dir, ignore_errors=True)
 
     _extract_portable_zip(zip_path, new_dir)
+
+    # 防御性校验:解压出的新目录必须含目标 exe,否则中止(绝不把好程序换成空目录)。
+    # zip 结构异常(无 FileToolbox/ 顶层 / exe 缺失)会在此暴露,而非静默替换失败。
+    if not (new_dir / _EXE_NAME).is_file():
+        shutil.rmtree(new_dir, ignore_errors=True)
+        raise ReplaceError(
+            f"更新包结构异常:未在解压结果中找到 {_EXE_NAME},已中止替换(原程序未受影响)"
+        )
 
     bat_content = build_bat_content(
         old_dir=str(old_dir),

@@ -195,13 +195,21 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_update(self, zip_path) -> None:
-        """生成 helper + 启动 + 退出本程序。"""
+        """生成 helper + 启动 + 退出本程序。替换失败 → 友好提示,不崩溃。"""
         import sys
         from pathlib import Path as _Path
 
+        from file_toolbox.updater.errors import UpdateError
         from file_toolbox.updater.replacer import replace_dir
 
-        replace_dir(_Path(zip_path), exe_path=_Path(sys.executable))
+        try:
+            replace_dir(_Path(zip_path), exe_path=_Path(sys.executable))
+        except UpdateError as e:
+            # 替换准备失败(如 zip 结构异常)→ 友好提示,原程序未受影响
+            QMessageBox.warning(
+                self, "更新失败", f"{e}\n\n原程序未受影响,可稍后重试。"
+            )
+            return
         # helper 已启动,本程序退出
         from PySide6.QtWidgets import QApplication
 
