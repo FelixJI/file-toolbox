@@ -1,3 +1,5 @@
+import logging
+
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.base_operation import BaseOperationService
 
@@ -36,5 +38,11 @@ def test_loggable_gives_logger():
 
 
 def test_loggable_logger_cached():
+    """logger 属性应延迟初始化并缓存:多次访问返回同一 Logger 实例(而非每次新建)。"""
     obj = _Logged()
-    assert obj.logger is obj.logger
+    first = obj.logger
+    # 缓存对象应已落在本实例上(而非每次重新计算)
+    assert getattr(obj, "_logger", None) is first
+    assert isinstance(first, logging.Logger)
+    # 多次访问保持同一对象
+    assert obj.logger is first is obj.logger

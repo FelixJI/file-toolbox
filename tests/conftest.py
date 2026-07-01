@@ -1,10 +1,31 @@
 """共享 pytest fixtures:程序化生成虚构 OFD/PDF/ZIP fixture(避免提交二进制与隐私内容)。"""
 
 import io
+import os
 import zipfile
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _disable_live_com_detect():
+    """全局禁用 PDF Tab 构造时的实时 Office COM 检测。
+
+    GUI 单元测试只校验控件状态与配置逻辑(各 test_*_gui.py 的 docstring 均声明
+    "不触发真实 COM")。但 PDFGeneratorDialog.__init__ 会异步 Dispatch Word/WPS COM
+    服务器,在无桌面/未装 Office 的测试环境触发 RPC 致命异常(0x800706ba/be),
+    污染进程退出。置此环境变量让对话框跳过 Dispatch,仅用缓存/占位信息。
+    """
+    old = os.environ.get("FILE_TOOLBOX_NO_COM_DETECT")
+    os.environ["FILE_TOOLBOX_NO_COM_DETECT"] = "1"
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("FILE_TOOLBOX_NO_COM_DETECT", None)
+        else:
+            os.environ["FILE_TOOLBOX_NO_COM_DETECT"] = old
 
 # --- 虚构 OFD 内容(XML 明文,均为占位数据) ---
 OFD_XML = """<?xml version="1.0" encoding="UTF-8"?>

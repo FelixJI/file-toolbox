@@ -4,6 +4,7 @@
 """
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -20,19 +21,22 @@ def test_shortcut_result_dataclass():
 
 def test_desktop_path_returns_path():
     p = shortcuts.desktop_dir()
-    assert hasattr(p, "exists")  # 是 Path-like
+    assert isinstance(p, Path)
+    assert str(p)  # 非空路径
 
 
 def test_start_menu_path_returns_path():
     p = shortcuts.start_menu_dir()
-    assert hasattr(p, "exists")
+    assert isinstance(p, Path)
+    assert str(p)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
 def test_windows_desktop_uses_registry_or_home():
-    # 不应抛异常;返回值是 Path
+    # 不应抛异常;返回值是真实 Path(回退到 ~/Desktop)
     p = shortcuts._windows_desktop()
-    assert hasattr(p, "exists")
+    assert isinstance(p, Path)
+    assert p.name == "Desktop"
 
 
 def _patch_dirs(monkeypatch, tmp_path):

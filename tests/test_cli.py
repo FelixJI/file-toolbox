@@ -1,14 +1,20 @@
+import re
+
 from typer.testing import CliRunner
 
+from file_toolbox import __version__
 from file_toolbox.cli.main import app
 
 runner = CliRunner()
 
 
 def test_version():
+    """--version 输出应与 package 实际 __version__ 一致(不硬编码字面量,避免发版即坏)。"""
     r = runner.invoke(app, ["--version"])
     assert r.exit_code == 0
-    assert "0.1.0" in r.output
+    assert r.output.strip() == __version__
+    # 且形如 x.y.z 的稳定版本号(而非回退占位 "0.0.0+unknown")
+    assert re.fullmatch(r"\d+\.\d+\.\d+", r.output.strip())
 
 
 def test_help_lists_commands():

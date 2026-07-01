@@ -113,10 +113,33 @@ class EngineManager(LoggableMixin):
         return "可用引擎: " + "、".join(info_parts)
 
     def detect_engines_async(self, callback=None):
-        """异步检测引擎（在后台线程调用）"""
-        self._detect_available_engines(force_refresh=True)
-        if callback:
-            callback(self.get_engine_info(use_cache=True))
+        """异步检测引擎(在后台守护线程执行,不阻塞调用线程)。
+
+        检测需 Dispatch COM 进程外服务器(Word/WPS),既慢又可能在没有桌面/Office
+        的环境(CI、无头会话)中失败,故必须在后台线程运行:既避免冻结 GUI 主线程,
+        也让调用方(含测试)不必在调用线程触发实时 COM。回调在该后台线程触发,调用方
+        应自行切回主线程更新 UI(pdf_tab 已用 QTimer.singleShot(0,...) 处理)。
+
+        COM 注意:win32com 要求使用它的每个线程先 CoInitialize,否则进程退出时
+        抛 CO_E_NOTINITIALIZED(0x800401f0)致命异常。故 worker 入口/出口配对调用。
+        """
+        import threading
+
+        def _worker():
+            import pythoncom
+
+            pythoncom.CoInitialize()
+            try:
+                self._detect_available_engines(force_refresh=True)
+                if callback:
+                    callback(self.get_engine_info(use_cache=True))
+            except Exception as e:  # COM/线程异常不应波及调用线程
+                self.logger.warning(f"异步引擎检测失败: {e}")
+            finally:
+                pythoncom.CoUninitialize()
+
+        # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ------------------------------------------------------------------ #
     #  应用初始化(配置驱动)

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_pdf import PDFGeneratorService
+from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 from file_toolbox.core.batch_pdf.constants import (
     DPI_DEFAULT,
     DPI_OPTIONS,
@@ -133,9 +134,23 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     def _init_engine_info(self):
         """启动时异步检测可用 Office 引擎并更新提示。
 
-        同步检测会 Dispatch COM 对象,阻塞 UI 线程,故使用服务的异步接口;
-        回调在后台线程触发,通过 QTimer.singleShot(0, ...) 切回主线程更新。
+        检测需 Dispatch COM 进程外服务器(Word/WPS),在无桌面/未装 Office 的环境
+        (CI、无头会话、单元测试)中可能触发 RPC 致命异常(0x800706ba/be)。故:
+        - 正常形态:经服务的异步接口在后台线程检测,回调通过 QTimer.singleShot(0,...)
+          切回主线程更新,避免冻结 UI。
+        - 测试/CI 形态:置环境变量 FILE_TOOLBOX_NO_COM_DETECT=1 跳过实时 Dispatch,
+          仅回退为缓存信息(无缓存时显示占位),让纯 UI 逻辑测试不触碰 COM。
         """
+        import os
+
+        if os.environ.get("FILE_TOOLBOX_NO_COM_DETECT"):
+            # 测试/CI:不触发 COM,仅用缓存(可能为空),避免致命异常
+            self.ui.label_engine_info.setText(
+                self._svc.get_engine_info(use_cache=True) if EngineManager._cached_engines
+                else "未检测到Office软件"
+            )
+            return
+
         self.ui.label_engine_info.setText("正在检测可用引擎...")
 
         def _on_detected(info: str):

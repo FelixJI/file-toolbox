@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QWidget,
 )
 
 from file_toolbox import __version__  # noqa: E402
@@ -38,8 +39,10 @@ def _collect_text(tab: AboutTab) -> str:
 
 
 def test_about_tab_instantiates(app):
+    """AboutTab 应为合法 QWidget 且已构建出可见子控件(而非空壳)。"""
     tab = AboutTab()
-    assert tab is not None
+    assert isinstance(tab, QWidget)
+    assert tab.findChildren(QWidget)  # 有子控件,确认 _init_ui 已执行
 
 
 def test_about_tab_shows_app_name(app):
