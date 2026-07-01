@@ -4,6 +4,7 @@ import contextlib
 import gc
 import shutil
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime
@@ -29,6 +30,18 @@ FILE_OPERATION_TIMEOUT = 30
 APP_QUIT_TIMEOUT = 10
 # 文本文件并行处理的最大线程数
 MAX_TEXT_WORKERS = 4
+
+
+def _no_window_flags() -> dict:
+    """Windows GUI 进程(如 Nuitka 打包的 FileToolbox.exe,PE 子系统 = GUI)启动控制台
+    子进程(tasklist/taskkill)时,缺本标志 Windows 会为子进程分配可见控制台 → 黑框一闪。
+
+    CREATE_NO_WINDOW 阻止子进程分配控制台。非 Windows 无此标志,返回空 dict。
+    根因详见 Nuitka 文档与 Issue #3073。
+    """
+    if sys.platform != "win32":
+        return {}
+    return {"creationflags": subprocess.CREATE_NO_WINDOW}
 
 
 class ContentReplaceService(BaseOperationService, LoggableMixin):
@@ -83,6 +96,8 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 # PID 解析只需 ASCII 数字部分,丢失个别非 ASCII 字符不影响。
                 errors="ignore",
                 timeout=SUBPROCESS_TIMEOUT_SECONDS,
+                # Windows GUI 进程起 tasklist 时不分配可见控制台(避免黑框一闪)。
+                **_no_window_flags(),
             )
 
             for line in result.stdout.strip().split("\n"):
@@ -107,6 +122,8 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                     ["taskkill", "/F", "/PID", str(pid)],
                     capture_output=True,
                     timeout=SUBPROCESS_TIMEOUT_SECONDS,
+                    # 同 _get_office_pids:GUI 进程起 taskkill 时不分配可见控制台。
+                    **_no_window_flags(),
                 )
 
     def is_supported_file(self, file_path: Path) -> bool:

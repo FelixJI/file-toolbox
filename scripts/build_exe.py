@@ -82,6 +82,9 @@ def _build_command(output_dir: Path, version: str) -> list[str]:
         "--include-package=openpyxl",  # Excel 导出
         "--include-package=chardet",  # 编码检测
         "--include-package-data=pdfplumber",  # pdfplumber 数据文件
+        # CHANGELOG.md 随包分发:仓库根的 CHANGELOG.md 拷到 .dist 根(exe 同级),
+        # 供关于页 get_changelog() 读取(metadata.get_changelog 回退链含 exe 同级)。
+        f"--include-data-file={_ROOT / 'CHANGELOG.md'}=CHANGELOG.md",
         # --- PyMuPDF:nofollow 阻止编译(避免 OOM),运行时文件由 build() 手工拷贝 ---
         "--nofollow-import-to=pymupdf",
         "--nofollow-import-to=fitz",
