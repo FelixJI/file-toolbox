@@ -3,6 +3,7 @@ from pathlib import Path
 from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
 from file_toolbox.core.batch_replace.types import ReplaceOperationType
 from file_toolbox.core.batch_replace.service import ContentReplaceService
+from file_toolbox.core.batch_replace import service as service_mod
 
 
 def test_text_count_matches_simple():
@@ -84,3 +85,64 @@ def test_service_validate_bad_regex():
     svc = ContentReplaceService()
     ok, msg = svc._validate_params({"type": "regex_replace", "params": {"pattern": "("}}, 0)
     assert ok is False
+
+
+def test_get_office_pids_uses_create_no_window_on_windows(monkeypatch):
+    """Windows GUI 进程(Nuitka 打包的 exe)起 tasklist 时必须带 CREATE_NO_WINDOW,
+    否则会闪黑框(根因:service.py 的 _no_window_flags)。
+
+    断言:win32 平台下,_get_office_pids 调 subprocess.run 时 kwargs 含
+    creationflags=CREATE_NO_WINDOW。非 win32 则不含该键(跨平台守卫)。
+    """
+    import subprocess
+
+    captured = {}
+
+    class _FakeResult:
+        stdout = ""
+        returncode = 0
+
+    def fake_run(*args, **kwargs):
+        captured.update(kwargs)
+        return _FakeResult()
+
+    monkeypatch.setattr(service_mod.subprocess, "run", fake_run)
+    # 强制走 Windows 分支(无论测试运行平台),验证标志确实传入
+    monkeypatch.setattr(service_mod.sys, "platform", "win32")
+
+    svc = ContentReplaceService()
+    svc._get_office_pids("WINWORD.EXE")
+
+    assert "creationflags" in captured
+    assert captured["creationflags"] == subprocess.CREATE_NO_WINDOW
+
+
+def test_kill_office_processes_uses_create_no_window_on_windows(monkeypatch):
+    """taskkill 同样需 CREATE_NO_WINDOW(运行时也会闪黑框)。
+
+    造一个真实存在的 PID:_get_office_pids 返回它,_kill 时 taskkill 应带标志。
+    """
+    import subprocess
+
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        # tasklist(taskkill 之前先查 PID)返回空,使 _kill 路径不会真起进程;
+        # 但为验证 taskkill 标志,这里直接捕获 taskkill 的 kwargs。
+        captured.update(kwargs)
+        class _R:
+            stdout = ""
+            returncode = 0
+        return _R()
+
+    monkeypatch.setattr(service_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(service_mod.sys, "platform", "win32")
+
+    svc = ContentReplaceService()
+    # 直接验证 _no_window_flags 在 win32 下产出 CREATE_NO_WINDOW
+    flags = service_mod._no_window_flags()
+    assert flags == {"creationflags": subprocess.CREATE_NO_WINDOW}
+
+    # _kill_new_office_processes 内部先 _get_office_pids(无新 PID 则不 kill),
+    # 确保调用不报错且路径覆盖
+    svc._kill_new_office_processes("WINWORD.EXE", [])

@@ -3,6 +3,7 @@
 CLI 的 --version 与 GUI About Tab 都从这里读,不各自硬编码。
 """
 
+import sys
 from pathlib import Path
 
 from file_toolbox import __version__
@@ -44,15 +45,18 @@ def _fallback_changelog() -> str:
 def get_changelog() -> str:
     """读取 CHANGELOG.md,失败返回兜底文本。
 
-    查找顺序(3 级回退链):
+    查找顺序(4 级回退链):
     1. 仓库根(开发环境): _repo_root_changelog_path()
-    2. 当前工作目录:      Path.cwd() / "CHANGELOG.md"
-    3. 都找不到 →         _fallback_changelog()(含版本号,提示完整日志见仓库)
+    2. 便携 exe 同级:      Path(sys.executable).parent / "CHANGELOG.md"
+                           (Nuitka standalone 产物;build_exe 用 --include-data-file 拷入)
+    3. 当前工作目录:       Path.cwd() / "CHANGELOG.md"
+    4. 都找不到 →          _fallback_changelog()(含版本号,提示完整日志见仓库)
 
     pip 安装的包不含 CHANGELOG.md(在仓库根,包目录外),故回退链保证不报错。
     """
     candidates = [
         _repo_root_changelog_path(),
+        Path(sys.executable).parent / "CHANGELOG.md",
         Path.cwd() / "CHANGELOG.md",
     ]
     for p in candidates:
