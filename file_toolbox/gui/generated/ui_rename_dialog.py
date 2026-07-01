@@ -274,25 +274,25 @@ class Ui_FileRenamerDialog:
             )
         )
         self.btn_add_prefix.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u2795 \u6dfb\u52a0\u524d\u7f00", None)
+            QCoreApplication.translate("FileRenamerDialog", "\u6dfb\u52a0\u524d\u7f00", None)
         )
         self.btn_add_suffix.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u2795 \u6dfb\u52a0\u540e\u7f00", None)
+            QCoreApplication.translate("FileRenamerDialog", "\u6dfb\u52a0\u540e\u7f00", None)
         )
         self.btn_replace_text.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u2795 \u66ff\u6362\u5b57\u7b26", None)
+            QCoreApplication.translate("FileRenamerDialog", "\u66ff\u6362\u5b57\u7b26", None)
         )
         self.btn_regex_replace.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u2795 \u6b63\u5219\u66ff\u6362", None)
+            QCoreApplication.translate("FileRenamerDialog", "\u6b63\u5219\u66ff\u6362", None)
         )
         self.btn_add_number.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u2795 \u6dfb\u52a0\u5e8f\u53f7", None)
+            QCoreApplication.translate("FileRenamerDialog", "\u6dfb\u52a0\u5e8f\u53f7", None)
         )
         self.btn_delete_chars.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u2795 \u5220\u9664\u5b57\u7b26", None)
+            QCoreApplication.translate("FileRenamerDialog", "\u5220\u9664\u5b57\u7b26", None)
         )
         self.btn_add_date.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u2795 \u6dfb\u52a0\u65e5\u671f", None)
+            QCoreApplication.translate("FileRenamerDialog", "\u6dfb\u52a0\u65e5\u671f", None)
         )
         self.btn_edit_operation.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u7f16\u8f91\u64cd\u4f5c", None)

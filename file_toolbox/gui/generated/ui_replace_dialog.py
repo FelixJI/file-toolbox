@@ -370,22 +370,22 @@ class Ui_ContentReplaceDialog:
 
         self.btn_simple_replace.setText(
             QCoreApplication.translate(
-                "ContentReplaceDialog", "\u2795 \u7b80\u5355\u66ff\u6362", None
+                "ContentReplaceDialog", "\u7b80\u5355\u66ff\u6362", None
             )
         )
 
         self.btn_regex_replace.setText(
             QCoreApplication.translate(
-                "ContentReplaceDialog", "\u2795 \u6b63\u5219\u66ff\u6362", None
+                "ContentReplaceDialog", "\u6b63\u5219\u66ff\u6362", None
             )
         )
 
         self.btn_edit_operation.setText(
-            QCoreApplication.translate("ContentReplaceDialog", "\u270f\ufe0f \u7f16\u8f91", None)
+            QCoreApplication.translate("ContentReplaceDialog", "\u7f16\u8f91", None)
         )
 
         self.btn_remove_operation.setText(
-            QCoreApplication.translate("ContentReplaceDialog", "\u274c \u5220\u9664", None)
+            QCoreApplication.translate("ContentReplaceDialog", "\u5220\u9664", None)
         )
 
         self.groupBox_preview.setTitle(
