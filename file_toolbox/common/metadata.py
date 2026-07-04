@@ -48,7 +48,7 @@ def get_changelog() -> str:
     查找顺序(4 级回退链):
     1. 仓库根(开发环境): _repo_root_changelog_path()
     2. 便携 exe 同级:      Path(sys.executable).parent / "CHANGELOG.md"
-                           (Nuitka standalone 产物;build_exe 用 --include-data-file 拷入)
+                           (PyInstaller onedir 产物;spec 用 datas 拷入)
     3. 当前工作目录:       Path.cwd() / "CHANGELOG.md"
     4. 都找不到 →          _fallback_changelog()(含版本号,提示完整日志见仓库)
 

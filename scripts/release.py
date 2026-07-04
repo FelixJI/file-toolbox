@@ -129,7 +129,7 @@ def release(
 
     # 2. build(非 CI 且 skip-build 时跳过)
     if not skip_build:
-        typer.echo("=== Nuitka 打包 ===")
+        typer.echo("=== PyInstaller 打包 ===")
         build_args = ["--ci"] if ci else []
         _run("build_exe.py", *build_args)
 
@@ -207,7 +207,7 @@ def _run_interactive_inner() -> None:
         break
 
     # ---- Step 2: 选附加动作(打包,不预选) ----
-    do_build = typer.confirm("是否同步 Nuitka 打包 build_exe?", default=False)
+    do_build = typer.confirm("是否同步 PyInstaller 打包 build_exe?", default=False)
 
     # ---- Step 3: 总览确认 ----
     typer.echo("\n即将执行:")
@@ -215,7 +215,7 @@ def _run_interactive_inner() -> None:
     typer.echo(f"  • uv.lock: 同步 file-toolbox 版本号")
     typer.echo(f"  • CHANGELOG.md: 迁移 [Unreleased] 段到 {new_ver}")
     typer.echo(f"  • git commit + tag v{new_ver}")
-    typer.echo(f"  • Nuitka 打包   {'(将执行)' if do_build else '— 跳过 —'}")
+    typer.echo(f"  • PyInstaller 打包   {'(将执行)' if do_build else '— 跳过 —'}")
     if not typer.confirm("\n确认执行?", default=False):
         typer.echo("已取消,未做任何改动。")
         return
@@ -235,7 +235,7 @@ def _execute_release(part: str | None, new_version: str, do_build: bool) -> None
 
     # 2. 可选打包(本地,不带 --ci)
     if do_build:
-        typer.echo("=== Nuitka 打包 ===")
+        typer.echo("=== PyInstaller 打包 ===")
         _run("build_exe.py")
 
     # 3. 收尾:从不自动 push

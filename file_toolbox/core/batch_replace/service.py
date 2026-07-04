@@ -33,11 +33,11 @@ MAX_TEXT_WORKERS = 4
 
 
 def _no_window_flags() -> dict:
-    """Windows GUI 进程(如 Nuitka 打包的 FileToolbox.exe,PE 子系统 = GUI)启动控制台
+    """Windows GUI 进程(如 PyInstaller 打包的 FileToolbox.exe,PE 子系统 = GUI)启动控制台
     子进程(tasklist/taskkill)时,缺本标志 Windows 会为子进程分配可见控制台 → 黑框一闪。
 
     CREATE_NO_WINDOW 阻止子进程分配控制台。非 Windows 无此标志,返回空 dict。
-    根因详见 Nuitka 文档与 Issue #3073。
+    根因详见 Nuitka Issue #3073(GUI 子系统进程的通用现象,与具体打包器无关)。
     """
     if sys.platform != "win32":
         return {}
