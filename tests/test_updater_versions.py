@@ -171,7 +171,7 @@ class TestIsPortableExe:
         assert isinstance(is_portable_exe(), bool)
 
     def test_dev_env_is_false(self, monkeypatch, tmp_path):
-        """开发环境(非 Nuitka,可执行名非 FileToolbox.exe)→ False。"""
+        """开发环境(非打包形态,可执行名非 FileToolbox.exe)→ False。"""
         monkeypatch.setattr(upkg.sys, "executable", str(tmp_path / "python.exe"))
         assert is_portable_exe() is False
 

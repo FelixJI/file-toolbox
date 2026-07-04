@@ -1,4 +1,4 @@
-"""GUI 独立入口(供 Nuitka 编译为 exe)。
+"""GUI 独立入口(供 PyInstaller 打包为 exe)。
 
 双击 exe 直接启动图形界面;CLI 仍可经 python -m file_toolbox 或 file-toolbox 命令使用。
 """

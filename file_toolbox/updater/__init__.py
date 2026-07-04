@@ -2,7 +2,7 @@
 
 对外暴露:
   - check_update(): 检查是否有新版本(返回 RemoteRelease 或 None)
-  - is_portable_exe(): 当前是否以便携 exe(Nuitka standalone)形态运行
+  - is_portable_exe(): 当前是否以便携 exe(PyInstaller onedir)形态运行
 
 三层职责(versions/downloader/replacer)在各自模块内,门面只做组装与转发。
 """
@@ -19,10 +19,10 @@ __all__ = ["check_update", "is_portable_exe", "RemoteRelease"]
 
 
 def is_portable_exe() -> bool:
-    """检测当前是否以便携 exe(Nuitka standalone)形态运行。
+    """检测当前是否以便携 exe(PyInstaller onedir)形态运行。
 
     判据:可执行名 == FileToolbox.exe 且同目录存在 python3.dll
-    (Nuitka standalone 产物的运行时标记)。
+    (PyInstaller onedir 产物的运行时标记;Python 运行时 DLL 放在 exe 同级)。
     """
     exe = Path(sys.executable)
     return exe.name == "FileToolbox.exe" and (exe.parent / "python3.dll").exists()
