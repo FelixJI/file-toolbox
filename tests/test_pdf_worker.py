@@ -18,6 +18,21 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def _stub_engine_validation(monkeypatch):
+    """默认 stub 掉 worker.run() 里的引擎兑现检测,避免测试环境真实 COM Dispatch
+    产生非致命 traceback 噪声(test_worker_invokes_engine_validation 会用自带的
+    spy 覆盖此 stub,单独验证兑现调用)。
+    """
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    monkeypatch.setattr(
+        EngineManager,
+        "_detect_available_engines",
+        lambda self, force_refresh=False: {"office": False, "wps": False},
+    )
+
+
 class _FakeService:
     """假 service:记录调用,可控成功/失败。"""
 
