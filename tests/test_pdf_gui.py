@@ -232,3 +232,118 @@ def test_clear_files_resets_table(dlg, tmp_path):
 
     assert dlg.selected_files == []
     assert dlg.ui.table_files.rowCount() == 0
+
+
+# ---------- 生成:worker 接入 ----------
+
+
+def test_generate_with_no_files_shows_message(dlg, monkeypatch):
+    """无文件 → 弹提示,不启动 worker。"""
+    called = []
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.information",
+        lambda *a, **k: called.append(True),
+    )
+    dlg.selected_files = []
+    dlg._generate()
+    assert called  # 弹了提示
+
+
+def test_generate_starts_worker_and_disables_ui(dlg, monkeypatch, tmp_path):
+    """有文件 → 创建 worker、start、UI 禁用、cancel 按钮显示。"""
+    from pathlib import Path
+
+    from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"x")
+    dlg.selected_files = [f]
+
+    started = []
+
+    # 用真 PdfGenerateWorker 但 mock start 避免真起线程
+    def fake_start(self):
+        started.append(True)
+
+    monkeypatch.setattr(PdfGenerateWorker, "start", fake_start)
+
+    dlg._generate()
+
+    assert started  # 启动了
+    assert dlg.worker is not None
+    assert isinstance(dlg.worker, PdfGenerateWorker)
+    assert dlg.ui.btn_generate.isEnabled() is False  # UI 禁用
+    # 对话框未 show 时 isVisible() 恒为 False;isHidden() 反映 setVisible 的真实意图
+    assert dlg.ui.btn_cancel.isHidden() is False  # 已设为可见(取消按钮亮起)
+
+
+def test_on_progress_updates_label_and_bar(dlg):
+    """_on_progress 更新 label_progress 与 progress_bar。"""
+    dlg._on_progress(2, 5, "处理中")
+    assert "2/5" in dlg.ui.label_progress.text()
+    assert dlg.ui.progress_bar.value() == 40  # 2/5
+
+
+def test_on_generate_ok_renders_results_and_restores_ui(dlg, tmp_path, monkeypatch):
+    """_on_generate_ok 填结果态 + 恢复 UI。"""
+    from pathlib import Path
+
+    # fail>0 时 _on_generate_ok 会弹 QMessageBox.warning,无事件循环会挂 → 打桩
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.warning",
+        lambda *a, **k: None,
+    )
+
+    results = [
+        {"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""},
+        {"source": Path("b.docx"), "output": Path("b.pdf"), "success": False, "error": "boom"},
+    ]
+    # 真实流程中 _generate 前 _do_refresh_preview 已填好预览行,这里同构预置
+    dlg.selected_files = [Path("a.docx"), Path("b.docx")]
+    dlg._do_refresh_preview()
+    # 预置 UI 禁用态
+    dlg.ui.btn_generate.setEnabled(False)
+    dlg.ui.btn_cancel.setVisible(True)
+
+    dlg._on_generate_ok(results)
+
+    tbl = dlg.ui.table_files
+    assert tbl.rowCount() == 2
+    assert tbl.item(0, 3).text() == "成功"
+    assert tbl.item(1, 3).text() == "失败: boom"
+    assert dlg.ui.btn_generate.isEnabled() is True  # 恢复
+    # 对话框未 show,用 isHidden() 反映 setVisible(False) 的真实意图
+    assert dlg.ui.btn_cancel.isHidden() is True  # 取消按钮隐藏
+
+
+def test_on_generate_failed_restores_ui(dlg, monkeypatch):
+    """_on_generate_failed 恢复 UI。"""
+    # _on_generate_failed 会弹 QMessageBox.critical,无事件循环会挂 → 打桩
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.critical",
+        lambda *a, **k: None,
+    )
+    dlg.ui.btn_generate.setEnabled(False)
+    dlg.ui.btn_cancel.setVisible(True)
+
+    dlg._on_generate_failed("some error")
+
+    assert dlg.ui.btn_generate.isEnabled() is True
+    assert dlg.ui.btn_cancel.isHidden() is True  # 取消按钮隐藏
+
+
+def test_render_results_keeps_pending_status_for_unprocessed(dlg, tmp_path):
+    """取消时 results 少于表行数 → 未处理的行保持"待转换"。"""
+    from pathlib import Path
+
+    # 表里 3 行(预览态),但只拿到 1 个结果(取消)
+    dlg.selected_files = [Path("a.docx"), Path("b.docx"), Path("c.docx")]
+    dlg._do_refresh_preview()
+    results = [{"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""}]
+
+    dlg._render_results(results)
+
+    tbl = dlg.ui.table_files
+    assert tbl.item(0, 3).text() == "成功"
+    assert tbl.item(1, 3).text() == "待转换"  # 未处理
+    assert tbl.item(2, 3).text() == "待转换"

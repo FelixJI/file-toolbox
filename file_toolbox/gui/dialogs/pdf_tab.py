@@ -128,6 +128,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.btn_browse_dir.clicked.connect(self._browse_output_dir)
         self.ui.btn_generate.clicked.connect(self._generate)
         self.ui.btn_refresh.clicked.connect(self._do_refresh_preview)
+        self.ui.btn_cancel.clicked.connect(self._on_cancel)
 
     def _init_engine_info(self):
         """启动时异步检测可用 Office 引擎并更新提示。
@@ -228,34 +229,70 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if not self.selected_files:
             QMessageBox.information(self, "提示", "请先选择文件。")
             return
+        # 避免重复启动
+        if self.worker is not None and self.worker.isRunning():
+            return
+
         config = self._build_config()
         self.ui.label_progress.setText("处理中...")
+        self.ui.progress_bar.setValue(0)
 
-        def progress(cur, total, msg):
-            self.ui.label_progress.setText(f"[{cur}/{total}] {msg}")
+        from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
 
-        results = self._svc.batch_generate(list(self.selected_files), config, progress)
+        worker = PdfGenerateWorker(
+            self._svc, list(self.selected_files), config, parent=self
+        )
+        worker.progress.connect(self._on_progress)
+        worker.finished_ok.connect(self._on_generate_ok)
+        worker.failed.connect(self._on_generate_failed)
+        self.worker = worker
+        self._set_ui_enabled(False)
+        worker.start()
+
+    def _on_progress(self, cur: int, total: int, msg: str):
+        self.ui.label_progress.setText(f"[{cur}/{total}] {msg}")
+        pct = int(cur / total * 100) if total else 0
+        self.ui.progress_bar.setValue(pct)
+
+    def _on_generate_ok(self, results: list):
         self._render_results(results)
         ok = sum(1 for r in results if r["success"])
         fail = len(results) - ok
         self.ui.label_progress.setText(f"完成: 成功 {ok}, 失败 {fail}")
         # 记录历史(PDF 生成不可逆,仅供审计/复现)
-        self._history.add_record(
-            "pdf",
-            {
-                "files": [str(f) for f in self.selected_files],
-                "success": ok,
-                "failed": fail,
-                "config": {
-                    "pdf_type": config["pdf_type"],
-                    "output_mode": config["output_mode"],
-                    "engine": config["engine"],
-                    "dpi": config["dpi"],
+        try:
+            config = self._build_config()
+            self._history.add_record(
+                "pdf",
+                {
+                    "files": [str(f) for f in self.selected_files],
+                    "success": ok,
+                    "failed": fail,
+                    "config": {
+                        "pdf_type": config["pdf_type"],
+                        "output_mode": config["output_mode"],
+                        "engine": config["engine"],
+                        "dpi": config["dpi"],
+                    },
                 },
-            },
-        )
+            )
+        except Exception:
+            pass  # 历史写入失败不影响主流程
+        self._set_ui_enabled(True)
+        self.worker = None
         if fail:
             QMessageBox.warning(self, "部分失败", f"{fail} 个文件转换失败,详见预览表。")
+
+    def _on_generate_failed(self, msg: str):
+        self.ui.label_progress.setText("生成失败")
+        self._set_ui_enabled(True)
+        self.worker = None
+        QMessageBox.critical(self, "生成失败", msg)
+
+    def _on_cancel(self):
+        if self.worker is not None and hasattr(self.worker, "cancel"):
+            self.worker.cancel()
+        self.ui.label_progress.setText("正在取消...")
 
     # ---------- 预览 ----------
 
@@ -290,13 +327,29 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             tbl.setItem(row, 2, QTableWidgetItem(size))
             tbl.setItem(row, 3, QTableWidgetItem("待转换"))
 
-    def _render_results(self, results):
+    def _render_results(self, results: list):
+        """把生成结果填入 table_files(复用预览表)。
+
+        结果数可能少于表行数(取消时):已处理的行更新为"成功"/"失败: xxx",
+        未处理的行保持"待转换"(预览态)。
+        """
         tbl = self.ui.table_files
-        tbl.setRowCount(len(results))
         for row, r in enumerate(results):
-            tbl.setItem(row, 0, QTableWidgetItem(r["source"].name))
-            tbl.setItem(row, 1, QTableWidgetItem(r["output"].name))
-            tbl.setItem(row, 2, QTableWidgetItem("成功" if r["success"] else f"失败: {r['error']}"))
+            if row >= tbl.rowCount():
+                break
+            tbl.item(row, 0).setText(r["source"].name)
+            tbl.item(row, 1).setText(r["output"].name)
+            status = "成功" if r["success"] else f"失败: {r['error']}"
+            tbl.item(row, 3).setText(status)
+
+    def _set_ui_enabled(self, enabled: bool):
+        """生成进行中禁用选择/生成按钮,显示取消按钮;完成则反之。"""
+        self.ui.btn_select_files.setEnabled(enabled)
+        self.ui.btn_select_folder.setEnabled(enabled)
+        self.ui.btn_clear_files.setEnabled(enabled)
+        self.ui.btn_generate.setEnabled(enabled)
+        self.ui.btn_refresh.setEnabled(enabled)
+        self.ui.btn_cancel.setVisible(not enabled)
 
     def _update_status(self):
         self.ui.label_status.setText(f"已选择 {len(self.selected_files)} 个文件")
