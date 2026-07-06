@@ -121,3 +121,41 @@ def test_build_config_custom_dir_includes_output_dir(dlg):
     config = dlg._build_config()
     assert config["same_as_source"] is False
     assert "output_dir" in config
+
+
+# ---------- 布局:文件选择与预览合并 ----------
+
+
+def test_no_separate_list_files_widget(dlg):
+    """list_files(QListWidget)已删除。"""
+    assert not hasattr(dlg.ui, "list_files")
+
+
+def test_no_separate_preview_group(dlg):
+    """group_preview 已删除(预览并入 group_files)。"""
+    assert not hasattr(dlg.ui, "group_preview")
+
+
+def test_table_files_exists_with_four_columns(dlg):
+    """table_files(QTableWidget)存在,4 列。"""
+    assert hasattr(dlg.ui, "table_files")
+    assert dlg.ui.table_files.columnCount() == 4
+    headers = [
+        dlg.ui.table_files.horizontalHeaderItem(i).text() for i in range(4)
+    ]
+    assert headers == ["源文件", "输出", "大小", "状态"]
+
+
+def test_table_files_supports_dnd_and_multiselect(dlg):
+    """table_files 继承原 list_files 的拖拽接收 + 多选能力。"""
+    from PySide6.QtWidgets import QAbstractItemView
+
+    tbl = dlg.ui.table_files
+    assert tbl.acceptDrops() is True
+    assert tbl.dragDropMode() == QAbstractItemView.DropOnly
+    assert tbl.selectionMode() == QAbstractItemView.ExtendedSelection
+
+
+def test_table_files_in_group_files(dlg):
+    """table_files 是 group_files 的子控件(合并后)。"""
+    assert dlg.ui.table_files.parent() is dlg.ui.group_files

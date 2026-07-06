@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -45,7 +44,6 @@ class Ui_PDFGeneratorDialog:
         self.group_files = QGroupBox(PDFGeneratorDialog)
         self.group_files.setObjectName("group_files")
         self.group_files.setMinimumSize(QSize(0, 180))
-        self.group_files.setMaximumSize(QSize(16777215, 250))
         self.filesLayout = QVBoxLayout(self.group_files)
         self.filesLayout.setObjectName("filesLayout")
         self.btnFileLayout = QHBoxLayout()
@@ -82,15 +80,28 @@ class Ui_PDFGeneratorDialog:
 
         self.filesLayout.addLayout(self.btnFileLayout)
 
-        self.list_files = QListWidget(self.group_files)
-        self.list_files.setObjectName("list_files")
-        self.list_files.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.list_files.setAcceptDrops(True)
-        self.list_files.setDragDropMode(QAbstractItemView.DropOnly)
+        self.table_files = QTableWidget(self.group_files)
+        self.table_files.setObjectName("table_files")
+        if self.table_files.columnCount() < 4:
+            self.table_files.setColumnCount(4)
+        __qtablewidgetitem_files0 = QTableWidgetItem()
+        self.table_files.setHorizontalHeaderItem(0, __qtablewidgetitem_files0)
+        __qtablewidgetitem_files1 = QTableWidgetItem()
+        self.table_files.setHorizontalHeaderItem(1, __qtablewidgetitem_files1)
+        __qtablewidgetitem_files2 = QTableWidgetItem()
+        self.table_files.setHorizontalHeaderItem(2, __qtablewidgetitem_files2)
+        __qtablewidgetitem_files3 = QTableWidgetItem()
+        self.table_files.setHorizontalHeaderItem(3, __qtablewidgetitem_files3)
+        self.table_files.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_files.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table_files.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_files.setAlternatingRowColors(True)
+        self.table_files.setAcceptDrops(True)
+        self.table_files.setDragDropMode(QAbstractItemView.DropOnly)
 
-        self.filesLayout.addWidget(self.list_files)
+        self.filesLayout.addWidget(self.table_files)
 
-        self.mainLayout.addWidget(self.group_files)
+        self.mainLayout.addWidget(self.group_files, 1)
 
         self.group_settings = QGroupBox(PDFGeneratorDialog)
         self.group_settings.setObjectName("group_settings")
@@ -369,31 +380,6 @@ class Ui_PDFGeneratorDialog:
 
         self.mainLayout.addWidget(self.group_settings)
 
-        self.group_preview = QGroupBox(PDFGeneratorDialog)
-        self.group_preview.setObjectName("group_preview")
-        self.previewLayout = QVBoxLayout(self.group_preview)
-        self.previewLayout.setObjectName("previewLayout")
-        self.table_preview = QTableWidget(self.group_preview)
-        if self.table_preview.columnCount() < 4:
-            self.table_preview.setColumnCount(4)
-        __qtablewidgetitem = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(0, __qtablewidgetitem)
-        __qtablewidgetitem1 = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(1, __qtablewidgetitem1)
-        __qtablewidgetitem2 = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(2, __qtablewidgetitem2)
-        __qtablewidgetitem3 = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(3, __qtablewidgetitem3)
-        self.table_preview.setObjectName("table_preview")
-        self.table_preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_preview.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table_preview.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table_preview.setAlternatingRowColors(True)
-
-        self.previewLayout.addWidget(self.table_preview)
-
-        self.mainLayout.addWidget(self.group_preview)
-
         self.progressLayout = QHBoxLayout()
         self.progressLayout.setObjectName("progressLayout")
         self.progress_bar = QProgressBar(PDFGeneratorDialog)
@@ -577,22 +563,19 @@ class Ui_PDFGeneratorDialog:
         self.btn_browse_dir.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u6d4f\u89c8", None)
         )
-        self.group_preview.setTitle(
-            QCoreApplication.translate("PDFGeneratorDialog", "\u9884\u89c8", None)
-        )
-        ___qtablewidgetitem = self.table_preview.horizontalHeaderItem(0)
+        ___qtablewidgetitem = self.table_files.horizontalHeaderItem(0)
         ___qtablewidgetitem.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u6e90\u6587\u4ef6", None)
         )
-        ___qtablewidgetitem1 = self.table_preview.horizontalHeaderItem(1)
+        ___qtablewidgetitem1 = self.table_files.horizontalHeaderItem(1)
         ___qtablewidgetitem1.setText(
-            QCoreApplication.translate("PDFGeneratorDialog", "\u8f93\u51fa\u6587\u4ef6", None)
+            QCoreApplication.translate("PDFGeneratorDialog", "\u8f93\u51fa", None)
         )
-        ___qtablewidgetitem2 = self.table_preview.horizontalHeaderItem(2)
+        ___qtablewidgetitem2 = self.table_files.horizontalHeaderItem(2)
         ___qtablewidgetitem2.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u5927\u5c0f", None)
         )
-        ___qtablewidgetitem3 = self.table_preview.horizontalHeaderItem(3)
+        ___qtablewidgetitem3 = self.table_files.horizontalHeaderItem(3)
         ___qtablewidgetitem3.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u72b6\u6001", None)
         )
