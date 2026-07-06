@@ -8,7 +8,6 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker  # noqa: E402
@@ -128,3 +127,30 @@ def test_worker_cancel_sets_flag(app):
     assert worker._cancel is False
     worker.cancel()
     assert worker._cancel is True
+
+
+def test_worker_invokes_engine_validation(app, monkeypatch):
+    """run() 应实例化 EngineManager 并以 force_refresh=True 调用兑现检测。
+
+    回归:此前误以类调用实例方法,验证被 try/except 静默吞掉(从未真正执行)。
+    """
+    from pathlib import Path
+
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    calls = []
+
+    def _spy(self, force_refresh=False):
+        calls.append({"force_refresh": force_refresh})
+        return {"office": False, "wps": False}
+
+    monkeypatch.setattr(EngineManager, "_detect_available_engines", _spy)
+
+    results = [_make_result("a.docx")]
+    svc = _FakeService(results)
+    worker = PdfGenerateWorker(svc, [Path("a.docx")], {})
+
+    worker.run()
+
+    assert len(calls) == 1
+    assert calls[0]["force_refresh"] is True

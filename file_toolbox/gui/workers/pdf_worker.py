@@ -12,7 +12,7 @@ worker 负责:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextlib
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -77,7 +77,7 @@ class PdfGenerateWorker(QThread, LoggableMixin):
             try:
                 from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
-                EngineManager._detect_available_engines(force_refresh=True)
+                EngineManager()._detect_available_engines(force_refresh=True)
             except Exception as e:
                 # 兑现失败不致命:auto 引擎下转换单元会逐个 ProgID 尝试
                 self.logger.warning(f"引擎兑现检测失败(继续生成): {e}")
@@ -93,8 +93,8 @@ class PdfGenerateWorker(QThread, LoggableMixin):
             self.logger.error(f"PDF 生成 worker 异常: {e}")
             self.failed.emit(str(e))
         finally:
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 self._svc.close()
             if com_inited:
-                with __import__("contextlib").suppress(Exception):
+                with contextlib.suppress(Exception):
                     pythoncom.CoUninitialize()
