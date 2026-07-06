@@ -76,21 +76,52 @@ class EngineManager(LoggableMixin):
             gc.collect()
             time.sleep(0.1)
 
+    @staticmethod
+    def _probe_registry(prog_id: str) -> bool:
+        """注册表探测:HKCR 下是否存在该 ProgID(毫秒级,不启动任何进程)。
+
+        作为快速预筛——"注册了"基本等于"装了",首次生成时再用真 Dispatch
+        兑现(见 service/worker)。非 Windows 或 winreg 不可用时返回 False。
+        """
+        try:
+            import winreg
+        except ImportError:
+            return False  # 非 Windows
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id)
+            winreg.CloseKey(key)
+            return True
+        except (FileNotFoundError, OSError):
+            return False
+
     def _detect_available_engines(self, force_refresh: bool = False) -> dict[str, bool]:
-        """检测可用的Office引擎（带缓存）"""
+        """检测可用的 Office 引擎(带缓存)。
+
+        - 默认(force_refresh=False):走注册表探测,毫秒级,不启动 Office 进程。
+        - force_refresh=True:走真 Dispatch(_try_detect),用于生成入口兑现验证。
+        """
         if EngineManager._cached_engines is not None and not force_refresh:
             return EngineManager._cached_engines
 
-        engines = {
-            "office": self._try_detect(
-                "Word.Application", lambda m: self.logger.warning(f"检测Microsoft Office Word失败: {m}")
-            ),
-            "wps": self._try_detect(
-                "KWPS.Application", lambda m: self.logger.warning(f"检测WPS Office失败: {m}")
-            ),
-        }
+        if force_refresh:
+            # 真兑现:Dispatch 进程外服务器
+            engines = {
+                "office": self._try_detect(
+                    "Word.Application",
+                    lambda m: self.logger.warning(f"检测Microsoft Office Word失败: {m}"),
+                ),
+                "wps": self._try_detect(
+                    "KWPS.Application",
+                    lambda m: self.logger.warning(f"检测WPS Office失败: {m}"),
+                ),
+            }
+        else:
+            # 快速预筛:注册表(经类访问 staticmethod,保持静态语义)
+            engines = {
+                "office": EngineManager._probe_registry("Word.Application"),
+                "wps": EngineManager._probe_registry("KWPS.Application"),
+            }
 
-        # 缓存结果
         EngineManager._cached_engines = engines
         return engines
 
