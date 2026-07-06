@@ -1,5 +1,6 @@
 """生成 PDF Tab:多格式文件批量转 PDF(支持合并、图片型)。"""
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -44,6 +45,13 @@ _SCALE_LABELS = {
 
 class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     """批量生成 PDF 对话框(作为 Tab 嵌入)。"""
+
+    # 模块级 logger(不通过 LoggableMixin 混入:该 mixin 的 @property logger 与
+    # QDialog/Qt 元类在解释器退出期 GC 交互会触发 Windows 堆损坏 0xc0000374)。
+    _module_logger = logging.getLogger(__name__)
+    # BatchDialogMixin 的 _cleanup_batch_dialog / _stop_worker 调用 self.logger,
+    # 暴露为类属性以满足该契约(无需混入 LoggableMixin,避免上述 GC 风险)。
+    logger = _module_logger
 
     SUPPORTED_FORMATS: set[str] = {
         ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
@@ -122,23 +130,23 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             self.ui.combo_scale.setCurrentIndex(default_scale_idx)
 
     def _connect_signals(self):
-        self.ui.btn_select_files.clicked.connect(lambda: self._select_files(self.ui.list_files))
-        self.ui.btn_select_folder.clicked.connect(
-            lambda: self._select_folder(self.ui.list_files)
-        )
-        self.ui.btn_clear_files.clicked.connect(lambda: self._clear_files(self.ui.list_files))
+        self.ui.btn_select_files.clicked.connect(self._on_select_files)
+        self.ui.btn_select_folder.clicked.connect(self._on_select_folder)
+        self.ui.btn_clear_files.clicked.connect(self._on_clear_files)
         self.ui.btn_browse_dir.clicked.connect(self._browse_output_dir)
         self.ui.btn_generate.clicked.connect(self._generate)
-        self.ui.btn_refresh.clicked.connect(self._refresh_engine_info)
+        self.ui.btn_refresh.clicked.connect(self._do_refresh_preview)
+        self.ui.btn_cancel.clicked.connect(self._on_cancel)
 
     def _init_engine_info(self):
         """启动时异步检测可用 Office 引擎并更新提示。
 
-        检测需 Dispatch COM 进程外服务器(Word/WPS),在无桌面/未装 Office 的环境
-        (CI、无头会话、单元测试)中可能触发 RPC 致命异常(0x800706ba/be)。故:
-        - 正常形态:经服务的异步接口在后台线程检测,回调通过 QTimer.singleShot(0,...)
-          切回主线程更新,避免冻结 UI。
-        - 测试/CI 形态:置环境变量 FILE_TOOLBOX_NO_COM_DETECT=1 跳过实时 Dispatch,
+        启动检测走**注册表探测**(force_refresh=False,毫秒级、不启动 Office 进程);
+        真正的 COM Dispatch 兑现留到生成时由 PdfGenerateWorker 以 force_refresh=True
+        完成。故:
+        - 正常形态:经服务的异步接口在后台线程做注册表探测,回调通过
+          QTimer.singleShot(0,...) 切回主线程更新,避免冻结 UI。
+        - 测试/CI 形态:置环境变量 FILE_TOOLBOX_NO_COM_DETECT=1 跳过后台探测,
           仅回退为缓存信息(无缓存时显示占位),让纯 UI 逻辑测试不触碰 COM。
         """
         import os
@@ -204,6 +212,23 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     # ---------- 业务 ----------
 
+    # ---------- 文件选择包装器(适配 table,不改 mixin 签名) ----------
+
+    def _on_select_files(self):
+        """选文件:list_widget 传 None(mixin 只更新 selected_files),再刷新预览表。"""
+        self._select_files(list_widget=None)
+        self._refresh_preview()
+
+    def _on_select_folder(self):
+        """选文件夹:同上。"""
+        self._select_folder(list_widget=None)
+        self._refresh_preview()
+
+    def _on_clear_files(self):
+        """清空:同时清 selected_files 与 table_files。"""
+        self._clear_files(table_widget=self.ui.table_files)
+        self._refresh_preview()
+
     def _browse_output_dir(self):
         d = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if d:
@@ -213,45 +238,151 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if not self.selected_files:
             QMessageBox.information(self, "提示", "请先选择文件。")
             return
+        # 避免重复启动
+        if self.worker is not None and self.worker.isRunning():
+            return
+
         config = self._build_config()
         self.ui.label_progress.setText("处理中...")
+        self.ui.progress_bar.setValue(0)
 
-        def progress(cur, total, msg):
-            self.ui.label_progress.setText(f"[{cur}/{total}] {msg}")
+        from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
 
-        results = self._svc.batch_generate(list(self.selected_files), config, progress)
+        worker = PdfGenerateWorker(
+            self._svc, list(self.selected_files), config, parent=self
+        )
+        worker.progress.connect(self._on_progress)
+        worker.finished_ok.connect(self._on_generate_ok)
+        worker.failed.connect(self._on_generate_failed)
+        self.worker = worker
+        self._set_ui_enabled(False)
+        worker.start()
+
+    def _on_progress(self, cur: int, total: int, msg: str):
+        self.ui.label_progress.setText(f"[{cur}/{total}] {msg}")
+        pct = int(cur / total * 100) if total else 0
+        self.ui.progress_bar.setValue(pct)
+
+    def _on_generate_ok(self, results: list):
         self._render_results(results)
         ok = sum(1 for r in results if r["success"])
         fail = len(results) - ok
         self.ui.label_progress.setText(f"完成: 成功 {ok}, 失败 {fail}")
         # 记录历史(PDF 生成不可逆,仅供审计/复现)
-        self._history.add_record(
-            "pdf",
-            {
-                "files": [str(f) for f in self.selected_files],
-                "success": ok,
-                "failed": fail,
-                "config": {
-                    "pdf_type": config["pdf_type"],
-                    "output_mode": config["output_mode"],
-                    "engine": config["engine"],
-                    "dpi": config["dpi"],
+        try:
+            config = self._build_config()
+            self._history.add_record(
+                "pdf",
+                {
+                    "files": [str(f) for f in self.selected_files],
+                    "success": ok,
+                    "failed": fail,
+                    "config": {
+                        "pdf_type": config["pdf_type"],
+                        "output_mode": config["output_mode"],
+                        "engine": config["engine"],
+                        "dpi": config["dpi"],
+                    },
                 },
-            },
-        )
+            )
+        except Exception as e:
+            self._module_logger.warning(f"写入历史失败: {e}", exc_info=True)
+        self._set_ui_enabled(True)
+        self.worker = None
         if fail:
             QMessageBox.warning(self, "部分失败", f"{fail} 个文件转换失败,详见预览表。")
 
-    def _render_results(self, results):
-        tbl = self.ui.table_preview
-        tbl.setRowCount(len(results))
-        for row, r in enumerate(results):
-            tbl.setItem(row, 0, QTableWidgetItem(r["source"].name))
-            tbl.setItem(row, 1, QTableWidgetItem(r["output"].name))
-            tbl.setItem(row, 2, QTableWidgetItem("成功" if r["success"] else f"失败: {r['error']}"))
+    def _on_generate_failed(self, msg: str):
+        self.ui.label_progress.setText("生成失败")
+        self._set_ui_enabled(True)
+        self.worker = None
+        QMessageBox.critical(self, "生成失败", msg)
 
-    def _refresh_engine_info(self):
-        self.ui.label_engine_info.setText(self._svc.get_engine_info(use_cache=True))
+    def _on_cancel(self):
+        if self.worker is not None and hasattr(self.worker, "cancel"):
+            self.worker.cancel()
+        self.ui.label_progress.setText("正在取消...")
+
+    def _stop_worker(self, timeout_ms: int = 30000):
+        """停止 PDF worker —— 协作式取消 + 较长等待,绝不强制 terminate。
+
+        覆盖 BatchDialogMixin._stop_worker:PDF worker 持有 COM 对象,强制 terminate
+        (QThread.terminate)会在线程仍处于 win32com/Word 调用中途时杀掉它,可能泄漏
+        Office 进程、留下未初始化 COM、甚至死锁。quit() 对无事件循环的 worker 是
+        no-op,cancel() 仅在文件间生效,故大文件转换(>3s)会让基类的 wait(3000) 超时
+        进而触发 terminate —— 必须禁用。改用 30s 宽限等待,超时仅记日志。
+
+        closeEvent → _cleanup_batch_dialog → _stop_worker 自动受益于此覆盖。
+        """
+        if self.worker and self.worker.isRunning():
+            if hasattr(self.worker, "cancel"):
+                self.worker.cancel()
+            # quit() 对无事件循环的 worker 无效,但仍调用以保持一致
+            self.worker.quit()
+            if not self.worker.wait(timeout_ms):
+                self._module_logger.warning(
+                    f"{self.__class__.__name__}: PDF worker 未能在 {timeout_ms}ms 内停止"
+                    "(可能仍在转换大文件);不强制 terminate 以避免 COM 泄漏"
+                )
+            # 不调用 self.worker.terminate() —— COM 线程强终止不安全
+        self.worker = None
+
+    # ---------- 预览 ----------
+
+    def _do_refresh_preview(self):
+        """刷新预览表(选文件/清空后由防抖定时器触发)。
+
+        把 selected_files 填入 table_files 4 列:
+          源文件 / 输出(预期 PDF 名) / 大小 / 状态(待转换)
+        合并模式输出列填合并文件名;分离模式填 {stem}.pdf。
+        """
+        from file_toolbox.common.file_utils import format_file_size
+
+        tbl = self.ui.table_files
+        tbl.setRowCount(0)  # 先清空
+        if not self.selected_files:
+            return
+
+        merge_mode = self.ui.radio_merge.isChecked()
+        merge_name = self.ui.edit_merge_filename.text().strip() or "合并文档.pdf"
+
+        tbl.setRowCount(len(self.selected_files))
+        for row, path in enumerate(self.selected_files):
+            tbl.setItem(row, 0, QTableWidgetItem(path.name))
+            # 输出列:合并模式 → 合并文件名;分离模式 → {stem}.pdf
+            out_name = merge_name if merge_mode else f"{path.stem}.pdf"
+            tbl.setItem(row, 1, QTableWidgetItem(out_name))
+            # 大小列:不存在则空
+            try:
+                size = format_file_size(path.stat().st_size)
+            except (OSError, ValueError):
+                size = ""
+            tbl.setItem(row, 2, QTableWidgetItem(size))
+            tbl.setItem(row, 3, QTableWidgetItem("待转换"))
+
+    def _render_results(self, results: list):
+        """把生成结果填入 table_files(复用预览表)。
+
+        结果数可能少于表行数(取消时):已处理的行更新为"成功"/"失败: xxx",
+        未处理的行保持"待转换"(预览态)。
+        """
+        tbl = self.ui.table_files
+        for row, r in enumerate(results):
+            if row >= tbl.rowCount():
+                break
+            tbl.item(row, 0).setText(r["source"].name)
+            tbl.item(row, 1).setText(r["output"].name)
+            status = "成功" if r["success"] else f"失败: {r['error']}"
+            tbl.item(row, 3).setText(status)
+
+    def _set_ui_enabled(self, enabled: bool):
+        """生成进行中禁用选择/生成按钮,显示取消按钮;完成则反之。"""
+        self.ui.btn_select_files.setEnabled(enabled)
+        self.ui.btn_select_folder.setEnabled(enabled)
+        self.ui.btn_clear_files.setEnabled(enabled)
+        self.ui.btn_generate.setEnabled(enabled)
+        self.ui.btn_refresh.setEnabled(enabled)
+        self.ui.btn_cancel.setVisible(not enabled)
 
     def _update_status(self):
         self.ui.label_status.setText(f"已选择 {len(self.selected_files)} 个文件")

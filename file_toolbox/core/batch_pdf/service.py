@@ -245,6 +245,7 @@ class PDFGeneratorService:
         files: list[Path],
         config: dict,
         progress_callback: Callable[[int, int, str], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> list[dict]:
         """
         批量生成PDF
@@ -253,6 +254,8 @@ class PDFGeneratorService:
             files: 文件列表
             config: 配置字典
             progress_callback: 进度回调函数 (current, total, message)
+            cancel_check: 取消检查回调(返回 True 则中断循环,已生成的结果照常返回)。
+                默认 None,行为与旧版完全一致(其它调用方零影响)。
 
         Returns:
             结果列表 [{'source': Path, 'output': Path, 'success': bool, 'error': str}, ...]
@@ -266,6 +269,10 @@ class PDFGeneratorService:
         temp_pdfs = []  # 用于合并模式
 
         for idx, file_path in enumerate(files):
+            # 取消检查:在处理下一个文件前判断(已完成的文件照常计入 results)
+            if cancel_check and cancel_check():
+                break
+
             if progress_callback:
                 progress_callback(idx, total, f"正在处理: {file_path.name}")
 
@@ -356,12 +363,18 @@ class PDFGeneratorService:
         """
         return get_file_info(file_path, SUPPORTED_FORMATS)
 
-    def close(self):
-        """关闭Office应用"""
+    def close(self, _from_del: bool = False):
+        """关闭Office应用。
+
+        _from_del:由 __del__ 调用时为 True,透传给 engine_manager.close 以跳过
+        gc.collect()——在 GC 链里再触发 gc.collect() 会与 pywin32/Windows 堆交互
+        导致 0xc0000374 堆损坏(EngineManager.__del__ 与 PDFGeneratorService.__del__
+        都可能进入此路径)。
+        """
         with contextlib.suppress(Exception):
-            self._engine_manager.close()
+            self._engine_manager.close(_from_del=_from_del)
 
     def __del__(self):
         """析构函数"""
         with contextlib.suppress(Exception):
-            self.close()
+            self.close(_from_del=True)

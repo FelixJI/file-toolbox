@@ -121,3 +121,331 @@ def test_build_config_custom_dir_includes_output_dir(dlg):
     config = dlg._build_config()
     assert config["same_as_source"] is False
     assert "output_dir" in config
+
+
+# ---------- 布局:文件选择与预览合并 ----------
+
+
+def test_no_separate_list_files_widget(dlg):
+    """list_files(QListWidget)已删除。"""
+    assert not hasattr(dlg.ui, "list_files")
+
+
+def test_no_separate_preview_group(dlg):
+    """group_preview 已删除(预览并入 group_files)。"""
+    assert not hasattr(dlg.ui, "group_preview")
+
+
+def test_table_files_exists_with_four_columns(dlg):
+    """table_files(QTableWidget)存在,4 列。"""
+    assert hasattr(dlg.ui, "table_files")
+    assert dlg.ui.table_files.columnCount() == 4
+    headers = [
+        dlg.ui.table_files.horizontalHeaderItem(i).text() for i in range(4)
+    ]
+    assert headers == ["源文件", "输出", "大小", "状态"]
+
+
+def test_table_files_supports_dnd_and_multiselect(dlg):
+    """table_files 继承原 list_files 的拖拽接收 + 多选能力。"""
+    from PySide6.QtWidgets import QAbstractItemView
+
+    tbl = dlg.ui.table_files
+    assert tbl.acceptDrops() is True
+    assert tbl.dragDropMode() == QAbstractItemView.DropOnly
+    assert tbl.selectionMode() == QAbstractItemView.ExtendedSelection
+
+
+def test_table_files_in_group_files(dlg):
+    """table_files 是 group_files 的子控件(合并后)。"""
+    assert dlg.ui.table_files.parent() is dlg.ui.group_files
+
+
+# ---------- 预览:选文件后填表 ----------
+
+
+def test_do_refresh_preview_populates_table(dlg, tmp_path):
+    """selected_files 非空 → _do_refresh_preview 填 4 列,状态=待转换。"""
+    from pathlib import Path
+
+    f1 = tmp_path / "a.docx"
+    f1.write_bytes(b"x" * 1234)
+    f2 = tmp_path / "b.xlsx"
+    f2.write_bytes(b"y" * 5678)
+    dlg.selected_files = [f1, f2]
+
+    dlg._do_refresh_preview()
+
+    tbl = dlg.ui.table_files
+    assert tbl.rowCount() == 2
+    assert tbl.item(0, 0).text() == "a.docx"
+    assert tbl.item(0, 1).text() == "a.pdf"  # 分离模式预期输出
+    assert tbl.item(0, 3).text() == "待转换"
+    assert tbl.item(1, 0).text() == "b.xlsx"
+    assert tbl.item(1, 1).text() == "b.pdf"
+
+
+def test_do_refresh_preview_merge_mode_uses_merge_filename(dlg, tmp_path):
+    """合并模式 → 输出列填合并文件名。"""
+    from pathlib import Path
+
+    f1 = tmp_path / "a.docx"
+    f1.write_bytes(b"x")
+    dlg.selected_files = [f1]
+    dlg.ui.radio_merge.setChecked(True)
+
+    dlg._do_refresh_preview()
+
+    assert dlg.ui.table_files.item(0, 1).text() == "合并文档.pdf"
+
+
+def test_do_refresh_preview_empty_files_clears_table(dlg):
+    """selected_files 空 → 表清空。"""
+    dlg.ui.table_files.setRowCount(3)  # 预置一些行
+    dlg.selected_files = []
+
+    dlg._do_refresh_preview()
+
+    assert dlg.ui.table_files.rowCount() == 0
+
+
+def test_do_refresh_preview_missing_file_size_blank(dlg, tmp_path):
+    """文件不存在 → 大小列空(不崩)。"""
+    from pathlib import Path
+
+    dlg.selected_files = [tmp_path / "no_such.docx"]
+    dlg._do_refresh_preview()  # 不应抛
+    assert dlg.ui.table_files.item(0, 2).text() == ""
+
+
+def test_clear_files_resets_table(dlg, tmp_path):
+    """_on_clear_files 清空 selected_files 与表。"""
+    from pathlib import Path
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"x")
+    dlg.selected_files = [f]
+    dlg._do_refresh_preview()
+    assert dlg.ui.table_files.rowCount() == 1
+
+    dlg._on_clear_files()
+
+    assert dlg.selected_files == []
+    assert dlg.ui.table_files.rowCount() == 0
+
+
+# ---------- 生成:worker 接入 ----------
+
+
+def test_generate_with_no_files_shows_message(dlg, monkeypatch):
+    """无文件 → 弹提示,不启动 worker。"""
+    called = []
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.information",
+        lambda *a, **k: called.append(True),
+    )
+    dlg.selected_files = []
+    dlg._generate()
+    assert called  # 弹了提示
+
+
+def test_generate_starts_worker_and_disables_ui(dlg, monkeypatch, tmp_path):
+    """有文件 → 创建 worker、start、UI 禁用、cancel 按钮显示。"""
+    from pathlib import Path
+
+    from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"x")
+    dlg.selected_files = [f]
+
+    started = []
+
+    # 用真 PdfGenerateWorker 但 mock start 避免真起线程
+    def fake_start(self):
+        started.append(True)
+
+    monkeypatch.setattr(PdfGenerateWorker, "start", fake_start)
+
+    dlg._generate()
+
+    assert started  # 启动了
+    assert dlg.worker is not None
+    assert isinstance(dlg.worker, PdfGenerateWorker)
+    assert dlg.ui.btn_generate.isEnabled() is False  # UI 禁用
+    # 对话框未 show 时 isVisible() 恒为 False;isHidden() 反映 setVisible 的真实意图
+    assert dlg.ui.btn_cancel.isHidden() is False  # 已设为可见(取消按钮亮起)
+
+
+def test_on_progress_updates_label_and_bar(dlg):
+    """_on_progress 更新 label_progress 与 progress_bar。"""
+    dlg._on_progress(2, 5, "处理中")
+    assert "2/5" in dlg.ui.label_progress.text()
+    assert dlg.ui.progress_bar.value() == 40  # 2/5
+
+
+def test_on_generate_ok_renders_results_and_restores_ui(dlg, tmp_path, monkeypatch):
+    """_on_generate_ok 填结果态 + 恢复 UI。"""
+    from pathlib import Path
+
+    # fail>0 时 _on_generate_ok 会弹 QMessageBox.warning,无事件循环会挂 → 打桩
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.warning",
+        lambda *a, **k: None,
+    )
+
+    results = [
+        {"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""},
+        {"source": Path("b.docx"), "output": Path("b.pdf"), "success": False, "error": "boom"},
+    ]
+    # 真实流程中 _generate 前 _do_refresh_preview 已填好预览行,这里同构预置
+    dlg.selected_files = [Path("a.docx"), Path("b.docx")]
+    dlg._do_refresh_preview()
+    # 预置 UI 禁用态
+    dlg.ui.btn_generate.setEnabled(False)
+    dlg.ui.btn_cancel.setVisible(True)
+
+    dlg._on_generate_ok(results)
+
+    tbl = dlg.ui.table_files
+    assert tbl.rowCount() == 2
+    assert tbl.item(0, 3).text() == "成功"
+    assert tbl.item(1, 3).text() == "失败: boom"
+    assert dlg.ui.btn_generate.isEnabled() is True  # 恢复
+    # 对话框未 show,用 isHidden() 反映 setVisible(False) 的真实意图
+    assert dlg.ui.btn_cancel.isHidden() is True  # 取消按钮隐藏
+
+
+def test_on_generate_failed_restores_ui(dlg, monkeypatch):
+    """_on_generate_failed 恢复 UI。"""
+    # _on_generate_failed 会弹 QMessageBox.critical,无事件循环会挂 → 打桩
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.critical",
+        lambda *a, **k: None,
+    )
+    dlg.ui.btn_generate.setEnabled(False)
+    dlg.ui.btn_cancel.setVisible(True)
+
+    dlg._on_generate_failed("some error")
+
+    assert dlg.ui.btn_generate.isEnabled() is True
+    assert dlg.ui.btn_cancel.isHidden() is True  # 取消按钮隐藏
+
+
+def test_render_results_keeps_pending_status_for_unprocessed(dlg, tmp_path):
+    """取消时 results 少于表行数 → 未处理的行保持"待转换"。"""
+    from pathlib import Path
+
+    # 表里 3 行(预览态),但只拿到 1 个结果(取消)
+    dlg.selected_files = [Path("a.docx"), Path("b.docx"), Path("c.docx")]
+    dlg._do_refresh_preview()
+    results = [{"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""}]
+
+    dlg._render_results(results)
+
+    tbl = dlg.ui.table_files
+    assert tbl.item(0, 3).text() == "成功"
+    assert tbl.item(1, 3).text() == "待转换"  # 未处理
+    assert tbl.item(2, 3).text() == "待转换"
+
+
+# ---------- 停止 worker:不强制 terminate(COM 安全) ----------
+
+
+class _FakeWorkerStub:
+    """纯桩(无真实线程):模拟持 COM 的 QThread 接口供 _stop_worker 调用。
+
+    用记录式 wait() 返回值模拟"在超时内停止"与"超时未停止"两种场景,避免在测试中
+    真起 OS 线程(与 Qt 进程退出 GC 交互会导致 Windows 堆损坏 0xc0000374)。
+    """
+
+    def __init__(self, wait_returns: bool = True):
+        self.cancel_called = False
+        self.quit_called = False
+        self.terminate_called = False
+        self.wait_called_with = []
+        self._running = True
+        self._wait_returns = wait_returns
+
+    def isRunning(self):
+        return self._running
+
+    def cancel(self):
+        self.cancel_called = True
+        self._running = False  # 协作式取消后视为停止
+
+    def quit(self):
+        self.quit_called = True
+
+    def wait(self, timeout_ms):
+        self.wait_called_with.append(timeout_ms)
+        return self._wait_returns  # 由用例决定是否"及时停止"
+
+    def terminate(self):
+        self.terminate_called = True  # 不应被调用
+
+
+def test_stop_worker_does_not_terminate_com_worker(dlg):
+    """回归:PDF worker 持 COM,_stop_worker 必须协作式取消,绝不 terminate。
+
+    验证对正在运行的 PDF worker:
+      - cancel() 被调用(协作式取消);
+      - quit() 被调用(保持一致);
+      - terminate() 绝不被调用(避免 COM 泄漏/死锁)。
+    """
+    worker = _FakeWorkerStub(wait_returns=True)  # 在超时内停止
+    dlg.worker = worker
+
+    dlg._stop_worker(timeout_ms=2000)
+
+    assert worker.cancel_called, "_stop_worker 应调用 cancel()"
+    assert worker.quit_called, "_stop_worker 应调用 quit()"
+    assert not worker.terminate_called, "_stop_worker 绝不应调用 terminate()"
+    assert worker.wait_called_with == [2000]
+    assert dlg.worker is None
+
+
+def test_stop_worker_logs_warning_on_timeout_without_terminate(dlg, caplog):
+    """超时未停止时仅记 warning,绝不 terminate。"""
+    import logging
+
+    worker = _FakeWorkerStub(wait_returns=False)  # 模拟未在超时内停止
+    dlg.worker = worker
+
+    with caplog.at_level(logging.WARNING, logger="file_toolbox.gui.dialogs.pdf_tab"):
+        dlg._stop_worker(timeout_ms=100)
+
+    assert worker.cancel_called
+    assert not worker.terminate_called, "超时也不应 terminate"
+    assert any(
+        "未能" in r.message or "terminate" in r.message for r in caplog.records
+    ), "超时应记录 warning"
+    assert dlg.worker is None
+
+
+def test_stop_worker_noop_when_no_worker(dlg):
+    """无 worker 或已停止 → 不抛、不调任何接口。"""
+    dlg.worker = None
+    dlg._stop_worker()  # 不应抛
+    assert dlg.worker is None
+
+    stopped = _FakeWorkerStub(wait_returns=True)
+    stopped._running = False  # 已停止
+    dlg.worker = stopped
+    dlg._stop_worker()
+    assert not stopped.cancel_called  # isRunning()=False 分支不调 cancel
+
+
+def test_dialog_exposes_logger_for_mixin_contract(dlg):
+    """回归:BatchDialogMixin._cleanup_batch_dialog / _stop_worker 调用 self.logger,
+    PDFGeneratorDialog 未混入 LoggableMixin,必须自行暴露 logger,否则 closeEvent
+    会在清理中途抛 AttributeError。
+    """
+    import logging
+
+    assert hasattr(dlg, "logger")
+    assert isinstance(dlg.logger, logging.Logger)
+    # _cleanup_batch_dialog 不应抛(它内部会 self.logger.debug)
+    dlg._cleanup_batch_dialog()
+
+    assert dlg.worker is None
