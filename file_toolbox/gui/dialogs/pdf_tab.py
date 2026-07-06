@@ -49,6 +49,9 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     # 模块级 logger(不通过 LoggableMixin 混入:该 mixin 的 @property logger 与
     # QDialog/Qt 元类在解释器退出期 GC 交互会触发 Windows 堆损坏 0xc0000374)。
     _module_logger = logging.getLogger(__name__)
+    # BatchDialogMixin 的 _cleanup_batch_dialog / _stop_worker 调用 self.logger,
+    # 暴露为类属性以满足该契约(无需混入 LoggableMixin,避免上述 GC 风险)。
+    logger = _module_logger
 
     SUPPORTED_FORMATS: set[str] = {
         ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",

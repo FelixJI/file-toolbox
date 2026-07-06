@@ -434,4 +434,18 @@ def test_stop_worker_noop_when_no_worker(dlg):
     dlg.worker = stopped
     dlg._stop_worker()
     assert not stopped.cancel_called  # isRunning()=False 分支不调 cancel
+
+
+def test_dialog_exposes_logger_for_mixin_contract(dlg):
+    """回归:BatchDialogMixin._cleanup_batch_dialog / _stop_worker 调用 self.logger,
+    PDFGeneratorDialog 未混入 LoggableMixin,必须自行暴露 logger,否则 closeEvent
+    会在清理中途抛 AttributeError。
+    """
+    import logging
+
+    assert hasattr(dlg, "logger")
+    assert isinstance(dlg.logger, logging.Logger)
+    # _cleanup_batch_dialog 不应抛(它内部会 self.logger.debug)
+    dlg._cleanup_batch_dialog()
+
     assert dlg.worker is None

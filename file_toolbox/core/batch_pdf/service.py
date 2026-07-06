@@ -363,12 +363,18 @@ class PDFGeneratorService:
         """
         return get_file_info(file_path, SUPPORTED_FORMATS)
 
-    def close(self):
-        """关闭Office应用"""
+    def close(self, _from_del: bool = False):
+        """关闭Office应用。
+
+        _from_del:由 __del__ 调用时为 True,透传给 engine_manager.close 以跳过
+        gc.collect()——在 GC 链里再触发 gc.collect() 会与 pywin32/Windows 堆交互
+        导致 0xc0000374 堆损坏(EngineManager.__del__ 与 PDFGeneratorService.__del__
+        都可能进入此路径)。
+        """
         with contextlib.suppress(Exception):
-            self._engine_manager.close()
+            self._engine_manager.close(_from_del=_from_del)
 
     def __del__(self):
         """析构函数"""
         with contextlib.suppress(Exception):
-            self.close()
+            self.close(_from_del=True)
