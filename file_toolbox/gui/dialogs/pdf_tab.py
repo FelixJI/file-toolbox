@@ -1,5 +1,6 @@
 """生成 PDF Tab:多格式文件批量转 PDF(支持合并、图片型)。"""
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
@@ -44,6 +45,10 @@ _SCALE_LABELS = {
 
 class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     """批量生成 PDF 对话框(作为 Tab 嵌入)。"""
+
+    # 模块级 logger(不通过 LoggableMixin 混入:该 mixin 的 @property logger 与
+    # QDialog/Qt 元类在解释器退出期 GC 交互会触发 Windows 堆损坏 0xc0000374)。
+    _module_logger = logging.getLogger(__name__)
 
     SUPPORTED_FORMATS: set[str] = {
         ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
@@ -133,11 +138,12 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     def _init_engine_info(self):
         """启动时异步检测可用 Office 引擎并更新提示。
 
-        检测需 Dispatch COM 进程外服务器(Word/WPS),在无桌面/未装 Office 的环境
-        (CI、无头会话、单元测试)中可能触发 RPC 致命异常(0x800706ba/be)。故:
-        - 正常形态:经服务的异步接口在后台线程检测,回调通过 QTimer.singleShot(0,...)
-          切回主线程更新,避免冻结 UI。
-        - 测试/CI 形态:置环境变量 FILE_TOOLBOX_NO_COM_DETECT=1 跳过实时 Dispatch,
+        启动检测走**注册表探测**(force_refresh=False,毫秒级、不启动 Office 进程);
+        真正的 COM Dispatch 兑现留到生成时由 PdfGenerateWorker 以 force_refresh=True
+        完成。故:
+        - 正常形态:经服务的异步接口在后台线程做注册表探测,回调通过
+          QTimer.singleShot(0,...) 切回主线程更新,避免冻结 UI。
+        - 测试/CI 形态:置环境变量 FILE_TOOLBOX_NO_COM_DETECT=1 跳过后台探测,
           仅回退为缓存信息(无缓存时显示占位),让纯 UI 逻辑测试不触碰 COM。
         """
         import os
@@ -276,8 +282,8 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
                     },
                 },
             )
-        except Exception:
-            pass  # 历史写入失败不影响主流程
+        except Exception as e:
+            self._module_logger.warning(f"写入历史失败: {e}", exc_info=True)
         self._set_ui_enabled(True)
         self.worker = None
         if fail:
@@ -293,6 +299,30 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if self.worker is not None and hasattr(self.worker, "cancel"):
             self.worker.cancel()
         self.ui.label_progress.setText("正在取消...")
+
+    def _stop_worker(self, timeout_ms: int = 30000):
+        """停止 PDF worker —— 协作式取消 + 较长等待,绝不强制 terminate。
+
+        覆盖 BatchDialogMixin._stop_worker:PDF worker 持有 COM 对象,强制 terminate
+        (QThread.terminate)会在线程仍处于 win32com/Word 调用中途时杀掉它,可能泄漏
+        Office 进程、留下未初始化 COM、甚至死锁。quit() 对无事件循环的 worker 是
+        no-op,cancel() 仅在文件间生效,故大文件转换(>3s)会让基类的 wait(3000) 超时
+        进而触发 terminate —— 必须禁用。改用 30s 宽限等待,超时仅记日志。
+
+        closeEvent → _cleanup_batch_dialog → _stop_worker 自动受益于此覆盖。
+        """
+        if self.worker and self.worker.isRunning():
+            if hasattr(self.worker, "cancel"):
+                self.worker.cancel()
+            # quit() 对无事件循环的 worker 无效,但仍调用以保持一致
+            self.worker.quit()
+            if not self.worker.wait(timeout_ms):
+                self._module_logger.warning(
+                    f"{self.__class__.__name__}: PDF worker 未能在 {timeout_ms}ms 内停止"
+                    "(可能仍在转换大文件);不强制 terminate 以避免 COM 泄漏"
+                )
+            # 不调用 self.worker.terminate() —— COM 线程强终止不安全
+        self.worker = None
 
     # ---------- 预览 ----------
 

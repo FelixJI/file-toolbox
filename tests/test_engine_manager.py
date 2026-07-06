@@ -78,3 +78,37 @@ def test_detect_force_refresh_uses_real_dispatch(monkeypatch):
 
     result = em._detect_available_engines(force_refresh=True)
     assert result == {"office": True, "wps": True}
+
+
+def test_async_detect_body_uses_registry_probe_not_dispatch(monkeypatch):
+    """回归:启动异步检测必须走注册表(force_refresh=False),不应触发真 Dispatch。
+
+    此前 detect_engines_async 的 worker 以 force_refresh=True 调用,每次打开对话框都
+    Dispatch Word/WPS,违背注册表快速探测的设计目标。worker 体已抽到
+    _async_detect_body,可直接同步断言。
+    """
+    EngineManager._cached_engines = None  # 清缓存避免直接命中
+    em = EngineManager()
+
+    detect_calls = []
+    try_calls = []
+
+    def _spy_detect(self, force_refresh=False):
+        detect_calls.append(force_refresh)
+        return {"office": True, "wps": False}
+
+    monkeypatch.setattr(EngineManager, "_detect_available_engines", _spy_detect)
+    monkeypatch.setattr(
+        EngineManager,
+        "_try_detect",
+        lambda *a, **k: try_calls.append(a) or pytest.fail("启动检测不应走真 Dispatch"),
+    )
+
+    # 回调应被调用,参数为 get_engine_info(use_cache=True) 的返回字符串
+    captured = {}
+    em._async_detect_body(callback=lambda info: captured.setdefault("info", info))
+
+    assert len(detect_calls) == 1
+    assert detect_calls[0] is False  # 关键:force_refresh=False(注册表探测)
+    assert try_calls == []  # 未触发真 Dispatch
+    assert "info" in captured and isinstance(captured["info"], str)

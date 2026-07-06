@@ -347,3 +347,91 @@ def test_render_results_keeps_pending_status_for_unprocessed(dlg, tmp_path):
     assert tbl.item(0, 3).text() == "成功"
     assert tbl.item(1, 3).text() == "待转换"  # 未处理
     assert tbl.item(2, 3).text() == "待转换"
+
+
+# ---------- 停止 worker:不强制 terminate(COM 安全) ----------
+
+
+class _FakeWorkerStub:
+    """纯桩(无真实线程):模拟持 COM 的 QThread 接口供 _stop_worker 调用。
+
+    用记录式 wait() 返回值模拟"在超时内停止"与"超时未停止"两种场景,避免在测试中
+    真起 OS 线程(与 Qt 进程退出 GC 交互会导致 Windows 堆损坏 0xc0000374)。
+    """
+
+    def __init__(self, wait_returns: bool = True):
+        self.cancel_called = False
+        self.quit_called = False
+        self.terminate_called = False
+        self.wait_called_with = []
+        self._running = True
+        self._wait_returns = wait_returns
+
+    def isRunning(self):
+        return self._running
+
+    def cancel(self):
+        self.cancel_called = True
+        self._running = False  # 协作式取消后视为停止
+
+    def quit(self):
+        self.quit_called = True
+
+    def wait(self, timeout_ms):
+        self.wait_called_with.append(timeout_ms)
+        return self._wait_returns  # 由用例决定是否"及时停止"
+
+    def terminate(self):
+        self.terminate_called = True  # 不应被调用
+
+
+def test_stop_worker_does_not_terminate_com_worker(dlg):
+    """回归:PDF worker 持 COM,_stop_worker 必须协作式取消,绝不 terminate。
+
+    验证对正在运行的 PDF worker:
+      - cancel() 被调用(协作式取消);
+      - quit() 被调用(保持一致);
+      - terminate() 绝不被调用(避免 COM 泄漏/死锁)。
+    """
+    worker = _FakeWorkerStub(wait_returns=True)  # 在超时内停止
+    dlg.worker = worker
+
+    dlg._stop_worker(timeout_ms=2000)
+
+    assert worker.cancel_called, "_stop_worker 应调用 cancel()"
+    assert worker.quit_called, "_stop_worker 应调用 quit()"
+    assert not worker.terminate_called, "_stop_worker 绝不应调用 terminate()"
+    assert worker.wait_called_with == [2000]
+    assert dlg.worker is None
+
+
+def test_stop_worker_logs_warning_on_timeout_without_terminate(dlg, caplog):
+    """超时未停止时仅记 warning,绝不 terminate。"""
+    import logging
+
+    worker = _FakeWorkerStub(wait_returns=False)  # 模拟未在超时内停止
+    dlg.worker = worker
+
+    with caplog.at_level(logging.WARNING, logger="file_toolbox.gui.dialogs.pdf_tab"):
+        dlg._stop_worker(timeout_ms=100)
+
+    assert worker.cancel_called
+    assert not worker.terminate_called, "超时也不应 terminate"
+    assert any(
+        "未能" in r.message or "terminate" in r.message for r in caplog.records
+    ), "超时应记录 warning"
+    assert dlg.worker is None
+
+
+def test_stop_worker_noop_when_no_worker(dlg):
+    """无 worker 或已停止 → 不抛、不调任何接口。"""
+    dlg.worker = None
+    dlg._stop_worker()  # 不应抛
+    assert dlg.worker is None
+
+    stopped = _FakeWorkerStub(wait_returns=True)
+    stopped._running = False  # 已停止
+    dlg.worker = stopped
+    dlg._stop_worker()
+    assert not stopped.cancel_called  # isRunning()=False 分支不调 cancel
+    assert dlg.worker is None

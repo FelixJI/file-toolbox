@@ -146,31 +146,57 @@ class EngineManager(LoggableMixin):
     def detect_engines_async(self, callback=None):
         """异步检测引擎(在后台守护线程执行,不阻塞调用线程)。
 
-        检测需 Dispatch COM 进程外服务器(Word/WPS),既慢又可能在没有桌面/Office
-        的环境(CI、无头会话)中失败,故必须在后台线程运行:既避免冻结 GUI 主线程,
-        也让调用方(含测试)不必在调用线程触发实时 COM。回调在该后台线程触发,调用方
-        应自行切回主线程更新 UI(pdf_tab 已用 QTimer.singleShot(0,...) 处理)。
+        启动检测走**注册表探测**(force_refresh=False):毫秒级、不启动任何 Office
+        进程,仅查 HKCR 下是否注册了 ProgID。真正的 COM Dispatch "兑现"留到生成时
+        (PdfGenerateWorker.run() 会以 force_refresh=True 再验一次)。这避免了每次
+        打开对话框都 Dispatch Word/WPS 导致的启动卡顿与进程泄漏(本特性核心目标)。
 
-        COM 注意:win32com 要求使用它的每个线程先 CoInitialize,否则进程退出时
-        抛 CO_E_NOTINITIALIZED(0x800401f0)致命异常。故 worker 入口/出口配对调用。
+        把检测放后台线程是为了:既不冻结 GUI 主线程,也让回调异步切回主线程
+        (pdf_tab 用 QTimer.singleShot(0,...) 处理)。
+
+        COM 注意:即便走注册表探测,此线程也保留 CoInitialize 配对(见 _run_async_detect),
+        以防未来扩展为真 Dispatch;win32com 要求使用它的每个线程先 CoInitialize,否则进程
+        退出时抛 CO_E_NOTINITIALIZED(0x800401f0)致命异常。
+
+        worker 体被抽到 _async_detect_body(callback),便于测试同步断言(无需 COM)。
         """
         import threading
 
-        def _worker():
+        # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
+        threading.Thread(
+            target=self._run_async_detect, args=(callback,), daemon=True
+        ).start()
+
+    def _run_async_detect(self, callback=None):
+        """后台线程入口:CoInitialize 配对 + 调用 _async_detect_body。"""
+        com_inited = False
+        try:
             import pythoncom
 
             pythoncom.CoInitialize()
-            try:
-                self._detect_available_engines(force_refresh=True)
-                if callback:
-                    callback(self.get_engine_info(use_cache=True))
-            except Exception as e:  # COM/线程异常不应波及调用线程
-                self.logger.warning(f"异步引擎检测失败: {e}")
-            finally:
-                pythoncom.CoUninitialize()
+            com_inited = True
+        except Exception:
+            com_inited = False  # 非 Windows / 无 pywin32
+        try:
+            self._async_detect_body(callback)
+        finally:
+            if com_inited:
+                with contextlib.suppress(Exception):
+                    pythoncom.CoUninitialize()
 
-        # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
-        threading.Thread(target=_worker, daemon=True).start()
+    def _async_detect_body(self, callback=None):
+        """detect_engines_async 的可测核心体(同步可调用,不依赖 COM)。
+
+        - 默认走注册表探测(force_refresh=False),不启动 Office。
+        - 真正的 COM Dispatch 兑现由 PdfGenerateWorker.run() 在生成时以
+          force_refresh=True 完成。
+        """
+        try:
+            self._detect_available_engines()  # force_refresh=False → 注册表探测
+            if callback:
+                callback(self.get_engine_info(use_cache=True))
+        except Exception as e:  # COM/线程异常不应波及调用线程
+            self.logger.warning(f"异步引擎检测失败: {e}")
 
     # ------------------------------------------------------------------ #
     #  应用初始化(配置驱动)
@@ -247,8 +273,12 @@ class EngineManager(LoggableMixin):
         """初始化PowerPoint应用，支持引擎切换"""
         return self._init_office_app("ppt", engine)
 
-    def close(self):
-        """关闭Office应用"""
+    def close(self, _from_del: bool = False):
+        """关闭Office应用。
+
+        _from_del:由 __del__ 调用时为 True,此时跳过末尾的 gc.collect()——在 GC 链中
+        再触发 gc.collect() 会与 pywin32/Windows 堆交互导致 0xc0000374 堆损坏。
+        """
         import gc
         import time
 
@@ -262,11 +292,13 @@ class EngineManager(LoggableMixin):
                 setattr(self, spec.app_attr, None)
                 setattr(self, spec.engine_attr, None)
 
-        # 强制垃圾回收,确保COM对象被释放
-        gc.collect()
-        time.sleep(0.1)
+        # 强制垃圾回收,确保COM对象被释放。
+        # 注意:不可在 __del__ 触发的 GC 链里调用——Windows + pywin32 下会堆损坏。
+        if not _from_del:
+            gc.collect()
+            time.sleep(0.1)
 
     def __del__(self):
         """析构函数"""
         with contextlib.suppress(Exception):
-            self.close()
+            self.close(_from_del=True)

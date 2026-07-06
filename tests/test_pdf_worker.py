@@ -169,3 +169,59 @@ def test_worker_invokes_engine_validation(app, monkeypatch):
 
     assert len(calls) == 1
     assert calls[0]["force_refresh"] is True
+
+
+def test_worker_start_delivers_finished_ok_across_threads(app):
+    """集成:真正 worker.start() 后台线程 → finished_ok 信号跨线程投递回主线程。
+
+    覆盖真实 QThread 启动 + 跨线程信号传递路径(区别于同步 run() 测试)。用
+    _FakeService 即时返回,worker 应快速完成并经 finished_ok(queued connection)
+    把结果送到主线程的槽。用 slot 捕获 + worker.wait + processEvents 轮询投递。
+    """
+    from pathlib import Path
+
+    results = [_make_result("a.docx"), _make_result("b.docx")]
+    svc = _FakeService(results)
+    worker = PdfGenerateWorker(svc, [Path("a.docx"), Path("b.docx")], {})
+
+    captured = {}
+    worker.finished_ok.connect(lambda r: captured.setdefault("ok", r))
+    failed = []
+    worker.failed.connect(lambda m: failed.append(m))
+
+    worker.start()
+    # 后台线程 run() 会 emit finished_ok(queued)然后返回;wait 阻塞至线程结束
+    finished = worker.wait(5000)
+    assert finished, "worker 未在 5s 内结束"
+    # 跨线程 queued 信号需主线程事件循环处理;手动 flush
+    app.processEvents()
+    if "ok" not in captured:
+        # 极少数情况需再多轮一次
+        app.processEvents()
+
+    assert captured.get("ok") == results, "finished_ok 应投递 service 返回值到主线程槽"
+    assert failed == [], "不应触发 failed"
+    assert svc.closed is True
+
+
+def test_worker_start_delivers_failed_across_threads(app):
+    """集成:worker.start() 异常路径 → failed 信号跨线程投递。"""
+    from pathlib import Path
+
+    svc = _FakeService([], error=RuntimeError("cross-thread boom"))
+    worker = PdfGenerateWorker(svc, [Path("a.docx")], {})
+
+    captured = {}
+    worker.failed.connect(lambda m: captured.setdefault("fail", m))
+    ok = []
+    worker.finished_ok.connect(lambda r: ok.append(r))
+
+    worker.start()
+    assert worker.wait(5000), "worker 未在 5s 内结束"
+    app.processEvents()
+    if "fail" not in captured:
+        app.processEvents()
+
+    assert "cross-thread boom" in captured.get("fail", "")
+    assert ok == []
+    assert svc.closed is True  # finally 仍 close
