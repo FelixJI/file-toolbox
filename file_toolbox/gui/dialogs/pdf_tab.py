@@ -122,14 +122,12 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             self.ui.combo_scale.setCurrentIndex(default_scale_idx)
 
     def _connect_signals(self):
-        self.ui.btn_select_files.clicked.connect(lambda: self._select_files(self.ui.list_files))
-        self.ui.btn_select_folder.clicked.connect(
-            lambda: self._select_folder(self.ui.list_files)
-        )
-        self.ui.btn_clear_files.clicked.connect(lambda: self._clear_files(self.ui.list_files))
+        self.ui.btn_select_files.clicked.connect(self._on_select_files)
+        self.ui.btn_select_folder.clicked.connect(self._on_select_folder)
+        self.ui.btn_clear_files.clicked.connect(self._on_clear_files)
         self.ui.btn_browse_dir.clicked.connect(self._browse_output_dir)
         self.ui.btn_generate.clicked.connect(self._generate)
-        self.ui.btn_refresh.clicked.connect(self._refresh_engine_info)
+        self.ui.btn_refresh.clicked.connect(self._do_refresh_preview)
 
     def _init_engine_info(self):
         """启动时异步检测可用 Office 引擎并更新提示。
@@ -204,6 +202,23 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     # ---------- 业务 ----------
 
+    # ---------- 文件选择包装器(适配 table,不改 mixin 签名) ----------
+
+    def _on_select_files(self):
+        """选文件:list_widget 传 None(mixin 只更新 selected_files),再刷新预览表。"""
+        self._select_files(list_widget=None)
+        self._refresh_preview()
+
+    def _on_select_folder(self):
+        """选文件夹:同上。"""
+        self._select_folder(list_widget=None)
+        self._refresh_preview()
+
+    def _on_clear_files(self):
+        """清空:同时清 selected_files 与 table_files。"""
+        self._clear_files(table_widget=self.ui.table_files)
+        self._refresh_preview()
+
     def _browse_output_dir(self):
         d = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if d:
@@ -242,16 +257,46 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if fail:
             QMessageBox.warning(self, "部分失败", f"{fail} 个文件转换失败,详见预览表。")
 
+    # ---------- 预览 ----------
+
+    def _do_refresh_preview(self):
+        """刷新预览表(选文件/清空后由防抖定时器触发)。
+
+        把 selected_files 填入 table_files 4 列:
+          源文件 / 输出(预期 PDF 名) / 大小 / 状态(待转换)
+        合并模式输出列填合并文件名;分离模式填 {stem}.pdf。
+        """
+        from file_toolbox.common.file_utils import format_file_size
+
+        tbl = self.ui.table_files
+        tbl.setRowCount(0)  # 先清空
+        if not self.selected_files:
+            return
+
+        merge_mode = self.ui.radio_merge.isChecked()
+        merge_name = self.ui.edit_merge_filename.text().strip() or "合并文档.pdf"
+
+        tbl.setRowCount(len(self.selected_files))
+        for row, path in enumerate(self.selected_files):
+            tbl.setItem(row, 0, QTableWidgetItem(path.name))
+            # 输出列:合并模式 → 合并文件名;分离模式 → {stem}.pdf
+            out_name = merge_name if merge_mode else f"{path.stem}.pdf"
+            tbl.setItem(row, 1, QTableWidgetItem(out_name))
+            # 大小列:不存在则空
+            try:
+                size = format_file_size(path.stat().st_size)
+            except (OSError, ValueError):
+                size = ""
+            tbl.setItem(row, 2, QTableWidgetItem(size))
+            tbl.setItem(row, 3, QTableWidgetItem("待转换"))
+
     def _render_results(self, results):
-        tbl = self.ui.table_preview
+        tbl = self.ui.table_files
         tbl.setRowCount(len(results))
         for row, r in enumerate(results):
             tbl.setItem(row, 0, QTableWidgetItem(r["source"].name))
             tbl.setItem(row, 1, QTableWidgetItem(r["output"].name))
             tbl.setItem(row, 2, QTableWidgetItem("成功" if r["success"] else f"失败: {r['error']}"))
-
-    def _refresh_engine_info(self):
-        self.ui.label_engine_info.setText(self._svc.get_engine_info(use_cache=True))
 
     def _update_status(self):
         self.ui.label_status.setText(f"已选择 {len(self.selected_files)} 个文件")

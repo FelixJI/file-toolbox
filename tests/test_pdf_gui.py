@@ -159,3 +159,76 @@ def test_table_files_supports_dnd_and_multiselect(dlg):
 def test_table_files_in_group_files(dlg):
     """table_files 是 group_files 的子控件(合并后)。"""
     assert dlg.ui.table_files.parent() is dlg.ui.group_files
+
+
+# ---------- 预览:选文件后填表 ----------
+
+
+def test_do_refresh_preview_populates_table(dlg, tmp_path):
+    """selected_files 非空 → _do_refresh_preview 填 4 列,状态=待转换。"""
+    from pathlib import Path
+
+    f1 = tmp_path / "a.docx"
+    f1.write_bytes(b"x" * 1234)
+    f2 = tmp_path / "b.xlsx"
+    f2.write_bytes(b"y" * 5678)
+    dlg.selected_files = [f1, f2]
+
+    dlg._do_refresh_preview()
+
+    tbl = dlg.ui.table_files
+    assert tbl.rowCount() == 2
+    assert tbl.item(0, 0).text() == "a.docx"
+    assert tbl.item(0, 1).text() == "a.pdf"  # 分离模式预期输出
+    assert tbl.item(0, 3).text() == "待转换"
+    assert tbl.item(1, 0).text() == "b.xlsx"
+    assert tbl.item(1, 1).text() == "b.pdf"
+
+
+def test_do_refresh_preview_merge_mode_uses_merge_filename(dlg, tmp_path):
+    """合并模式 → 输出列填合并文件名。"""
+    from pathlib import Path
+
+    f1 = tmp_path / "a.docx"
+    f1.write_bytes(b"x")
+    dlg.selected_files = [f1]
+    dlg.ui.radio_merge.setChecked(True)
+
+    dlg._do_refresh_preview()
+
+    assert dlg.ui.table_files.item(0, 1).text() == "合并文档.pdf"
+
+
+def test_do_refresh_preview_empty_files_clears_table(dlg):
+    """selected_files 空 → 表清空。"""
+    dlg.ui.table_files.setRowCount(3)  # 预置一些行
+    dlg.selected_files = []
+
+    dlg._do_refresh_preview()
+
+    assert dlg.ui.table_files.rowCount() == 0
+
+
+def test_do_refresh_preview_missing_file_size_blank(dlg, tmp_path):
+    """文件不存在 → 大小列空(不崩)。"""
+    from pathlib import Path
+
+    dlg.selected_files = [tmp_path / "no_such.docx"]
+    dlg._do_refresh_preview()  # 不应抛
+    assert dlg.ui.table_files.item(0, 2).text() == ""
+
+
+def test_clear_files_resets_table(dlg, tmp_path):
+    """_on_clear_files 清空 selected_files 与表。"""
+    from pathlib import Path
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"x")
+    dlg.selected_files = [f]
+    dlg._do_refresh_preview()
+    assert dlg.ui.table_files.rowCount() == 1
+
+    dlg._on_clear_files()
+
+    assert dlg.selected_files == []
+    assert dlg.ui.table_files.rowCount() == 0
