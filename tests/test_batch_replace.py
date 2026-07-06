@@ -88,7 +88,7 @@ def test_service_validate_bad_regex():
 
 
 def test_get_office_pids_uses_create_no_window_on_windows(monkeypatch):
-    """Windows GUI 进程(Nuitka 打包的 exe)起 tasklist 时必须带 CREATE_NO_WINDOW,
+    """Windows GUI 进程(打包后的 exe)起 tasklist 时必须带 CREATE_NO_WINDOW,
     否则会闪黑框(根因:service.py 的 _no_window_flags)。
 
     断言:win32 平台下,_get_office_pids 调 subprocess.run 时 kwargs 含

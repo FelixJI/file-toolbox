@@ -1,6 +1,6 @@
 [project]
 name = "file-toolbox"
-version = "0.1.4"
+version = "0.1.5"
 description = "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 gui = ["PySide6>=6.5"]
 invoice = ["pdfplumber>=0.11", "openpyxl>=3.1"]
-dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5", "mypy>=1.10", "reportlab>=4.0", "packaging>=24.0"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.5", "mypy>=1.10", "reportlab>=4.0", "packaging>=24.0", "pyinstaller>=6.0"]
 
 [project.scripts]
 file-toolbox = "file_toolbox.cli.main:main"
