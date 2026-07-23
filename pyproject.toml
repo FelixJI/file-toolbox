@@ -64,3 +64,18 @@ ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["file_toolbox"]
+omit = [
+    "file_toolbox/gui/generated/*",
+    "file_toolbox/__main__.py",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
