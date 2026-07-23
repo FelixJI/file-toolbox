@@ -30,6 +30,7 @@ logs/
 .cody/
 .gemini/
 .copilot/
+.zcode/
 
 # 设计/计划文档,仅本地使用
 docs/
