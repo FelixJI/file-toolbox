@@ -41,7 +41,7 @@ class TextHandler:
             with open(file_path, "rb") as f:
                 raw_data = f.read()
             detected = chardet.detect(raw_data)
-            encoding = detected.get("encoding", "utf-8")
+            encoding: str | None = detected.get("encoding", "utf-8")  # type: ignore[no-redef]
             if encoding:
                 return raw_data.decode(encoding)
         except Exception:

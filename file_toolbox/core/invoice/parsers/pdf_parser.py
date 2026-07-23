@@ -41,7 +41,7 @@ _HEADER_KEYWORDS = ("项目名称", "规格型号")
 _TOTAL_KEYWORDS = ("合计",)
 
 # 表头单字标题 -> 所属列(用于把"单"+"位"这种拆字表头归并成一列)
-_SINGLE_CHAR_COL: dict[str, str] = {
+_SINGLE_CHAR_COL: dict[str, str | None] = {
     "单": None,  # 候选 unit/unit_price,靠后续字确定
     "位": "unit",
     "数": None,  # 候选 quantity

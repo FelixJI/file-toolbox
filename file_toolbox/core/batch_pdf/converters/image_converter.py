@@ -117,7 +117,7 @@ class ImageConverter:
             from PIL import Image
 
             # 打开图片
-            img = Image.open(file_path)
+            img: Image.Image = Image.open(file_path)
 
             # 转换为RGB（PDF不支持RGBA）
             if img.mode in ("RGBA", "LA", "P"):

@@ -47,11 +47,11 @@ def convert_pdf_to_image_pdf(
         # 尝试多种导入方式（兼容不同PyMuPDF版本）
         fitz = None
         with contextlib.suppress(ImportError):
-            import fitz
+            import fitz  # type: ignore[no-redef]
 
         if fitz is None:  # pragma: no cover - fitz 在依赖中已安装,此分支在测试环境不可达
             with contextlib.suppress(ImportError):
-                import pymupdf as fitz
+                import pymupdf as fitz  # type: ignore[assignment]
 
         if fitz is None:  # pragma: no cover - 同上,fitz 已安装
             return (
@@ -211,11 +211,11 @@ def merge_pdfs(
         # 尝试多种导入方式（兼容不同PyMuPDF版本）
         fitz = None
         with contextlib.suppress(ImportError):
-            import fitz
+            import fitz  # type: ignore[no-redef]
 
         if fitz is None:  # pragma: no cover - fitz 在依赖中已安装,此分支在测试环境不可达
             with contextlib.suppress(ImportError):
-                import pymupdf as fitz
+                import pymupdf as fitz  # type: ignore[assignment]
 
         if fitz is None:  # pragma: no cover - 同上,fitz 已安装
             return (

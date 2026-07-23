@@ -21,7 +21,7 @@ class RenameTemplateService:
         if config_path is None:
             config_path = get_data_dir() / "rename_templates.json"
         self.config_path = Path(config_path)
-        self._templates = None  # 延迟加载，使用时才读取
+        self._templates: dict[str, dict] | None = None  # 延迟加载，使用时才读取
 
     @property
     def templates(self) -> dict[str, dict]:

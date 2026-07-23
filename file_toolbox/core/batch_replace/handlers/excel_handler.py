@@ -160,7 +160,7 @@ class ExcelHandler(LoggableMixin):
         import pythoncom
         import win32com.client
 
-        result = {"success_count": 0, "total_replacements": 0, "errors": []}
+        result: dict = {"success_count": 0, "total_replacements": 0, "errors": []}
 
         if not files:
             return result

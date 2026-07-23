@@ -91,7 +91,7 @@ class FolderCreatorService(LoggableMixin):
             lines = text.strip().split("\n")
             folder_structure = []
             invalid_folders = []
-            prev_row = []  # 上一行的非空值
+            prev_row: list[str] = []  # 上一行的非空值
 
             for line_num, line in enumerate(lines, start=1):
                 if not line.strip():
