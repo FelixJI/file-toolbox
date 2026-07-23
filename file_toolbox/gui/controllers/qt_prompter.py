@@ -26,7 +26,7 @@ class QInputDialogPrompter:
         self, title: str, label: str, value: int = 0, minimum: int = 0, maximum: int = 99
     ) -> int:
         result, ok = QInputDialog.getInt(
-            self._parent, title, label, value=value, minimum=minimum, maximum=maximum
+            self._parent, title, label, value=value, minValue=minimum, maxValue=maximum
         )
         if not ok:
             raise PromptCancelled

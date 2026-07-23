@@ -145,9 +145,9 @@ class BatchFolderCreatorDialog(QDialog):
                     parent = nodes[prefix]
                     continue
                 node = QTreeWidgetItem([level])
-                node.setData(0, Qt.UserRole, str(root.joinpath(*prefix)))
+                node.setData(0, Qt.ItemDataRole.UserRole, str(root.joinpath(*prefix)))
                 if it.exists and prefix == it.levels:
-                    node.setForeground(0, Qt.gray)
+                    node.setForeground(0, Qt.GlobalColor.gray)
                 if parent is None:
                     tree.addTopLevelItem(node)
                 else:
@@ -304,7 +304,7 @@ class BatchFolderCreatorDialog(QDialog):
 
         root = str(self._root_path())
         if sys.platform == "win32":
-            os.startfile(root)  # type: ignore[attr-defined]
+            os.startfile(root)
         elif sys.platform == "darwin":
             import subprocess
 

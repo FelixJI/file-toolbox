@@ -379,10 +379,18 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         for row, r in enumerate(results):
             if row >= tbl.rowCount():
                 break
-            tbl.item(row, 0).setText(r["source"].name)
-            tbl.item(row, 1).setText(r["output"].name)
+            # tbl.item() 在单元格未设置时返回 None;预览态行均填了 0/1/3 列,
+            # 但防御性判空以匹配 QTableWidgetItem | None 的类型契约。
+            item0 = tbl.item(row, 0)
+            if item0 is not None:
+                item0.setText(r["source"].name)
+            item1 = tbl.item(row, 1)
+            if item1 is not None:
+                item1.setText(r["output"].name)
             status = "成功" if r["success"] else f"失败: {r['error']}"
-            tbl.item(row, 3).setText(status)
+            item3 = tbl.item(row, 3)
+            if item3 is not None:
+                item3.setText(status)
 
     def _set_ui_enabled(self, enabled: bool):
         """生成进行中禁用选择/生成按钮,显示取消按钮;完成则反之。"""

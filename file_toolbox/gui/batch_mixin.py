@@ -1,10 +1,12 @@
 """批处理对话框混入类 - 提供文件选择、预览、进度显示等公共功能。"""
 
 import contextlib
+import logging
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtCore import QObject, QTimer
-from PySide6.QtWidgets import QFileDialog, QListWidget, QMessageBox, QTableWidget
+from PySide6.QtWidgets import QFileDialog, QListWidget, QMessageBox, QTableWidget, QWidget
 
 from file_toolbox.common.file_utils import format_file_size, get_file_info
 
@@ -20,7 +22,9 @@ class SignalManager(QObject):
         super().__init__(parent)
         self._connections: list = []
 
-    def connect(self, signal, slot, description: str = ""):
+    # NOTE: 故意不叫 connect() —— 那会与 QObject.connect 签名冲突(mypy [override]),
+    # 且本管理器的三参形态(带 description)与 Qt 单参 connect 语义不同。
+    def add_connection(self, signal, slot, description: str = ""):
         try:
             signal.connect(slot)
             self._connections.append((signal, slot, description))
@@ -40,14 +44,20 @@ class BatchDialogMixin:
     SUPPORTED_FORMATS: set[str] = set()
     PREVIEW_DEBOUNCE_MS: int = 200  # 预览防抖(毫秒)
 
+    # 子类(QDialog 子类,如 PDFGeneratorDialog)必须提供 logger。
+    # 声明类型而非赋值:mypy 据此认定 self.logger 合法,且不在此引入实例属性。
+    logger: logging.Logger
+
     def _init_batch_dialog(self):
         """初始化批处理对话框功能（在__init__中调用）"""
         self.selected_files: list[Path] = []
         self.worker = None
-        self._signal_manager = SignalManager(self)
-        self._preview_timer = QTimer(self)
+        # 本 mixin 总是被混入 QDialog(本身是 QObject)。用 cast 如实表达
+        # "运行期 self 即为 QWidget"这一契约,以满足 Qt API 的类型要求。
+        self._signal_manager = SignalManager(cast(QObject, self))
+        self._preview_timer = QTimer(cast(QObject, self))
         self._preview_timer.setSingleShot(True)
-        self._signal_manager.connect(
+        self._signal_manager.add_connection(
             self._preview_timer.timeout, self._do_refresh_preview, "预览防抖定时器"
         )
 
@@ -75,7 +85,9 @@ class BatchDialogMixin:
 
     def _select_files(self, list_widget: QListWidget | None = None, auto_preview: bool = True):
         """选择文件"""
-        files, _ = QFileDialog.getOpenFileNames(self, "选择文件", "", self._get_file_filter())
+        files, _ = QFileDialog.getOpenFileNames(
+            cast(QWidget, self), "选择文件", "", self._get_file_filter()
+        )
         if files:
             added_count = 0
             for file_path in files:
@@ -97,7 +109,7 @@ class BatchDialogMixin:
         auto_preview: bool = True,
     ):
         """选择文件夹"""
-        folder = QFileDialog.getExistingDirectory(self, "选择文件夹")
+        folder = QFileDialog.getExistingDirectory(cast(QWidget, self), "选择文件夹")
         if not folder:
             return
 
@@ -106,7 +118,7 @@ class BatchDialogMixin:
 
         if ask_recursive:
             reply = QMessageBox.question(
-                self,
+                cast(QWidget, self),
                 "选择模式",
                 "是否包含子文件夹中的文件？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -116,7 +128,7 @@ class BatchDialogMixin:
 
         if recursive:
             if self.SUPPORTED_FORMATS:
-                files = []
+                files: list[Path] = []
                 for ext in self.SUPPORTED_FORMATS:
                     files.extend(
                         f for f in folder_path.rglob(f"*{ext}") if not self._is_temp_file(f)

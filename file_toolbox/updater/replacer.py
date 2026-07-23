@@ -103,7 +103,7 @@ mshta "javascript:var s=new ActiveXObject('WScript.Shell');s.Popup('更新失败
 
 
 # 模块级别名,便于测试 monkeypatch(os.startfile 仅 Windows 存在)
-_startfile = os.startfile  # type: ignore[attr-defined]
+_startfile = os.startfile
 
 
 def _extract_portable_zip(zip_path: Path, dest_dir: Path) -> None:
