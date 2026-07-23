@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    env:
+      FILE_TOOLBOX_NO_COM_DETECT: "1"
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: 同步依赖(含 gui + invoice + dev)
+        run: uv sync --extra gui --extra invoice --extra dev
+
+      - name: ruff lint
+        run: uv run ruff check .
+
+      - name: ruff format check
+        run: uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: pytest + core 覆盖率(≥85%)
+        run: uv run pytest --cov=file_toolbox.core --cov-fail-under=85 -q
+
+      - name: pytest + 总盘覆盖率(≥65%)
+        run: uv run pytest --cov=file_toolbox --cov-fail-under=65 -q
