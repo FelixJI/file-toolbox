@@ -67,7 +67,7 @@ def test_excel_detail_rows(tmp_path):
     assert "发票号码" in headers
     assert "项目名称" in headers
     row2 = [c.value for c in ws[2]]
-    assert row2[0] == "A"                     # 外键
+    assert row2[0] == "A"  # 外键
     assert row2[1] == "*交通运输设备*甲"
 
 
@@ -111,4 +111,4 @@ def test_json_chinese_not_escaped(tmp_path):
     out = tmp_path / "out.json"
     export_json([_invoice("A")], out, dedupe_strategy="keep_all")
     raw = out.read_text(encoding="utf-8")
-    assert "测试销售方" in raw                  # 中文明文,未转义
+    assert "测试销售方" in raw  # 中文明文,未转义

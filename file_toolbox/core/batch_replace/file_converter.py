@@ -17,12 +17,12 @@ from pathlib import Path
 class _LegacySpec:
     """旧格式→新格式转换的规格(差异点参数化,消除两份近乎复制的代码)。"""
 
-    prog_id: str                       # Office 应用 ProgID
-    new_suffix: str                    # 目标扩展名,如 ".docx"
-    file_format: int                   # SaveAs/SaveAs2 的 FileFormat 常量
-    open_doc: Callable                 # open_doc(app, abs_path) -> document/workbook
-    save_doc: Callable                 # save_doc(doc, abs_path, file_format) -> None
-    error_label: str                   # 错误提示名
+    prog_id: str  # Office 应用 ProgID
+    new_suffix: str  # 目标扩展名,如 ".docx"
+    file_format: int  # SaveAs/SaveAs2 的 FileFormat 常量
+    open_doc: Callable  # open_doc(app, abs_path) -> document/workbook
+    save_doc: Callable  # save_doc(doc, abs_path, file_format) -> None
+    error_label: str  # 错误提示名
 
 
 class FileConverterService:

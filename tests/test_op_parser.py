@@ -18,9 +18,7 @@ def test_parse_multiple_ops():
 
 def test_parse_multi_params():
     ops = parse_ops(["add_number:start=1,digits=3,position=start"])
-    assert ops == [
-        {"type": "add_number", "params": {"start": 1, "digits": 3, "position": "start"}}
-    ]
+    assert ops == [{"type": "add_number", "params": {"start": 1, "digits": 3, "position": "start"}}]
 
 
 def test_parse_int_values_coerced():

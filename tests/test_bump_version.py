@@ -155,7 +155,7 @@ class TestMigrateChangelog:
         idx_new = result.index("## 0.2.0 - 2026-06-26")
         idx_old = result.index("## 0.1.0")
         assert idx_unreleased < idx_new < idx_old
-        assert "新功能 A" in result[result.index("## 0.2.0"):result.index("## 0.1.0")]
+        assert "新功能 A" in result[result.index("## 0.2.0") : result.index("## 0.1.0")]
 
     def test_empty_unreleased_still_emits_new_section(self):
         from scripts.bump_version import migrate_changelog
@@ -188,19 +188,14 @@ class TestPyprojectVersionIO:
         from scripts.bump_version import read_pyproject_version
 
         pj = tmp_path / "pyproject.toml"
-        pj.write_text(
-            '[project]\nname = "file-toolbox"\nversion = "0.3.7"\n', encoding="utf-8"
-        )
+        pj.write_text('[project]\nname = "file-toolbox"\nversion = "0.3.7"\n', encoding="utf-8")
         assert read_pyproject_version(pj) == "0.3.7"
 
     def test_write_version_preserves_rest(self, tmp_path):
         from scripts.bump_version import read_pyproject_version, write_pyproject_version
 
         original = (
-            "[project]\n"
-            'name = "file-toolbox"\n'
-            'version = "0.3.7"\n'
-            'requires-python = ">=3.11"\n'
+            '[project]\nname = "file-toolbox"\nversion = "0.3.7"\nrequires-python = ">=3.11"\n'
         )
         pj = tmp_path / "pyproject.toml"
         pj.write_text(original, encoding="utf-8")

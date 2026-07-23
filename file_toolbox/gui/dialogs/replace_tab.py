@@ -34,9 +34,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
 
     def _connect_signals(self):
         self.ui.btn_select_files.clicked.connect(lambda: self._select_files(self.ui.list_files))
-        self.ui.btn_select_folder.clicked.connect(
-            lambda: self._select_folder(self.ui.list_files)
-        )
+        self.ui.btn_select_folder.clicked.connect(lambda: self._select_folder(self.ui.list_files))
         self.ui.btn_clear_files.clicked.connect(lambda: self._clear_files(self.ui.list_files))
         self.ui.btn_simple_replace.clicked.connect(
             lambda: self._add_operation(ReplaceOperationType.SIMPLE_REPLACE.value)
@@ -142,7 +140,8 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             QMessageBox.information(self, "提示", "请先选择文件并添加操作。")
             return
         reply = QMessageBox.question(
-            self, "确认执行",
+            self,
+            "确认执行",
             f"将对 {len(self.selected_files)} 个文件执行替换,执行前自动备份。是否继续?",
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -155,7 +154,9 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             {"files": [str(f) for f in self.selected_files], "operations": self.operations},
         )
         QMessageBox.information(
-            self, "完成", f"处理 {success} 个文件, 替换 {total} 处。"
+            self,
+            "完成",
+            f"处理 {success} 个文件, 替换 {total} 处。"
             + ("\n" + "\n".join(errors) if errors else ""),
         )
         self._do_refresh_preview()
@@ -166,8 +167,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             QMessageBox.information(self, "历史", "暂无历史记录。")
             return
         lines = [
-            f"#{r['id']} {r['timestamp'][:19]}  {r['data'].get('files', [])[:1]}"
-            for r in records
+            f"#{r['id']} {r['timestamp'][:19]}  {r['data'].get('files', [])[:1]}" for r in records
         ]
         QMessageBox.information(self, "历史", "\n".join(lines))
 

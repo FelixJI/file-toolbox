@@ -360,6 +360,7 @@ def _safe_add(a: str, b: str) -> str:
 # 主入口
 # --------------------------------------------------------------------------- #
 
+
 def parse_ofd(path: Path, source_file: str = "") -> Invoice:
     """解析 OFD 发票文件(仅首张 DocBody)。
 

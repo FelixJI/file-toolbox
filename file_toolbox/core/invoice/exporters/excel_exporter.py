@@ -11,9 +11,7 @@ try:
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill
 except ImportError as e:
-    raise ImportError(
-        "Excel 导出需要 openpyxl: pip install 'file-toolbox[invoice]'"
-    ) from e
+    raise ImportError("Excel 导出需要 openpyxl: pip install 'file-toolbox[invoice]'") from e
 
 
 _DUP_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")

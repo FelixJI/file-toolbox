@@ -39,12 +39,12 @@ def test_parse_xml_items_with_empty_spec():
     assert item0.quantity == "2"
     assert item0.unit_price == "500"
     assert item0.amount == "1000.00"
-    assert item0.tax_rate == "13%"            # 0.130000 归一化
+    assert item0.tax_rate == "13%"  # 0.130000 归一化
     assert item0.tax_amount == "130.00"
     # 第二条规格/单位为空
     item1 = inv.items[1]
     assert item1.name == "*交通运输设备*无规格测试品"
-    assert item1.spec == ""                    # 空标签 normalize 为 ""
+    assert item1.spec == ""  # 空标签 normalize 为 ""
     assert item1.unit == ""
 
 

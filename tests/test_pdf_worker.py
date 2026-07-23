@@ -74,8 +74,9 @@ def test_worker_emits_finished_ok_on_success(app):
     """正常完成 → finished_ok 信号带 results。"""
     results = [_make_result("a.docx"), _make_result("b.docx")]
     svc = _FakeService(results)
-    worker = PdfGenerateWorker(svc, [__import__("pathlib").Path("a.docx"),
-                                      __import__("pathlib").Path("b.docx")], {})
+    worker = PdfGenerateWorker(
+        svc, [__import__("pathlib").Path("a.docx"), __import__("pathlib").Path("b.docx")], {}
+    )
 
     captured = {}
     worker.finished_ok.connect(lambda r: captured.setdefault("ok", r))

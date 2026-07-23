@@ -20,7 +20,9 @@ class TestStripVPrefix:
 
 
 class TestIsPrerelease:
-    @pytest.mark.parametrize("v", ["1.2.3a1", "1.2.3b2", "1.2.3rc1", "1.2.3.dev0", "1.2.3alpha1", "1.2.3beta1"])
+    @pytest.mark.parametrize(
+        "v", ["1.2.3a1", "1.2.3b2", "1.2.3rc1", "1.2.3.dev0", "1.2.3alpha1", "1.2.3beta1"]
+    )
     def test_prerelease_versions(self, v):
         assert _is_prerelease(v) is True
 

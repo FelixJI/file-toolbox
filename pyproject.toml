@@ -41,5 +41,8 @@ ignore = ["E501"]
 "scripts/*" = ["B008"]
 "tests/*" = ["E402", "B017"]  # 测试中 E402(importorskip 前置)、B017(测异常基类)合理
 
+[tool.ruff.format]
+quote-style = "double"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

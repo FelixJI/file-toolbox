@@ -43,9 +43,7 @@ def test_invoice_preview_no_write(tmp_path):
 def test_invoice_export_excel_with_yes(tmp_path):
     f = _xml(tmp_path / "222.xml", "222")
     out = tmp_path / "out.xlsx"
-    r = runner.invoke(
-        app, ["invoice", str(f), "--format", "excel", "--output", str(out), "--yes"]
-    )
+    r = runner.invoke(app, ["invoice", str(f), "--format", "excel", "--output", str(out), "--yes"])
     assert r.exit_code == 0, r.output
     assert out.exists()
 
@@ -53,9 +51,7 @@ def test_invoice_export_excel_with_yes(tmp_path):
 def test_invoice_export_json(tmp_path):
     f = _xml(tmp_path / "333.xml", "333")
     out = tmp_path / "out.json"
-    r = runner.invoke(
-        app, ["invoice", str(f), "--format", "json", "--output", str(out), "--yes"]
-    )
+    r = runner.invoke(app, ["invoice", str(f), "--format", "json", "--output", str(out), "--yes"])
     assert r.exit_code == 0
     assert out.exists()
     assert "333" in out.read_text(encoding="utf-8")

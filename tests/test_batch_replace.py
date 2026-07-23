@@ -8,7 +8,9 @@ from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
 def test_text_count_matches_simple():
     h = TextHandler()
-    n = h.count_matches("hello hello world", [{"type": "simple_replace", "params": {"find": "hello"}}])
+    n = h.count_matches(
+        "hello hello world", [{"type": "simple_replace", "params": {"find": "hello"}}]
+    )
     assert n == 2
 
 
@@ -29,7 +31,9 @@ def test_text_count_matches_case_sensitive():
 
 def test_text_count_matches_regex():
     h = TextHandler()
-    n = h.count_matches("2023 2024 2025", [{"type": "regex_replace", "params": {"pattern": r"\d{4}"}}])
+    n = h.count_matches(
+        "2023 2024 2025", [{"type": "regex_replace", "params": {"pattern": r"\d{4}"}}]
+    )
     assert n == 3
 
 
@@ -130,9 +134,11 @@ def test_kill_office_processes_uses_create_no_window_on_windows(monkeypatch):
         # tasklist(taskkill 之前先查 PID)返回空,使 _kill 路径不会真起进程;
         # 但为验证 taskkill 标志,这里直接捕获 taskkill 的 kwargs。
         captured.update(kwargs)
+
         class _R:
             stdout = ""
             returncode = 0
+
         return _R()
 
     monkeypatch.setattr(service_mod.subprocess, "run", fake_run)

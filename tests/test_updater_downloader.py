@@ -35,9 +35,7 @@ class TestParseChecksums:
 
     def test_uppercase_sha_normalized_to_lower(self):
         content = "ABCD1234" + "0" * 56 + "  FileToolbox-1.2.0-win64.zip\n"
-        assert parse_checksums(content, "FileToolbox-1.2.0-win64.zip") == (
-            "abcd1234" + "0" * 56
-        )
+        assert parse_checksums(content, "FileToolbox-1.2.0-win64.zip") == ("abcd1234" + "0" * 56)
 
 
 class TestSha256File:
@@ -84,7 +82,9 @@ class _StreamResp:
         return self._buf.read(n)
 
 
-def _make_release(zip_url="http://github/FileToolbox-1.2.0-win64.zip", cs_url="http://github/checksums.txt"):
+def _make_release(
+    zip_url="http://github/FileToolbox-1.2.0-win64.zip", cs_url="http://github/checksums.txt"
+):
     return RemoteRelease("1.2.0", zip_url, cs_url, "github")
 
 

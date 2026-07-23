@@ -19,6 +19,4 @@ def test_version_no_hardcoded_literal():
     )
     # 允许 importlib.metadata 读取,禁止直接赋值字面量版本号
     forbidden = re.compile(r'__version__\s*=\s*"\d+\.\d+\.\d+"')
-    assert not forbidden.search(src), (
-        "__init__.py 仍硬编码 __version__,应改用 importlib.metadata"
-    )
+    assert not forbidden.search(src), "__init__.py 仍硬编码 __version__,应改用 importlib.metadata"

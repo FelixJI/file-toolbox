@@ -121,14 +121,10 @@ class TestGitQueries:
 
         root = self._init_repo(tmp_path)
         bare = tmp_path / "origin.git"
-        subprocess.run(
-            ["git", "init", "--bare", str(bare)], check=True, capture_output=True
-        )
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
 
         def g(*a):
-            subprocess.run(
-                ["git", *a], cwd=str(root), check=True, capture_output=True
-            )
+            subprocess.run(["git", *a], cwd=str(root), check=True, capture_output=True)
 
         g("remote", "add", "origin", str(bare))
         g("push", "-u", "origin", "main")
@@ -226,6 +222,7 @@ class TestInteractiveFlow:
         monkeypatch.setattr(
             rel, "_run", lambda *a, **k: run_called.__setitem__("n", run_called["n"] + 1)
         )
+
         # prompt 抛 KeyboardInterrupt(模拟用户在选版本时 Ctrl+C)
         def raise_kb(*a, **k):
             raise KeyboardInterrupt

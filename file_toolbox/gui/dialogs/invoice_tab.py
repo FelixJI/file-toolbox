@@ -29,8 +29,8 @@ from file_toolbox.core.invoice.dedupe import DEDUPE, KEEP_ALL, MARK
 from file_toolbox.core.invoice.service import InvoiceService
 from file_toolbox.core.invoice.types import ParseResult
 
-_DUP_COLOR = QColor(255, 242, 204)       # 浅黄(重复)
-_PDF_COLOR = QColor(230, 230, 230)       # 浅灰(PDF 弱解析)
+_DUP_COLOR = QColor(255, 242, 204)  # 浅黄(重复)
+_PDF_COLOR = QColor(230, 230, 230)  # 浅灰(PDF 弱解析)
 _HEADERS = [
     "发票号码",
     "发票类型",
@@ -138,13 +138,16 @@ class InvoiceTab(QWidget):
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if not d:
             return
-        recursive = QMessageBox.question(
-            self,
-            "选择模式",
-            "是否包含子文件夹中的发票文件？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        ) == QMessageBox.StandardButton.Yes
+        recursive = (
+            QMessageBox.question(
+                self,
+                "选择模式",
+                "是否包含子文件夹中的发票文件？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            == QMessageBox.StandardButton.Yes
+        )
         root = Path(d)
         candidates = root.rglob("*") if recursive else root.iterdir()
         seen = {p.resolve() for p in self._files}
@@ -252,6 +255,4 @@ class InvoiceTab(QWidget):
                 "outputs": [str(w) for w in written],
             },
         )
-        QMessageBox.information(
-            self, "完成", "已导出:\n" + "\n".join(str(w) for w in written)
-        )
+        QMessageBox.information(self, "完成", "已导出:\n" + "\n".join(str(w) for w in written))

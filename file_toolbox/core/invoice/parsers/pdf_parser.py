@@ -20,9 +20,7 @@ from file_toolbox.core.invoice.types import Invoice, LineItem
 try:
     import pdfplumber
 except ImportError as e:
-    raise ImportError(
-        "PDF 解析需要 pdfplumber: pip install 'file-toolbox[invoice]'"
-    ) from e
+    raise ImportError("PDF 解析需要 pdfplumber: pip install 'file-toolbox[invoice]'") from e
 
 
 # --------------------------------------------------------------------------- #
@@ -44,14 +42,14 @@ _TOTAL_KEYWORDS = ("合计",)
 
 # 表头单字标题 -> 所属列(用于把"单"+"位"这种拆字表头归并成一列)
 _SINGLE_CHAR_COL: dict[str, str] = {
-    "单": None,   # 候选 unit/unit_price,靠后续字确定
+    "单": None,  # 候选 unit/unit_price,靠后续字确定
     "位": "unit",
-    "数": None,   # 候选 quantity
+    "数": None,  # 候选 quantity
     "量": "quantity",
     "价": "unit_price",
-    "金": None,   # 候选 amount
+    "金": None,  # 候选 amount
     "额": "amount",
-    "税": None,   # 候选 tax_rate/tax_amount
+    "税": None,  # 候选 tax_rate/tax_amount
 }
 
 
@@ -202,8 +200,16 @@ def _extract_detail_items(words: list[dict], col_centers: dict[str, float]) -> l
     if start_idx is None:
         start_idx = 0
 
-    col_order = ["name", "spec", "unit", "quantity", "unit_price",
-                 "amount", "tax_rate", "tax_amount"]
+    col_order = [
+        "name",
+        "spec",
+        "unit",
+        "quantity",
+        "unit_price",
+        "amount",
+        "tax_rate",
+        "tax_amount",
+    ]
 
     items: list[LineItem] = []
     for key in keys_in_order[start_idx:]:
@@ -227,8 +233,8 @@ def _extract_detail_items(words: list[dict], col_centers: dict[str, float]) -> l
 
         # 续行:只有 name/spec 列有值,其余空 -> 合并到上一条
         tail_empty = all(
-            not join(c) for c in
-            ("unit", "quantity", "unit_price", "amount", "tax_rate", "tax_amount")
+            not join(c)
+            for c in ("unit", "quantity", "unit_price", "amount", "tax_rate", "tax_amount")
         )
         if items and tail_empty and (join("name") or join("spec")):
             last = items[-1]
@@ -303,8 +309,9 @@ _TAX_LABELS = (
 )
 
 
-def _find_label_word(rows: dict[int, list[dict]], keys: list[int],
-                     labels: tuple[str, ...]) -> list[tuple[float, str]]:
+def _find_label_word(
+    rows: dict[int, list[dict]], keys: list[int], labels: tuple[str, ...]
+) -> list[tuple[float, str]]:
     """在所有行找含 labels 任一的 word,返回 [(x0, 冒号后的值)]。"""
     hits: list[tuple[float, str]] = []
     for key in keys:
@@ -313,7 +320,7 @@ def _find_label_word(rows: dict[int, list[dict]], keys: list[int],
             for lab in labels:
                 pos = t.find(lab)
                 if pos != -1:
-                    val = t[pos + len(lab):].strip()
+                    val = t[pos + len(lab) :].strip()
                     # 裁掉同行可能粘的后续标签
                     for stop_lab in labels:
                         sp = val.find(stop_lab)
@@ -444,8 +451,9 @@ def _extract_amounts(rows: dict[int, list[dict]], keys: list[int]) -> tuple[str,
     return amount_without_tax, tax_amount, amount_with_tax
 
 
-def _find_amount_in_next_rows(rows: dict[int, list[dict]], keys: list[int],
-                              start_key: int, look: int = 2) -> str:
+def _find_amount_in_next_rows(
+    rows: dict[int, list[dict]], keys: list[int], start_key: int, look: int = 2
+) -> str:
     """从 start_key 之后 look 个 y 行里找第一个金额数字(x.x​x)。
 
     价税合计的金额常与'(大写)'标签分在不同 y 行(如标签在 y=143,¥23480.52 在 y=142)。
@@ -454,7 +462,7 @@ def _find_amount_in_next_rows(rows: dict[int, list[dict]], keys: list[int],
         idx = keys.index(start_key)
     except ValueError:
         return ""
-    for key in keys[idx + 1: idx + 1 + look]:
+    for key in keys[idx + 1 : idx + 1 + look]:
         for w in rows[key]:
             m = re.search(r"([\d,]+\.\d{2})", w["text"])
             if m:

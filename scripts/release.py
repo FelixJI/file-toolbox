@@ -97,9 +97,7 @@ def _validate_custom_version(raw: str) -> str | None:
 def release(
     part: str = typer.Argument(None, help="major/minor/patch/prerelease(与 --set 二选一)"),
     set_version: str = typer.Option(None, "--set", help="直接设到指定版本"),
-    update_deps: bool = typer.Option(
-        False, "--update-deps", help="发版前先跑 update_deps check"
-    ),
+    update_deps: bool = typer.Option(False, "--update-deps", help="发版前先跑 update_deps check"),
     skip_build: bool = typer.Option(False, "--skip-build", help="只 bump,不打包"),
     ci: bool = typer.Option(False, "--ci", help="CI 模式:非交互"),
 ) -> None:
@@ -134,9 +132,7 @@ def release(
         _run("build_exe.py", *build_args)
 
     if not ci:
-        typer.echo(
-            "\n发版准备完成。下一步: git push --tags  (CI 会自动出 GitHub Release)"
-        )
+        typer.echo("\n发版准备完成。下一步: git push --tags  (CI 会自动出 GitHub Release)")
     typer.secho("✓ release 流程结束", fg=typer.colors.GREEN)
 
 

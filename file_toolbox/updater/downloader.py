@@ -134,7 +134,5 @@ def download_and_verify(
     if actual_sha != expected_sha:
         with contextlib.suppress(OSError):
             dest.unlink(missing_ok=True)
-        raise ChecksumMismatchError(
-            f"SHA256 校验不匹配: expected {expected_sha}, got {actual_sha}"
-        )
+        raise ChecksumMismatchError(f"SHA256 校验不匹配: expected {expected_sha}, got {actual_sha}")
     return dest

@@ -141,7 +141,9 @@ class BatchDialogMixin:
             if auto_preview:
                 self._refresh_preview()
 
-    def _clear_files(self, list_widget: QListWidget | None = None, table_widget: QTableWidget | None = None):
+    def _clear_files(
+        self, list_widget: QListWidget | None = None, table_widget: QTableWidget | None = None
+    ):
         """清空文件列表"""
         self.selected_files.clear()
         if list_widget:

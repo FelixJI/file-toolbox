@@ -342,4 +342,3 @@ class FileRenameService(BaseOperationService):
     def get_file_info(self, file_path: Path) -> dict:
         """获取文件信息(委托给通用工具,保持单一实现)。"""
         return get_file_info(file_path)
-

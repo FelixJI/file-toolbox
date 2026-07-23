@@ -140,9 +140,7 @@ def test_table_files_exists_with_four_columns(dlg):
     """table_files(QTableWidget)存在,4 列。"""
     assert hasattr(dlg.ui, "table_files")
     assert dlg.ui.table_files.columnCount() == 4
-    headers = [
-        dlg.ui.table_files.horizontalHeaderItem(i).text() for i in range(4)
-    ]
+    headers = [dlg.ui.table_files.horizontalHeaderItem(i).text() for i in range(4)]
     assert headers == ["源文件", "输出", "大小", "状态"]
 
 
@@ -412,9 +410,9 @@ def test_stop_worker_logs_warning_on_timeout_without_terminate(dlg, caplog):
 
     assert worker.cancel_called
     assert not worker.terminate_called, "超时也不应 terminate"
-    assert any(
-        "未能" in r.message or "terminate" in r.message for r in caplog.records
-    ), "超时应记录 warning"
+    assert any("未能" in r.message or "terminate" in r.message for r in caplog.records), (
+        "超时应记录 warning"
+    )
     assert dlg.worker is None
 
 

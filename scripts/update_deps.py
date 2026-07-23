@@ -28,9 +28,7 @@ def parse_lock_versions(lock_text: str) -> dict[str, str]:
     return dict(_PACKAGE_RE.findall(lock_text))
 
 
-def diff_upgrades(
-    before: dict[str, str], after: dict[str, str]
-) -> dict[str, tuple[str, str]]:
+def diff_upgrades(before: dict[str, str], after: dict[str, str]) -> dict[str, tuple[str, str]]:
     """对比前后版本,返回 {包名: (旧版, 新版)},只含版本变化的包。"""
     result: dict[str, tuple[str, str]] = {}
     for name, new_ver in after.items():

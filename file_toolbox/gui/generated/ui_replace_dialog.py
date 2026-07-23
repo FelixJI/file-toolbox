@@ -45,11 +45,9 @@ from PySide6.QtWidgets import (
 
 
 class Ui_ContentReplaceDialog:
-
     def setupUi(self, ContentReplaceDialog):
 
         if not ContentReplaceDialog.objectName():
-
             ContentReplaceDialog.setObjectName("ContentReplaceDialog")
 
         ContentReplaceDialog.resize(900, 700)
@@ -185,7 +183,6 @@ class Ui_ContentReplaceDialog:
         self.table_preview = QTableWidget(self.groupBox_preview)
 
         if self.table_preview.columnCount() < 5:
-
             self.table_preview.setColumnCount(5)
 
         __qtablewidgetitem = QTableWidgetItem()
@@ -369,15 +366,11 @@ class Ui_ContentReplaceDialog:
         )
 
         self.btn_simple_replace.setText(
-            QCoreApplication.translate(
-                "ContentReplaceDialog", "\u7b80\u5355\u66ff\u6362", None
-            )
+            QCoreApplication.translate("ContentReplaceDialog", "\u7b80\u5355\u66ff\u6362", None)
         )
 
         self.btn_regex_replace.setText(
-            QCoreApplication.translate(
-                "ContentReplaceDialog", "\u6b63\u5219\u66ff\u6362", None
-            )
+            QCoreApplication.translate("ContentReplaceDialog", "\u6b63\u5219\u66ff\u6362", None)
         )
 
         self.btn_edit_operation.setText(

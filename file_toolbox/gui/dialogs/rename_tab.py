@@ -51,9 +51,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
     # ---------- 信号连接 ----------
     def _connect_signals(self):
         self.ui.btn_select_files.clicked.connect(lambda: self._select_files(self.ui.list_files))
-        self.ui.btn_select_folder.clicked.connect(
-            lambda: self._select_folder(self.ui.list_files)
-        )
+        self.ui.btn_select_folder.clicked.connect(lambda: self._select_folder(self.ui.list_files))
         self.ui.btn_clear_files.clicked.connect(lambda: self._clear_files(self.ui.list_files))
         self.ui.btn_add_prefix.clicked.connect(
             lambda: self._add_operation(OperationType.ADD_PREFIX.value)
@@ -175,7 +173,9 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
             if not ok:
                 return None
             value, ok = QInputDialog.getText(
-                self, "删除字符", "值(前缀/后缀为数量,文本为要删除的文本):",
+                self,
+                "删除字符",
+                "值(前缀/后缀为数量,文本为要删除的文本):",
                 text=str(existing.get("value", "")),
             )
             return {"delete_type": dtype, "value": value} if ok else None
@@ -221,9 +221,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         if not ready:
             QMessageBox.warning(self, "无可执行", "没有就绪的文件(可能全部冲突或无变化)。")
             return
-        reply = QMessageBox.question(
-            self, "确认执行", f"将重命名 {len(ready)} 个文件,是否继续?"
-        )
+        reply = QMessageBox.question(self, "确认执行", f"将重命名 {len(ready)} 个文件,是否继续?")
         if reply != QMessageBox.StandardButton.Yes:
             return
         count, errors = self._svc.execute_rename(ready)
@@ -231,7 +229,11 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         self._history.add_record(
             "rename", {"rename_map": {str(k): str(v) for k, v in ready.items()}}
         )
-        QMessageBox.information(self, "完成", f"已重命名 {count} 个文件。" + ("\n" + "\n".join(errors) if errors else ""))
+        QMessageBox.information(
+            self,
+            "完成",
+            f"已重命名 {count} 个文件。" + ("\n" + "\n".join(errors) if errors else ""),
+        )
         self._do_refresh_preview()
 
     def _show_history(self):
@@ -239,7 +241,10 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         if not records:
             QMessageBox.information(self, "历史", "暂无历史记录。")
             return
-        lines = [f"#{r['id']} {r['timestamp'][:19]}  {len(r['data'].get('rename_map', {}))} 个文件" for r in records]
+        lines = [
+            f"#{r['id']} {r['timestamp'][:19]}  {len(r['data'].get('rename_map', {}))} 个文件"
+            for r in records
+        ]
         QMessageBox.information(self, "历史", "\n".join(lines))
 
     # ---------- 模板管理 ----------
@@ -254,9 +259,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         for t in templates:
             ops_desc = ", ".join(self._op_label(o) for o in t["operations"])
             labels.append(f"{t['name']}  ({ops_desc})")
-        choice, ok = QInputDialog.getItem(
-            self, "加载模板", "选择模板:", labels, 0, editable=False
-        )
+        choice, ok = QInputDialog.getItem(self, "加载模板", "选择模板:", labels, 0, editable=False)
         if not ok:
             return
         idx = labels.index(choice)
@@ -278,9 +281,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         name = name.strip()
         exists = self._template_svc.template_exists(name)
         if exists:
-            reply = QMessageBox.question(
-                self, "覆盖确认", f"模板「{name}」已存在,是否覆盖?"
-            )
+            reply = QMessageBox.question(self, "覆盖确认", f"模板「{name}」已存在,是否覆盖?")
             if reply != QMessageBox.StandardButton.Yes:
                 return
             self._template_svc.update_template(name, self.operations)

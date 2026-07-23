@@ -221,9 +221,7 @@ class BatchFolderCreatorDialog(QDialog):
     # ---------- 创建 ----------
 
     def _selected_strategy(self) -> ConflictStrategy:
-        return _CONFLICT_OPTIONS.get(
-            self._combo_conflict.currentText(), ConflictStrategy.MERGE
-        )
+        return _CONFLICT_OPTIONS.get(self._combo_conflict.currentText(), ConflictStrategy.MERGE)
 
     def _make_skip_callback(self):
         """构造逐个确认回调:对已存在文件夹弹窗询问,返回 True 表示跳过。
@@ -255,7 +253,7 @@ class BatchFolderCreatorDialog(QDialog):
         if invalid:
             preview = "、".join(invalid[:5])
             self._show_error(
-                f"以下名称含非法字符 \\ / : * ? \" < > |: {preview}"
+                f'以下名称含非法字符 \\ / : * ? " < > |: {preview}'
                 + (" 等" if len(invalid) > 5 else "")
                 + "。请点击「处理特殊字符」或手动修改。"
             )

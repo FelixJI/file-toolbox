@@ -67,5 +67,5 @@ def test_mark_flags_second_onward():
     a_invs = [i for i in kept if i.invoice_number == "A"]
     # 最高优先级那条不标,其余标 duplicate
     dup_flags = [i.is_duplicate for i in a_invs]
-    assert dup_flags.count(True) == 2          # ofd 和 pdf 标
-    assert dup_flags.count(False) == 1         # xml 不标
+    assert dup_flags.count(True) == 2  # ofd 和 pdf 标
+    assert dup_flags.count(False) == 1  # xml 不标

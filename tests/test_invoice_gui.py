@@ -37,9 +37,7 @@ def tab(app):
 def test_invoice_tab_has_expected_table_headers(tab):
     """表格应预置 8 列业务表头,列数与表头一致。"""
     assert tab._table.columnCount() == len(EXPECTED_HEADERS)
-    headers = [
-        tab._table.horizontalHeaderItem(i).text() for i in range(tab._table.columnCount())
-    ]
+    headers = [tab._table.horizontalHeaderItem(i).text() for i in range(tab._table.columnCount())]
     assert headers == EXPECTED_HEADERS
 
 

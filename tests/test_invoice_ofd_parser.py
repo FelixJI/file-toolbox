@@ -80,9 +80,9 @@ def test_parse_ofd_normalizes_variant_keys(ofd_sample_variant_keys):
     inv = parse_ofd(ofd_sample_variant_keys)
     # 变体键应归一化到标准字段
     assert inv.invoice_number == "99990000000000000010"
-    assert inv.amount_without_tax == "3000.00"   # 合计(元) → 合计金额
-    assert inv.tax_amount == "390.00"            # 税额合计 → 合计税额
-    assert inv.amount_with_tax == "3390.00"      # 价税合计(大写) → 价税合计
+    assert inv.amount_without_tax == "3000.00"  # 合计(元) → 合计金额
+    assert inv.tax_amount == "390.00"  # 税额合计 → 合计税额
+    assert inv.amount_with_tax == "3390.00"  # 价税合计(大写) → 价税合计
     assert inv.issue_date == "2026-07-01 09:00:00"  # 开票时间 → 开票日期
 
 

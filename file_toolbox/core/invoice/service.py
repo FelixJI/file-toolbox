@@ -55,9 +55,7 @@ class InvoiceService:
             written.append(export_excel(result.invoices, output_path))
         if fmt in ("json", "both"):
             jp = json_path or output_path.with_suffix(".json")
-            written.append(
-                export_json(result.invoices, jp, dedupe_strategy, result.failed)
-            )
+            written.append(export_json(result.invoices, jp, dedupe_strategy, result.failed))
         return written
 
     @staticmethod

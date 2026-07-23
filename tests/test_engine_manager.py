@@ -56,10 +56,12 @@ def test_detect_uses_registry_by_default(monkeypatch):
     em = EngineManager()
 
     calls = []
-    monkeypatch.setattr(EngineManager, "_probe_registry",
-                        lambda prog_id: calls.append(prog_id) or True)
-    monkeypatch.setattr(EngineManager, "_try_detect",
-                        lambda *a, **k: pytest.fail("不应调用真 Dispatch"))
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda prog_id: calls.append(prog_id) or True
+    )
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda *a, **k: pytest.fail("不应调用真 Dispatch")
+    )
 
     result = em._detect_available_engines(force_refresh=False)
     assert result == {"office": True, "wps": True}
@@ -72,8 +74,9 @@ def test_detect_force_refresh_uses_real_dispatch(monkeypatch):
     EngineManager._cached_engines = None
     em = EngineManager()
 
-    monkeypatch.setattr(EngineManager, "_probe_registry",
-                        lambda *a, **k: pytest.fail("force_refresh 不应走注册表"))
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda *a, **k: pytest.fail("force_refresh 不应走注册表")
+    )
     monkeypatch.setattr(EngineManager, "_try_detect", lambda *a, **k: True)
 
     result = em._detect_available_engines(force_refresh=True)

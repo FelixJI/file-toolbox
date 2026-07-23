@@ -51,7 +51,8 @@ def test_rename_execute(tmp_path):
 
 def test_mkdir_from_levels(tmp_path):
     r = runner.invoke(
-        app, ["mkdir", "--root", str(tmp_path), "--levels", "部门A/项目1", "--levels", "部门A/项目2"]
+        app,
+        ["mkdir", "--root", str(tmp_path), "--levels", "部门A/项目1", "--levels", "部门A/项目2"],
     )
     assert r.exit_code == 0
     assert (tmp_path / "部门A" / "项目1").is_dir()

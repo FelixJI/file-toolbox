@@ -18,22 +18,35 @@ from .constants import ENGINE_AUTO, ENGINE_WPS
 class _AppSpec:
     """单个 Office 应用的配置(app 实例属性、引擎属性、各引擎 ProgID、检测用 ProgID)。"""
 
-    kind: str               # word | excel | ppt
-    app_attr: str           # self._word_app 等
-    engine_attr: str        # self._current_word_engine 等
-    ms_prog_id: str         # Microsoft Office ProgID
-    wps_prog_id: str        # WPS Office ProgID
-    label: str              # 错误提示用名
+    kind: str  # word | excel | ppt
+    app_attr: str  # self._word_app 等
+    engine_attr: str  # self._current_word_engine 等
+    ms_prog_id: str  # Microsoft Office ProgID
+    wps_prog_id: str  # WPS Office ProgID
+    label: str  # 错误提示用名
 
 
 # 三种应用的配置表 —— 新增应用只需在此添加一行。
 _APP_CONFIG: dict[str, _AppSpec] = {
-    "word": _AppSpec("word", "_word_app", "_current_word_engine",
-                     "Word.Application", "KWPS.Application", "Word"),
-    "excel": _AppSpec("excel", "_excel_app", "_current_excel_engine",
-                      "Excel.Application", "Ket.Application", "Excel"),
-    "ppt": _AppSpec("ppt", "_ppt_app", "_current_ppt_engine",
-                    "PowerPoint.Application", "KWPP.Application", "PowerPoint"),
+    "word": _AppSpec(
+        "word", "_word_app", "_current_word_engine", "Word.Application", "KWPS.Application", "Word"
+    ),
+    "excel": _AppSpec(
+        "excel",
+        "_excel_app",
+        "_current_excel_engine",
+        "Excel.Application",
+        "Ket.Application",
+        "Excel",
+    ),
+    "ppt": _AppSpec(
+        "ppt",
+        "_ppt_app",
+        "_current_ppt_engine",
+        "PowerPoint.Application",
+        "KWPP.Application",
+        "PowerPoint",
+    ),
 }
 
 
@@ -161,9 +174,7 @@ class EngineManager(LoggableMixin):
         import threading
 
         # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
-        threading.Thread(
-            target=self._run_async_detect, args=(callback,), daemon=True
-        ).start()
+        threading.Thread(target=self._run_async_detect, args=(callback,), daemon=True).start()
 
     def _run_async_detect(self, callback=None):
         """后台线程入口:CoInitialize 配对 + 调用 _async_detect_body。"""

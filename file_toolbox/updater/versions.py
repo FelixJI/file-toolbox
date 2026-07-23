@@ -26,10 +26,10 @@ _FETCH_TIMEOUT = 10
 class RemoteRelease:
     """远程最新 Release 信息。"""
 
-    version: str          # PEP 440 正式版号,如 "1.2.0"(无 v 前缀)
-    zip_url: str          # 便携 zip 下载地址
-    checksum_url: str     # checksums.txt 地址
-    source: str           # "github",用于日志/排错
+    version: str  # PEP 440 正式版号,如 "1.2.0"(无 v 前缀)
+    zip_url: str  # 便携 zip 下载地址
+    checksum_url: str  # checksums.txt 地址
+    source: str  # "github",用于日志/排错
 
 
 def strip_v_prefix(version: str) -> str:

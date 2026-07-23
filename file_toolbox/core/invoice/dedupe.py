@@ -50,7 +50,7 @@ def dedupe_invoices(
                 # 选优先级最高(数字最小);同优先级取索引最小(首个)
                 best = min(range(len(grp)), key=lambda i: _method_rank(grp[i].parse_method))
                 kept.append(grp[best])
-                dups.extend(grp[:best] + grp[best + 1:])
+                dups.extend(grp[:best] + grp[best + 1 :])
         return kept, dups
 
     if strategy == MARK:

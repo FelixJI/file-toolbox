@@ -27,6 +27,7 @@ def _disable_live_com_detect():
         else:
             os.environ["FILE_TOOLBOX_NO_COM_DETECT"] = old
 
+
 # --- 虚构 OFD 内容(XML 明文,均为占位数据) ---
 OFD_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <ofd:OFD xmlns:ofd="http://www.ofdspec.org/2016" Version="1.2" DocType="OFD">
@@ -76,7 +77,10 @@ def _write_ofd(tmp_path: Path, name: str, ofd_xml: str, doc_xml: str, contents: 
 def ofd_sample(tmp_path) -> Path:
     """生成虚构 OFD(打包 XML),返回路径。"""
     return _write_ofd(
-        tmp_path, "sample.ofd", OFD_XML, DOCUMENT_XML,
+        tmp_path,
+        "sample.ofd",
+        OFD_XML,
+        DOCUMENT_XML,
         {"Doc_0/Pages/Page_0/Content.xml": CONTENT_XML},
     )
 
@@ -125,7 +129,10 @@ CONTENT_XML_WITH_ITEMS = """<?xml version="1.0" encoding="UTF-8"?>
 def ofd_sample_with_items(tmp_path) -> Path:
     """OFD 含 3 行明细(第 3 行为续行验证)+ 大写金额 + 备注干扰项。"""
     return _write_ofd(
-        tmp_path, "with_items.ofd", OFD_XML, DOCUMENT_XML,
+        tmp_path,
+        "with_items.ofd",
+        OFD_XML,
+        DOCUMENT_XML,
         {"Doc_0/Pages/Page_0/Content.xml": CONTENT_XML_WITH_ITEMS},
     )
 
@@ -155,7 +162,10 @@ CONTENT_XML_FULLWIDTH_COLON = """<?xml version="1.0" encoding="UTF-8"?>
 def ofd_sample_variant_keys(tmp_path) -> Path:
     """OFD 用键名变体(合计(元)/税额合计/价税合计(大写)/开票时间)+ 全角冒号。"""
     return _write_ofd(
-        tmp_path, "variant.ofd", OFD_XML_VARIANT_KEYS, DOCUMENT_XML,
+        tmp_path,
+        "variant.ofd",
+        OFD_XML_VARIANT_KEYS,
+        DOCUMENT_XML,
         {"Doc_0/Pages/Page_0/Content.xml": CONTENT_XML_FULLWIDTH_COLON},
     )
 
@@ -187,7 +197,10 @@ CONTENT_XML_PAGE1 = """<?xml version="1.0" encoding="UTF-8"?>
 def ofd_sample_multipage(tmp_path) -> Path:
     """OFD 两页:Document.xml 声明 Page_0/Page_1,买卖方名称分在不同页。"""
     return _write_ofd(
-        tmp_path, "multipage.ofd", OFD_XML, DOCUMENT_XML_MULTIPAGE,
+        tmp_path,
+        "multipage.ofd",
+        OFD_XML,
+        DOCUMENT_XML_MULTIPAGE,
         {
             "Doc_0/Pages/Page_0/Content.xml": CONTENT_XML_PAGE0,
             "Doc_0/Pages/Page_1/Content.xml": CONTENT_XML_PAGE1,
@@ -297,9 +310,7 @@ def pdf_sample(tmp_path) -> Path:
 
 
 # --- 虚构 ZIP fixtures(模拟税务局完整下载:含 pdf+ofd+嵌套 zip) ---
-_XML_FIXTURE = (
-    Path(__file__).parent / "fixtures" / "invoice" / "sample_einvoice.xml"
-)
+_XML_FIXTURE = Path(__file__).parent / "fixtures" / "invoice" / "sample_einvoice.xml"
 
 
 @pytest.fixture

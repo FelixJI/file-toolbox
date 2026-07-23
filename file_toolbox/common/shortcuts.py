@@ -94,9 +94,7 @@ def _create_windows_lnk(target_dir: Path, location: str) -> ShortcutResult:
         shortcut.Description = APP_NAME
         shortcut.Save()
         loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
-        return ShortcutResult(
-            True, str(lnk_path), location, f"已创建{loc_name}快捷方式"
-        )
+        return ShortcutResult(True, str(lnk_path), location, f"已创建{loc_name}快捷方式")
     except Exception as e:  # noqa: BLE001 — COM 失败不抛给 UI
         loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
         return ShortcutResult(False, "", location, f"创建{loc_name}快捷方式失败: {e}")
@@ -118,9 +116,7 @@ def _create_linux_desktop_file(target_dir: Path, location: str) -> ShortcutResul
         )
         desktop_path.write_text(content, encoding="utf-8")
         loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
-        return ShortcutResult(
-            True, str(desktop_path), location, f"已创建{loc_name}快捷方式"
-        )
+        return ShortcutResult(True, str(desktop_path), location, f"已创建{loc_name}快捷方式")
     except OSError as e:
         loc_name = "桌面" if location == LOCATION_DESKTOP else "开始菜单"
         return ShortcutResult(False, "", location, f"创建{loc_name}快捷方式失败: {e}")
@@ -166,9 +162,7 @@ def _remove_shortcut(location: str) -> ShortcutResult:
     target_dir = desktop_dir() if location == LOCATION_DESKTOP else start_menu_dir()
     path = target_dir / _shortcut_filename()
     if not path.exists():
-        return ShortcutResult(
-            False, "", location, f"未找到{loc_name}快捷方式(可能尚未创建)"
-        )
+        return ShortcutResult(False, "", location, f"未找到{loc_name}快捷方式(可能尚未创建)")
     try:
         path.unlink()
         return ShortcutResult(True, str(path), location, f"已删除{loc_name}快捷方式")

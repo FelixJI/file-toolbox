@@ -43,6 +43,7 @@ class TestUpdateBanner:
         # QLabel 无 click(),用 QTest 模拟鼠标点击
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest
+
         QTest.mouseClick(banner, Qt.MouseButton.LeftButton)
         assert len(clicked) == 1
 

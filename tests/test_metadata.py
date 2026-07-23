@@ -45,9 +45,7 @@ def test_get_changelog_fallback_when_missing(tmp_path, monkeypatch):
     """模拟找不到 CHANGELOG.md:切到空目录,断言返回兜底字符串(含版本号),不抛异常。"""
     monkeypatch.chdir(tmp_path)
     # 同时屏蔽仓库根查找:让 _repo_root_changelog_path 指向不存在的地方
-    monkeypatch.setattr(
-        metadata, "_repo_root_changelog_path", lambda: tmp_path / "nope.md"
-    )
+    monkeypatch.setattr(metadata, "_repo_root_changelog_path", lambda: tmp_path / "nope.md")
     text = metadata.get_changelog()
     assert isinstance(text, str)
     assert file_toolbox.__version__ in text  # 兜底文本含版本号
@@ -70,9 +68,7 @@ def test_get_changelog_finds_portable_exe_sibling(tmp_path, monkeypatch):
     monkeypatch.setattr(metadata.sys, "executable", str(fake_exe))
     # 屏蔽仓库根查找(开发环境回退),强制走 exe 同级
     monkeypatch.setattr(metadata.sys, "platform", "win32")
-    monkeypatch.setattr(
-        metadata, "_repo_root_changelog_path", lambda: tmp_path / "nope.md"
-    )
+    monkeypatch.setattr(metadata, "_repo_root_changelog_path", lambda: tmp_path / "nope.md")
     # cwd 指向空目录,避免误命中
     empty_cwd = tmp_path / "empty"
     empty_cwd.mkdir()

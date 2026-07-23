@@ -55,8 +55,20 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     logger = _module_logger
 
     SUPPORTED_FORMATS: set[str] = {
-        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".gif", ".pdf",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".bmp",
+        ".tif",
+        ".tiff",
+        ".gif",
+        ".pdf",
     }
 
     def __init__(self, parent=None):
@@ -155,7 +167,8 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if os.environ.get("FILE_TOOLBOX_NO_COM_DETECT"):
             # 测试/CI:不触发 COM,仅用缓存(可能为空),避免致命异常
             self.ui.label_engine_info.setText(
-                self._svc.get_engine_info(use_cache=True) if EngineManager._cached_engines
+                self._svc.get_engine_info(use_cache=True)
+                if EngineManager._cached_engines
                 else "未检测到Office软件"
             )
             return
@@ -176,10 +189,13 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     def _build_config(self) -> dict:
         output_mode = OUTPUT_MERGE if self.ui.radio_merge.isChecked() else OUTPUT_SEPARATE
         pdf_type = PDF_TYPE_IMAGE if self.ui.radio_type_image.isChecked() else PDF_TYPE_EDITABLE
-        print_mode = PRINT_MODE_DUPLEX if self.ui.radio_print_duplex.isChecked() else PRINT_MODE_SINGLE
+        print_mode = (
+            PRINT_MODE_DUPLEX if self.ui.radio_print_duplex.isChecked() else PRINT_MODE_SINGLE
+        )
         same_as_source = self.ui.radio_same_dir.isChecked()
         engine = (
-            "wps" if self.ui.radio_engine_wps.isChecked()
+            "wps"
+            if self.ui.radio_engine_wps.isChecked()
             else ("office" if self.ui.radio_engine_office.isChecked() else "auto")
         )
 
@@ -249,9 +265,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
         from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
 
-        worker = PdfGenerateWorker(
-            self._svc, list(self.selected_files), config, parent=self
-        )
+        worker = PdfGenerateWorker(self._svc, list(self.selected_files), config, parent=self)
         worker.progress.connect(self._on_progress)
         worker.finished_ok.connect(self._on_generate_ok)
         worker.failed.connect(self._on_generate_failed)

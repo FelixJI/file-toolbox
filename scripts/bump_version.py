@@ -78,12 +78,12 @@ def migrate_changelog(content: str, new_version: str, date: str) -> str:
 
     unreleased_idx = content.index(_UNRELEASED_HEADER)
     # Unreleased 标题之后的内容
-    after_unreleased = content[unreleased_idx + len(_UNRELEASED_HEADER):]
+    after_unreleased = content[unreleased_idx + len(_UNRELEASED_HEADER) :]
     # 下一个 "## " 标题之前 = Unreleased 条目体
     next_header_match = _NEXT_HEADER_RE.search(after_unreleased)
     if next_header_match:
         unreleased_body = after_unreleased[: next_header_match.start()]
-        rest = after_unreleased[next_header_match.start():]  # 含前导 "\n## "
+        rest = after_unreleased[next_header_match.start() :]  # 含前导 "\n## "
     else:
         unreleased_body = after_unreleased
         rest = ""
@@ -278,9 +278,7 @@ def bump(
 
     # 工作区清洁检查(commit 前提下)
     if not no_commit and not working_tree_clean(_ROOT):
-        typer.secho(
-            "✗ git 工作区不干净,请先 commit/stash 当前改动", fg=typer.colors.RED, err=True
-        )
+        typer.secho("✗ git 工作区不干净,请先 commit/stash 当前改动", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
     # 写 pyproject
