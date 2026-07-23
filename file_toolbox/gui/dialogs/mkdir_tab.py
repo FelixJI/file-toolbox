@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_mkdir import ConflictStrategy, FolderCreatorService
+from file_toolbox.gui.controllers.mkdir_controller import MkdirController
 from file_toolbox.gui.generated.ui_mkdir_dialog import Ui_BatchFolderCreatorDialog
 
 # 冲突策略下拉框:显示文本 -> ConflictStrategy
@@ -34,6 +35,7 @@ class BatchFolderCreatorDialog(QDialog):
         self.ui = Ui_BatchFolderCreatorDialog()
         self.ui.setupUi(self)
         self._svc = FolderCreatorService()
+        self._controller = MkdirController(self._svc)
         self._history = JsonHistoryStore()
 
         self.ui.btn_cancel.setVisible(False)
@@ -196,27 +198,23 @@ class BatchFolderCreatorDialog(QDialog):
     # ---------- 结构收集与校验 ----------
 
     def _collect_structures(self) -> list[tuple[str, ...]]:
-        """从粘贴表格读取层级结构(按行,Tab 感知用列)。"""
+        """从粘贴表格读取层级结构(按行,Tab 感知用列)。
+
+        表格读取留在 View,结构构建委托给 controller(纯 Python,可单测)。
+        """
         tbl = self._paste_table()
-        structures: list[tuple[str, ...]] = []
+        rows: list[list[str]] = []
         for r in range(tbl.rowCount()):
-            parts: list[str] = []
+            cells: list[str] = []
             for c in range(tbl.columnCount()):
                 item = tbl.item(r, c)
-                if item and item.text().strip():
-                    parts.append(item.text().strip())
-            if parts:
-                structures.append(tuple(parts))
-        return structures
+                cells.append(item.text() if item else "")
+            rows.append(cells)
+        return self._controller.collect_structures(rows)
 
     def _find_invalid_names(self, structures: list[tuple[str, ...]]) -> list[str]:
         """返回含非法字符的文件夹名。"""
-        invalid: list[str] = []
-        for levels in structures:
-            for name in levels:
-                if not self._svc.validate_folder_name(name) and name not in invalid:
-                    invalid.append(name)
-        return invalid
+        return self._controller.find_invalid_names(structures)
 
     # ---------- 创建 ----------
 
@@ -283,14 +281,14 @@ class BatchFolderCreatorDialog(QDialog):
         # 记录历史(文件夹创建不可逆,仅供审计/复现)
         self._history.add_record(
             "mkdir",
-            {
-                "root": str(root),
-                "structure_count": len(structures),
-                "strategy": strategy.name,
-                "created": result.created_count,
-                "skipped": result.skipped_count,
-                "success": result.success,
-            },
+            self._controller.build_history_record(
+                root=root,
+                structure_count=len(structures),
+                strategy=strategy,
+                created=result.created_count,
+                skipped=result.skipped_count,
+                success=result.success,
+            ),
         )
         QMessageBox.information(
             self,

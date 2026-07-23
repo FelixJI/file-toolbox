@@ -2,7 +2,6 @@
 
 import contextlib
 import logging
-from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -32,6 +31,7 @@ from file_toolbox.core.batch_pdf.constants import (
 )
 from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
+from file_toolbox.gui.controllers.pdf_controller import PDFConfigState, PDFController
 from file_toolbox.gui.generated.ui_pdf_dialog import Ui_PDFGeneratorDialog
 
 # 下拉框显示文本 -> 服务层期望的常量值
@@ -78,6 +78,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.setupUi(self)
         self._svc = PDFGeneratorService()
         self._history = JsonHistoryStore()
+        self._controller = PDFController()
         # 各组 QButtonGroup,避免所有单选按钮因共享父控件而互相排斥
         self._type_group = QButtonGroup(self)
         self._engine_group = QButtonGroup(self)
@@ -187,6 +188,11 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     # ---------- 配置构建 ----------
 
     def _build_config(self) -> dict:
+        """从 UI 控件读取当前值 → PDFConfigState → 交 controller 编排为 config dict。
+
+        UI→值映射(常量字符串)保留在此处(与 Qt 控件耦合);纯编排逻辑落在
+        PDFController.build_config(可无 Qt 单测)。
+        """
         output_mode = OUTPUT_MERGE if self.ui.radio_merge.isChecked() else OUTPUT_SEPARATE
         pdf_type = PDF_TYPE_IMAGE if self.ui.radio_type_image.isChecked() else PDF_TYPE_EDITABLE
         print_mode = (
@@ -211,21 +217,20 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             or SCALE_DEFAULT
         )
 
-        config = {
-            "pdf_type": pdf_type,
-            "dpi": int(self.ui.combo_dpi.currentText() or DPI_DEFAULT),
-            "paper_size": paper_size,
-            "orientation": orientation,
-            "scale_mode": scale_mode,
-            "engine": engine,
-            "output_mode": output_mode,
-            "same_as_source": same_as_source,
-            "print_mode": print_mode,
-            "merge_filename": self.ui.edit_merge_filename.text().strip() or "合并文档.pdf",
-        }
-        if not same_as_source:
-            config["output_dir"] = Path(self.ui.edit_output_dir.text().strip())
-        return config
+        state = PDFConfigState(
+            pdf_type=pdf_type,
+            dpi=int(self.ui.combo_dpi.currentText() or DPI_DEFAULT),
+            paper_size=paper_size,
+            orientation=orientation,
+            scale_mode=scale_mode,
+            engine=engine,
+            output_mode=output_mode,
+            same_as_source=same_as_source,
+            print_mode=print_mode,
+            merge_filename=self.ui.edit_merge_filename.text(),
+            output_dir=self.ui.edit_output_dir.text(),
+        )
+        return self._controller.build_config(state)
 
     # ---------- 业务 ----------
 
@@ -274,31 +279,20 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         worker.start()
 
     def _on_progress(self, cur: int, total: int, msg: str):
-        self.ui.label_progress.setText(f"[{cur}/{total}] {msg}")
+        self.ui.label_progress.setText(self._controller.format_progress(cur, total, msg))
         pct = int(cur / total * 100) if total else 0
         self.ui.progress_bar.setValue(pct)
 
     def _on_generate_ok(self, results: list):
         self._render_results(results)
-        ok = sum(1 for r in results if r["success"])
-        fail = len(results) - ok
+        ok, fail = self._controller.summarize_results(results)
         self.ui.label_progress.setText(f"完成: 成功 {ok}, 失败 {fail}")
         # 记录历史(PDF 生成不可逆,仅供审计/复现)
         try:
             config = self._build_config()
             self._history.add_record(
                 "pdf",
-                {
-                    "files": [str(f) for f in self.selected_files],
-                    "success": ok,
-                    "failed": fail,
-                    "config": {
-                        "pdf_type": config["pdf_type"],
-                        "output_mode": config["output_mode"],
-                        "engine": config["engine"],
-                        "dpi": config["dpi"],
-                    },
-                },
+                self._controller.build_history_record(list(self.selected_files), ok, fail, config),
             )
         except Exception as e:
             self._module_logger.warning(f"写入历史失败: {e}", exc_info=True)

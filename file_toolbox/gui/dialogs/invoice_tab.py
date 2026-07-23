@@ -25,9 +25,9 @@ from PySide6.QtWidgets import (
 )
 
 from file_toolbox.common.history import JsonHistoryStore
-from file_toolbox.core.invoice.dedupe import DEDUPE, KEEP_ALL, MARK
 from file_toolbox.core.invoice.service import InvoiceService
 from file_toolbox.core.invoice.types import ParseResult
+from file_toolbox.gui.controllers.invoice_controller import InvoiceController
 
 _DUP_COLOR = QColor(255, 242, 204)  # 浅黄(重复)
 _PDF_COLOR = QColor(230, 230, 230)  # 浅灰(PDF 弱解析)
@@ -51,6 +51,7 @@ class InvoiceTab(QWidget):
         super().__init__(parent)
         self._svc = InvoiceService()
         self._history = JsonHistoryStore()
+        self._controller = InvoiceController()
         self._result: ParseResult | None = None
         self._files: list[Path] = []
         self._init_ui()
@@ -174,15 +175,10 @@ class InvoiceTab(QWidget):
             self._edit_outdir.setText(d)
 
     def _dedupe_strategy(self) -> str:
-        idx = self._cmb_dedupe.currentIndex()
-        return [KEEP_ALL, DEDUPE, MARK][idx]
+        return self._controller.dedupe_strategy(self._cmb_dedupe.currentIndex())
 
     def _format(self) -> str:
-        if self._rb_json.isChecked():
-            return "json"
-        if self._rb_both.isChecked():
-            return "both"
-        return "excel"
+        return self._controller.format(self._rb_json.isChecked(), self._rb_both.isChecked())
 
     # --- 解析 ---
     def _parse(self):
@@ -195,8 +191,12 @@ class InvoiceTab(QWidget):
         self._btn_export.setEnabled(bool(self._result.invoices))
         dup = sum(1 for i in self._result.invoices if i.is_duplicate)
         self._lbl_status.setText(
-            f"成功 {len(self._result.invoices)} | 重复标记 {dup} | "
-            f"去重移除 {len(self._result.duplicates)} | 失败 {len(self._result.failed)}"
+            self._controller.format_status(
+                len(self._result.invoices),
+                dup,
+                len(self._result.duplicates),
+                len(self._result.failed),
+            )
         )
 
     def _populate_table(self):
@@ -247,12 +247,12 @@ class InvoiceTab(QWidget):
         assert self._result is not None
         self._history.add_record(
             "invoice",
-            {
-                "file_count": len(self._files),
-                "invoice_count": len(self._result.invoices),
-                "dedupe_strategy": self._dedupe_strategy(),
-                "fmt": self._format(),
-                "outputs": [str(w) for w in written],
-            },
+            self._controller.build_history_record(
+                len(self._files),
+                len(self._result.invoices),
+                self._dedupe_strategy(),
+                self._format(),
+                written,
+            ),
         )
         QMessageBox.information(self, "完成", "已导出:\n" + "\n".join(str(w) for w in written))
