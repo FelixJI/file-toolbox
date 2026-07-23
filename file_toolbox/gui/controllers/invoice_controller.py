@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from file_toolbox.core.invoice.dedupe import DEDUPE, KEEP_ALL, MARK
 
 
@@ -52,8 +54,8 @@ class InvoiceController:
         invoice_count: int,
         dedupe_strategy: str,
         fmt: str,
-        outputs: list,
-    ) -> dict:
+        outputs: list[Any],
+    ) -> dict[str, Any]:
         """构造 history.add_record 的 record dict,键与原 InvoiceTab._export 一致。
 
         outputs 转为 str 列表(原行为:[str(w) for w in written])。

@@ -1,6 +1,10 @@
 """建文件夹 Tab:从层级或粘贴的 Excel 表格批量创建文件夹结构。"""
 
+from collections.abc import Callable
+from pathlib import Path
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -15,7 +19,11 @@ from PySide6.QtWidgets import (
 )
 
 from file_toolbox.common.history import JsonHistoryStore
-from file_toolbox.core.batch_mkdir import ConflictStrategy, FolderCreatorService
+from file_toolbox.core.batch_mkdir import (
+    ConflictStrategy,
+    FolderCreatorService,
+    FolderStructureItem,
+)
 from file_toolbox.gui.controllers.mkdir_controller import MkdirController
 from file_toolbox.gui.generated.ui_mkdir_dialog import Ui_BatchFolderCreatorDialog
 
@@ -30,10 +38,10 @@ _CONFLICT_OPTIONS = {
 class BatchFolderCreatorDialog(QDialog):
     """批量创建文件夹对话框(作为 Tab 嵌入)。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.ui = Ui_BatchFolderCreatorDialog()
-        self.ui.setupUi(self)
+        self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
         self._svc = FolderCreatorService()
         self._controller = MkdirController(self._svc)
         self._history = JsonHistoryStore()
@@ -48,7 +56,7 @@ class BatchFolderCreatorDialog(QDialog):
 
     # ---------- 初始化 ----------
 
-    def _add_conflict_selector(self):
+    def _add_conflict_selector(self) -> None:
         """在特殊字符按钮所在行追加冲突策略下拉框。
 
         生成的 UI 没有冲突策略控件,这里以最小侵入方式补充。
@@ -71,7 +79,7 @@ class BatchFolderCreatorDialog(QDialog):
             self.ui.verticalLayout_main.indexOf(self.ui.btn_fix_special_chars) + 1, wrap
         )
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         self.ui.btn_browse_root.clicked.connect(self._browse_root)
         self.ui.btn_clear.clicked.connect(self._clear)
         self.ui.btn_fix_special_chars.clicked.connect(self._fix_special_chars)
@@ -82,7 +90,7 @@ class BatchFolderCreatorDialog(QDialog):
 
     # ---------- UI 状态 ----------
 
-    def _refresh_ui_state(self):
+    def _refresh_ui_state(self) -> None:
         """根据表格/根目录内容刷新各按钮启用状态与预览树。"""
         has_structures = bool(self._collect_structures())
         self.ui.btn_create_folders.setEnabled(has_structures)
@@ -93,28 +101,26 @@ class BatchFolderCreatorDialog(QDialog):
 
         self._refresh_preview()
 
-    def _on_table_changed(self):
+    def _on_table_changed(self) -> None:
         self._refresh_ui_state()
 
     # ---------- 错误提示 ----------
 
-    def _show_error(self, message: str):
+    def _show_error(self, message: str) -> None:
         self.ui.label_error.setText(message)
         self.ui.label_error.setVisible(bool(message))
 
     # ---------- 文件/目录 ----------
 
-    def _browse_root(self):
+    def _browse_root(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "选择根目录")
         if d:
             self.ui.line_edit_root_path.setText(d)
 
-    def _root_path(self):
-        from pathlib import Path
-
+    def _root_path(self) -> Path:
         return Path(self.ui.line_edit_root_path.text().strip() or ".")
 
-    def _clear(self):
+    def _clear(self) -> None:
         self._paste_table().clearContents()
         self._paste_table().setRowCount(0)
         self._show_error("")
@@ -125,7 +131,7 @@ class BatchFolderCreatorDialog(QDialog):
 
     # ---------- 预览 ----------
 
-    def _refresh_preview(self):
+    def _refresh_preview(self) -> None:
         """根据表格内容重建右侧文件夹结构预览树。"""
         tree: QTreeWidget = self.ui.tree_preview
         tree.clear()
@@ -158,7 +164,7 @@ class BatchFolderCreatorDialog(QDialog):
 
     # ---------- 特殊字符处理 ----------
 
-    def _fix_special_chars(self):
+    def _fix_special_chars(self) -> None:
         """处理粘贴表中的特殊字符:替换为下划线 或 直接删除。
 
         对应 service 的 replace_special_chars / remove_special_chars。
@@ -221,12 +227,11 @@ class BatchFolderCreatorDialog(QDialog):
     def _selected_strategy(self) -> ConflictStrategy:
         return _CONFLICT_OPTIONS.get(self._combo_conflict.currentText(), ConflictStrategy.MERGE)
 
-    def _make_skip_callback(self):
+    def _make_skip_callback(self) -> Callable[[FolderStructureItem], bool]:
         """构造逐个确认回调:对已存在文件夹弹窗询问,返回 True 表示跳过。
 
         对应 service.create_folders 的 skip_callback 参数(CONFIRM 策略)。
         """
-        from file_toolbox.core.batch_mkdir import FolderStructureItem
 
         def _ask(item: FolderStructureItem) -> bool:
             reply = QMessageBox.question(
@@ -240,7 +245,7 @@ class BatchFolderCreatorDialog(QDialog):
 
         return _ask
 
-    def _create_folders(self):
+    def _create_folders(self) -> None:
         structures = self._collect_structures()
         if not structures:
             QMessageBox.information(self, "提示", "请先在表格中粘贴或输入文件夹结构。")
@@ -298,7 +303,7 @@ class BatchFolderCreatorDialog(QDialog):
         )
         self._refresh_ui_state()
 
-    def _open_root(self):
+    def _open_root(self) -> None:
         import os
         import sys
 
@@ -314,5 +319,5 @@ class BatchFolderCreatorDialog(QDialog):
 
             subprocess.Popen(["xdg-open", root])
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         super().closeEvent(event)

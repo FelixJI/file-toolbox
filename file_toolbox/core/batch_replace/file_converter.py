@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -20,15 +21,17 @@ class _LegacySpec:
     prog_id: str  # Office 应用 ProgID
     new_suffix: str  # 目标扩展名,如 ".docx"
     file_format: int  # SaveAs/SaveAs2 的 FileFormat 常量
-    open_doc: Callable  # open_doc(app, abs_path) -> document/workbook
-    save_doc: Callable  # save_doc(doc, abs_path, file_format) -> None
+    # open_doc(app, abs_path) -> document/workbook;app/doc 为 win32com 未类型化对象
+    open_doc: Callable[[Any, str], Any]
+    # save_doc(doc, abs_path, file_format) -> None
+    save_doc: Callable[[Any, str, int], None]
     error_label: str  # 错误提示名
 
 
 class FileConverterService:
     """文件格式转换服务"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.temp_files: list[Path] = []  # 记录临时文件
 
     def is_conversion_needed(self, file_path: Path) -> bool:
@@ -162,7 +165,7 @@ class FileConverterService:
             # 不需要转换
             return True, file_path, ""
 
-    def cleanup_temp_files(self):
+    def cleanup_temp_files(self) -> None:
         """清理临时转换文件"""
         # 检查Python是否正在关闭
         import sys
@@ -191,11 +194,11 @@ class FileConverterService:
                     break
         self.temp_files.clear()
 
-    def close(self):
+    def close(self) -> None:
         """关闭服务，清理临时文件"""
         self.cleanup_temp_files()
 
-    def __del__(self):
+    def __del__(self) -> None:
         """析构函数"""
         # 不执行任何操作，避免在Python关闭时导致崩溃
         # 清理由close()方法显式调用

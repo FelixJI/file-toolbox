@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.core.batch_pdf.constants import (
     DPI_DEFAULT,
@@ -51,7 +52,7 @@ class PDFController:
     - build_history_record:构建写入 JsonHistoryStore 的记录 dict
     """
 
-    def build_config(self, state: PDFConfigState) -> dict:
+    def build_config(self, state: PDFConfigState) -> dict[str, Any]:
         """PDFConfigState -> 服务层 config dict。
 
         与原 pdf_tab._build_config 完全等价:
@@ -75,7 +76,7 @@ class PDFController:
             config["output_dir"] = Path(state.output_dir.strip())
         return config
 
-    def summarize_results(self, results: list[dict]) -> tuple[int, int]:
+    def summarize_results(self, results: list[dict[str, Any]]) -> tuple[int, int]:
         """返回 (ok_count, fail_count):ok = r["success"] 为真的数量。"""
         ok = sum(1 for r in results if r["success"])
         return ok, len(results) - ok
@@ -84,7 +85,9 @@ class PDFController:
         """进度文案:与原 pdf_tab._on_progress 的 label 格式一致。"""
         return f"[{cur}/{total}] {msg}"
 
-    def build_history_record(self, files: list[Path], ok: int, fail: int, config: dict) -> dict:
+    def build_history_record(
+        self, files: list[Path], ok: int, fail: int, config: dict[str, Any]
+    ) -> dict[str, Any]:
         """构建写入 JsonHistoryStore 的记录 dict。
 
         与原 pdf_tab._on_generate_ok 内联结构完全一致:files 转 str 列表,

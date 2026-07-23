@@ -3,6 +3,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 class JsonHistoryStore:
@@ -19,11 +20,11 @@ class JsonHistoryStore:
     def _file(self, tool: str) -> Path:
         return self._dir / f"{tool}.jsonl"
 
-    def _read_all(self, tool: str) -> list[dict]:
+    def _read_all(self, tool: str) -> list[dict[str, Any]]:
         f = self._file(tool)
         if not f.exists():
             return []
-        records: list[dict] = []
+        records: list[dict[str, Any]] = []
         for line in f.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line:
@@ -33,7 +34,7 @@ class JsonHistoryStore:
                     continue
         return records
 
-    def _write_all(self, tool: str, records: list[dict]) -> None:
+    def _write_all(self, tool: str, records: list[dict[str, Any]]) -> None:
         self._dir.mkdir(parents=True, exist_ok=True)
         f = self._file(tool)
         with open(f, "w", encoding="utf-8") as fh:
@@ -55,12 +56,12 @@ class JsonHistoryStore:
                 last_line = line
         if last_line:
             try:
-                return json.loads(last_line).get("id", 0)
+                return int(json.loads(last_line).get("id", 0))
             except json.JSONDecodeError:
                 return max((r["id"] for r in self._read_all(tool)), default=0)
         return 0
 
-    def add_record(self, tool: str, data: dict) -> int:
+    def add_record(self, tool: str, data: dict[str, Any]) -> int:
         """追加一条记录(O(1) append,不全量重写),返回自增 id。"""
         self._dir.mkdir(parents=True, exist_ok=True)
         rid = self._last_id(tool) + 1
@@ -75,12 +76,12 @@ class JsonHistoryStore:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
         return rid
 
-    def get_records(self, tool: str, limit: int = 100) -> list[dict]:
+    def get_records(self, tool: str, limit: int = 100) -> list[dict[str, Any]]:
         """获取最近 limit 条记录（limit<=0 表示全部）。"""
         records = self._read_all(tool)
         return records[-limit:] if limit else records
 
-    def get_record(self, tool: str, record_id: int) -> dict | None:
+    def get_record(self, tool: str, record_id: int) -> dict[str, Any] | None:
         """获取单条记录。"""
         for rec in self._read_all(tool):
             if rec["id"] == record_id:

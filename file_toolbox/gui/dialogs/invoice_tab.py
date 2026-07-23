@@ -24,7 +24,7 @@ _INVOICE_EXTS = (".zip", ".xml", ".ofd", ".pdf")
 class InvoiceTab(QWidget):
     """发票识别 Tab。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.ui = Ui_InvoiceDialog()
         self.ui.setupUi(self)
@@ -35,7 +35,7 @@ class InvoiceTab(QWidget):
         self._files: list[Path] = []
         self._connect()
 
-    def _connect(self):
+    def _connect(self) -> None:
         self.ui.btn_add_files.clicked.connect(self._add_files)
         self.ui.btn_add_folder.clicked.connect(self._add_folder)
         self.ui.btn_clear.clicked.connect(self._clear)
@@ -44,7 +44,7 @@ class InvoiceTab(QWidget):
         self.ui.btn_export.clicked.connect(self._export)
 
     # --- 文件管理 ---
-    def _add_files(self):
+    def _add_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self, "选择发票文件", "", "发票文件 (*.zip *.xml *.ofd *.pdf)"
         )
@@ -52,7 +52,7 @@ class InvoiceTab(QWidget):
             self._files.append(Path(p))
             self.ui.list_files.addItem(Path(p).name)
 
-    def _add_folder(self):
+    def _add_folder(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if not d:
             return
@@ -78,7 +78,7 @@ class InvoiceTab(QWidget):
             self._files.append(p)
             self.ui.list_files.addItem(p.name)
 
-    def _clear(self):
+    def _clear(self) -> None:
         self._files.clear()
         self.ui.list_files.clear()
         self.ui.table.setRowCount(0)
@@ -86,7 +86,7 @@ class InvoiceTab(QWidget):
         self.ui.btn_export.setEnabled(False)
         self.ui.lbl_status.setText("就绪")
 
-    def _browse_outdir(self):
+    def _browse_outdir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if d:
             self.ui.edit_outdir.setText(d)
@@ -98,7 +98,7 @@ class InvoiceTab(QWidget):
         return self._controller.format(self.ui.rb_json.isChecked(), self.ui.rb_both.isChecked())
 
     # --- 解析 ---
-    def _parse(self):
+    def _parse(self) -> None:
         if not self._files:
             QMessageBox.warning(self, "提示", "请先添加发票文件")
             return
@@ -116,7 +116,7 @@ class InvoiceTab(QWidget):
             )
         )
 
-    def _populate_table(self):
+    def _populate_table(self) -> None:
         assert self._result is not None
         self.ui.table.setRowCount(len(self._result.invoices))
         for r, inv in enumerate(self._result.invoices):
@@ -139,7 +139,7 @@ class InvoiceTab(QWidget):
                 self.ui.table.setItem(r, c, item)
 
     # --- 导出 ---
-    def _export(self):
+    def _export(self) -> None:
         if not self._result or not self._result.invoices:
             QMessageBox.warning(self, "提示", "无数据可导出")
             return

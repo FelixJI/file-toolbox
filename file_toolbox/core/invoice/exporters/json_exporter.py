@@ -3,11 +3,12 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.core.invoice.types import FailedFile, Invoice
 
 
-def _invoice_to_dict(inv: Invoice) -> dict:
+def _invoice_to_dict(inv: Invoice) -> dict[str, Any]:
     return {
         "invoice_number": inv.invoice_number,
         "invoice_type": inv.invoice_type,

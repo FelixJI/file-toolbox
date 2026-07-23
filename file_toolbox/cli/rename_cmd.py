@@ -33,7 +33,7 @@ def rename(
     directory: Path | None = typer.Option(None, "--dir", help="目录(批量加入)"),
     recursive: bool = typer.Option(False, "--recursive", help="递归子目录"),
     yes: bool = typer.Option(False, "--yes", help="跳过确认直接执行(默认仅预览)"),
-):
+) -> None:
     """批量重命名文件。"""
     operations = parse_ops(op)
     if not operations:

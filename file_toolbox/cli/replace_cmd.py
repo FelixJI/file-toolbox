@@ -13,7 +13,7 @@ def replace(
     op: list[str] = typer.Option([], "--op", help="操作,格式 type:key=value,可多次"),
     yes: bool = typer.Option(False, "--yes", help="跳过预览直接执行"),
     keep_backup: bool = typer.Option(True, "--keep-backup/--no-backup", help="保留备份"),
-):
+) -> None:
     """批量替换 Word/Excel/txt 文档内容。"""
     operations = parse_ops(op)
     if not operations:

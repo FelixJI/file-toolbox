@@ -3,6 +3,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.common.paths import get_data_dir
 
@@ -10,7 +11,7 @@ from file_toolbox.common.paths import get_data_dir
 class RenameTemplateService:
     """重命名模板服务"""
 
-    def __init__(self, config_path: str | Path | None = None):
+    def __init__(self, config_path: str | Path | None = None) -> None:
         """
         初始化模板服务
 
@@ -21,32 +22,33 @@ class RenameTemplateService:
         if config_path is None:
             config_path = get_data_dir() / "rename_templates.json"
         self.config_path = Path(config_path)
-        self._templates: dict[str, dict] | None = None  # 延迟加载，使用时才读取
+        self._templates: dict[str, dict[str, Any]] | None = None  # 延迟加载，使用时才读取
 
     @property
-    def templates(self) -> dict[str, dict]:
+    def templates(self) -> dict[str, dict[str, Any]]:
         """延迟加载模板"""
         if self._templates is None:
             self._templates = self._load_templates()
         return self._templates
 
     @templates.setter
-    def templates(self, value: dict[str, dict]):
+    def templates(self, value: dict[str, dict[str, Any]]) -> None:
         """设置模板"""
         self._templates = value
 
-    def _load_templates(self) -> dict[str, dict]:
+    def _load_templates(self) -> dict[str, dict[str, Any]]:
         """加载模板配置"""
         if not self.config_path.exists():
             return {}
 
         try:
             with open(self.config_path, encoding="utf-8") as f:
-                return json.load(f)
+                data: dict[str, dict[str, Any]] = json.load(f)
+                return data
         except (OSError, json.JSONDecodeError):
             return {}
 
-    def _save_templates(self):
+    def _save_templates(self) -> None:
         """保存模板配置"""
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -54,7 +56,9 @@ class RenameTemplateService:
         except OSError as e:  # pragma: no cover - 磁盘满/权限拒绝难以在测试中触发
             raise Exception(f"保存模板失败: {e!s}") from e
 
-    def add_template(self, name: str, operations: list[dict], description: str = "") -> bool:
+    def add_template(
+        self, name: str, operations: list[dict[str, Any]], description: str = ""
+    ) -> bool:
         """
         添加模板
 
@@ -82,7 +86,9 @@ class RenameTemplateService:
         self._save_templates()
         return True
 
-    def update_template(self, name: str, operations: list[dict], description: str = "") -> bool:
+    def update_template(
+        self, name: str, operations: list[dict[str, Any]], description: str = ""
+    ) -> bool:
         """
         更新模板
 
@@ -121,7 +127,7 @@ class RenameTemplateService:
         self._save_templates()
         return True
 
-    def get_template(self, name: str) -> dict | None:
+    def get_template(self, name: str) -> dict[str, Any] | None:
         """
         获取模板
 
@@ -133,7 +139,7 @@ class RenameTemplateService:
         """
         return self.templates.get(name)
 
-    def get_all_templates(self) -> list[dict]:
+    def get_all_templates(self) -> list[dict[str, Any]]:
         """
         获取所有模板
 
@@ -180,7 +186,7 @@ class RenameTemplateService:
         self._save_templates()
         return True
 
-    def clear_all(self):
+    def clear_all(self) -> None:
         """清空所有模板"""
         self.templates = {}
         self._save_templates()
@@ -220,10 +226,10 @@ class RenameTemplateService:
         """
         try:
             with open(file_path, encoding="utf-8") as f:
-                data = json.load(f)
+                data: dict[str, Any] = json.load(f)
 
-            name = data.get("template_name")
-            template_data = data.get("template_data")
+            name: str | None = data.get("template_name")
+            template_data: dict[str, Any] | None = data.get("template_data")
 
             if not name or not template_data:
                 return None

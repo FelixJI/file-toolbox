@@ -3,6 +3,7 @@
 import contextlib
 
 from PySide6.QtCore import QMetaObject, Qt, QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -33,7 +34,7 @@ from file_toolbox.updater.versions import RemoteRelease
 class MainWindow(QMainWindow):
     """工具箱主窗口,4 个功能 Tab。"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("File Toolbox")
         self.resize(950, 720)
@@ -94,7 +95,7 @@ class MainWindow(QMainWindow):
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
 
-    def _open_history(self):
+    def _open_history(self) -> None:
         # 简单起见:用一个下拉选择工具,默认显示 rename 历史
         from PySide6.QtWidgets import QInputDialog
 
@@ -169,7 +170,7 @@ class MainWindow(QMainWindow):
             if downloaded >= total:
                 self._update_dialog.setLabelText("正在校验完整性…")
 
-    def _on_update_verified(self, zip_path) -> None:
+    def _on_update_verified(self, zip_path: str) -> None:
         """下载校验完成 → 提示用户应用更新(用户已取消则静默)。"""
         if self._update_dialog is not None:
             self._update_dialog.close()
@@ -194,7 +195,7 @@ class MainWindow(QMainWindow):
             return
         QMessageBox.warning(self, "更新失败", f"{msg}\n\n请稍后重试,或前往开源仓库手动下载。")
 
-    def _apply_update(self, zip_path) -> None:
+    def _apply_update(self, zip_path: str) -> None:
         """生成 helper + 启动 + 退出本程序。替换失败 → 友好提示,不崩溃。"""
         import sys
         from pathlib import Path as _Path
@@ -213,7 +214,7 @@ class MainWindow(QMainWindow):
 
         QApplication.quit()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         # 退出自更新 worker 线程(若有)
         try:
             if self._update_worker.isRunning():
@@ -236,7 +237,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def run_gui():
+def run_gui() -> None:
     """启动 GUI(供 cli gui 子命令调用)。"""
     import sys
 

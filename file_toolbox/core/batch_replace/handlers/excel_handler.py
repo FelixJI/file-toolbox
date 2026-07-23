@@ -6,6 +6,7 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
 
@@ -17,7 +18,11 @@ FILE_OPERATION_TIMEOUT = 30
 class ExcelHandler(LoggableMixin):
     """Excel 文档处理器"""
 
-    def __init__(self, get_office_pids: Callable, kill_office_processes: Callable):
+    def __init__(
+        self,
+        get_office_pids: Callable[[str], list[int]],
+        kill_office_processes: Callable[[str, list[int]], None],
+    ) -> None:
         """
 
         初始化 Excel 处理器
@@ -126,11 +131,11 @@ class ExcelHandler(LoggableMixin):
     def batch_replace(
         self,
         files: list[Path],
-        operations: list[dict],
+        operations: list[dict[str, Any]],
         upgrade_format: bool = False,
-        cancel_check: Callable | None = None,
-        file_progress_callback: Callable | None = None,
-    ) -> dict:  # pragma: no cover
+        cancel_check: Callable[[], bool] | None = None,
+        file_progress_callback: Callable[[int], None] | None = None,
+    ) -> dict[str, Any]:  # pragma: no cover
         """
 
         批量替换 Excel 文档
@@ -160,7 +165,7 @@ class ExcelHandler(LoggableMixin):
         import pythoncom
         import win32com.client
 
-        result: dict = {"success_count": 0, "total_replacements": 0, "errors": []}
+        result: dict[str, Any] = {"success_count": 0, "total_replacements": 0, "errors": []}
 
         if not files:
             return result
@@ -209,7 +214,7 @@ class ExcelHandler(LoggableMixin):
 
                 try:
 
-                    def check_timeout(start_time=file_start_time):
+                    def check_timeout(start_time: float = file_start_time) -> None:
                         if time.time() - start_time > FILE_OPERATION_TIMEOUT:
                             raise TimeoutError(f"文件操作超时 ({FILE_OPERATION_TIMEOUT}s)")
 
@@ -353,7 +358,10 @@ class ExcelHandler(LoggableMixin):
         return result
 
     def _execute_operation(
-        self, wb, operation: dict, check_timeout: Callable | None = None
+        self,
+        wb: Any,
+        operation: dict[str, Any],
+        check_timeout: Callable[[], None] | None = None,
     ) -> int:  # pragma: no cover
         """执行单个替换操作"""
 
@@ -361,7 +369,7 @@ class ExcelHandler(LoggableMixin):
 
         op_type = operation.get("type")
 
-        params = operation.get("params", {})
+        params: dict[str, Any] = operation.get("params", {})
 
         total_count = 0
 
@@ -441,7 +449,7 @@ class ExcelHandler(LoggableMixin):
 
         return total_count
 
-    def _count_matches_in_text(self, content: str, operations: list[dict]) -> int:
+    def _count_matches_in_text(self, content: str, operations: list[dict[str, Any]]) -> int:
         """统计文本中的匹配数"""
 
         from file_toolbox.core.batch_replace.types import ReplaceOperationType
@@ -484,7 +492,7 @@ class ExcelHandler(LoggableMixin):
         return total
 
     def _count_excel_matches(
-        self, sheet, find_text: str, match_case: bool
+        self, sheet: Any, find_text: str, match_case: bool
     ) -> int:  # pragma: no cover
         """统计 Excel 工作表中的匹配数"""
         count = 0
@@ -524,8 +532,8 @@ class ExcelHandler(LoggableMixin):
         return count
 
     def _replace_headers_footers(
-        self, sheet, find_text: str, replace_text: str, case_sensitive: bool
-    ):  # pragma: no cover
+        self, sheet: Any, find_text: str, replace_text: str, case_sensitive: bool
+    ) -> None:  # pragma: no cover
         """替换 Excel 页眉页脚"""
 
         try:
@@ -562,7 +570,9 @@ class ExcelHandler(LoggableMixin):
         except Exception as e:
             self.logger.error(f"Excel页眉页脚替换失败: {e}")
 
-    def _replace_headers_footers_regex(self, sheet, pattern, replace_text: str):  # pragma: no cover
+    def _replace_headers_footers_regex(
+        self, sheet: Any, pattern: re.Pattern[str], replace_text: str
+    ) -> None:  # pragma: no cover
         """使用正则替换 Excel 页眉页脚"""
 
         try:

@@ -6,6 +6,7 @@ PDF工具函数
 
 import contextlib
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from file_toolbox.common.file_utils import format_file_size
 
@@ -19,6 +20,9 @@ from .constants import (
     SCALE_DEFAULT,
     SCALE_FIT_MARGIN,
 )
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 
 def convert_pdf_to_image_pdf(
@@ -112,7 +116,7 @@ def convert_pdf_to_image_pdf(
         return False, f"转换图片型PDF失败: {e!s}"
 
 
-def _resize_to_fit(img, max_w: int, max_h: int):
+def _resize_to_fit(img: "Image.Image", max_w: int, max_h: int) -> "Image.Image":
     """
     等比缩放图片以适应目标尺寸，支持放大和缩小。
     与 thumbnail() 不同，当图片小于目标尺寸时会放大。
@@ -129,8 +133,12 @@ def _resize_to_fit(img, max_w: int, max_h: int):
 
 
 def _fit_image_to_paper(
-    img, paper_size: str, orientation: str, dpi: int, scale_mode: str = SCALE_DEFAULT
-):
+    img: "Image.Image",
+    paper_size: str,
+    orientation: str,
+    dpi: int,
+    scale_mode: str = SCALE_DEFAULT,
+) -> "Image.Image":
     """
     将图片适应到指定纸张尺寸
 
@@ -265,7 +273,7 @@ def merge_pdfs(
         return False, f"合并PDF失败: {e!s}"
 
 
-def get_file_info(file_path: Path, supported_formats: dict) -> dict:
+def get_file_info(file_path: Path, supported_formats: dict[str, list[str]]) -> dict[str, Any]:
     """
     获取文件信息
 

@@ -1,6 +1,7 @@
 """操作服务基类 - 提供通用的操作验证逻辑。"""
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class BaseOperationService(ABC):
@@ -12,11 +13,11 @@ class BaseOperationService(ABC):
         pass
 
     @abstractmethod
-    def _validate_params(self, operation: dict, index: int) -> tuple[bool, str]:
+    def _validate_params(self, operation: dict[str, Any], index: int) -> tuple[bool, str]:
         """验证操作参数（子类实现）。"""
         pass
 
-    def validate_operations(self, operations: list[dict]) -> tuple[bool, str]:
+    def validate_operations(self, operations: list[dict[str, Any]]) -> tuple[bool, str]:
         """
         验证操作列表。
 

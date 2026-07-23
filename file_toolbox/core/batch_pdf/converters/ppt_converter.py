@@ -5,7 +5,7 @@ PowerPoint转PDF转换器
 """
 
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from ..constants import (
     ORIENTATION_AUTO_DETECT,
@@ -30,7 +30,7 @@ class PptConverter:
     def __init__(self, engine_manager: EngineManager):
         self._engine_manager = engine_manager
 
-    def _detect_orientation(self, presentation) -> str:  # pragma: no cover
+    def _detect_orientation(self, presentation: Any) -> str:  # pragma: no cover
         """
         检测PPT应该使用的方向
         根据幻灯片宽高比判断
@@ -45,7 +45,7 @@ class PptConverter:
         return "portrait"
 
     def convert(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:  # pragma: no cover
         """
         从PowerPoint文档生成PDF

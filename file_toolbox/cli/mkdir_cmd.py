@@ -14,7 +14,7 @@ def mkdir(
     levels: list[str] = typer.Option([], "--levels", help='层级,用 / 分隔,如 "部门A/项目1"'),
     from_table: Path | None = typer.Option(None, "--from-table", help="从 Tab 分隔文件读结构"),
     on_conflict: str = typer.Option("merge", "--on-conflict", help="skip|merge"),
-):
+) -> None:
     """批量创建文件夹。"""
     strategy = _STRATEGY_MAP.get(on_conflict, ConflictStrategy.MERGE)
     svc = FolderCreatorService()

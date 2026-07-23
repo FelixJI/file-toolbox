@@ -12,7 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QLabel
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QLabel, QWidget
 
 from file_toolbox.updater.errors import UpdateError
 from file_toolbox.updater.versions import RemoteRelease
@@ -26,7 +27,7 @@ class UpdateBanner(QLabel):
 
     clicked = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setStyleSheet(
             "color: #0969da; padding: 2px 8px; cursor: pointer; text-decoration: underline;"
@@ -37,7 +38,7 @@ class UpdateBanner(QLabel):
         self.setText(f"🆕 发现新版本 {release.version} · 点击更新")
         self.show()
 
-    def mousePressEvent(self, event):  # noqa: N802 (Qt 命名)
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt 命名)
         self.clicked.emit()
 
 
@@ -64,7 +65,7 @@ class UpdateWorker(QThread):
     verified = Signal(Path)
     failed = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
     def run(self) -> None:

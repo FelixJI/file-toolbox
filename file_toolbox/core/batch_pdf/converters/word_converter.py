@@ -5,6 +5,7 @@ Word转PDF转换器
 """
 
 from pathlib import Path
+from typing import Any
 
 from ..constants import (
     ORIENTATION_AUTO_DETECT,
@@ -29,7 +30,7 @@ class WordConverter:
         # wdOrientPortrait = 0, wdOrientLandscape = 1
         return 1 if orientation == ORIENTATION_LANDSCAPE else 0
 
-    def _detect_orientation(self, doc) -> str:  # pragma: no cover
+    def _detect_orientation(self, doc: Any) -> str:  # pragma: no cover
         """
         检测Word文档应该使用的方向
         根据页面宽高比例判断
@@ -46,7 +47,7 @@ class WordConverter:
         return "portrait"
 
     def convert(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:  # pragma: no cover
         """
         从Word文档生成PDF

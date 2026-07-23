@@ -12,6 +12,7 @@
 
 import re
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.core.invoice.parsers.base import UnsupportedFormatError
 from file_toolbox.core.invoice.types import Invoice, LineItem
@@ -21,6 +22,9 @@ try:
     import pdfplumber
 except ImportError as e:
     raise ImportError("PDF 解析需要 pdfplumber: pip install 'file-toolbox[invoice]'") from e
+
+# pdfplumber 返回的 word 字典(含 x0/x1/top/text 等键,库未提供类型存根)
+Word = dict[str, Any]
 
 
 # --------------------------------------------------------------------------- #
@@ -53,9 +57,9 @@ _SINGLE_CHAR_COL: dict[str, str | None] = {
 }
 
 
-def _word_center(w: dict) -> float:
+def _word_center(w: Word) -> float:
     """word 的水平中心。判列用中心而非 x0,避免长数字误归邻列。"""
-    return (w["x0"] + w["x1"]) / 2
+    return (float(w["x0"]) + float(w["x1"])) / 2
 
 
 # --------------------------------------------------------------------------- #
@@ -63,7 +67,7 @@ def _word_center(w: dict) -> float:
 # --------------------------------------------------------------------------- #
 
 
-def _learn_columns(header_words: list[dict]) -> dict[str, float]:
+def _learn_columns(header_words: list[Word]) -> dict[str, float]:
     """从表头行 word 动态学习各列中心 x。
 
     兼容两种形态:
@@ -149,7 +153,7 @@ def _learn_columns(header_words: list[dict]) -> dict[str, float]:
     return cols
 
 
-def _column_of(w: dict, col_centers: dict[str, float]) -> str:
+def _column_of(w: Word, col_centers: dict[str, float]) -> str:
     """根据 word 中心找最近的表头列名。"""
     cx = _word_center(w)
     best_col = min(col_centers, key=lambda c: abs(cx - col_centers[c]))
@@ -161,9 +165,9 @@ def _column_of(w: dict, col_centers: dict[str, float]) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _group_rows(words: list[dict]) -> tuple[dict[int, list[dict]], list[int]]:
+def _group_rows(words: list[Word]) -> tuple[dict[int, list[Word]], list[int]]:
     """按 top 分行(3pt 容差)。返回 ({y_key: [words]}, 有序 y_keys)。"""
-    rows: dict[int, list[dict]] = {}
+    rows: dict[int, list[Word]] = {}
     keys_in_order: list[int] = []
     for w in words:
         key = round(w["top"] / 3)
@@ -179,7 +183,7 @@ def _group_rows(words: list[dict]) -> tuple[dict[int, list[dict]], list[int]]:
 # --------------------------------------------------------------------------- #
 
 
-def _extract_detail_items(words: list[dict], col_centers: dict[str, float]) -> list[LineItem]:
+def _extract_detail_items(words: list[Word], col_centers: dict[str, float]) -> list[LineItem]:
     """用 word 坐标提取明细。比依赖 extract_tables 的列检测更稳定。
 
     流程:按 y 分行 -> 定位表头行 -> 动态学列锚点 -> 每行按 word 中心落列 -> 合并续行。
@@ -266,7 +270,7 @@ def _extract_detail_items(words: list[dict], col_centers: dict[str, float]) -> l
 # --------------------------------------------------------------------------- #
 
 
-def _extract_invoice_number(rows: dict[int, list[dict]], keys: list[int]) -> str:
+def _extract_invoice_number(rows: dict[int, list[Word]], keys: list[int]) -> str:
     """从含'发票号码'的行提取 18+ 位数字。"""
     for key in keys:
         row_text = "".join(w["text"] for w in rows[key])
@@ -283,7 +287,7 @@ def _extract_invoice_number(rows: dict[int, list[dict]], keys: list[int]) -> str
     return ""
 
 
-def _extract_issue_date(rows: dict[int, list[dict]], keys: list[int]) -> str:
+def _extract_issue_date(rows: dict[int, list[Word]], keys: list[int]) -> str:
     """提取开票日期 YYYY-MM-DD(容忍'YYYY年MM月DD日')。"""
     for key in keys:
         for w in rows[key]:
@@ -310,7 +314,7 @@ _TAX_LABELS = (
 
 
 def _find_label_word(
-    rows: dict[int, list[dict]], keys: list[int], labels: tuple[str, ...]
+    rows: dict[int, list[Word]], keys: list[int], labels: tuple[str, ...]
 ) -> list[tuple[float, str]]:
     """在所有行找含 labels 任一的 word,返回 [(x0, 冒号后的值)]。"""
     hits: list[tuple[float, str]] = []
@@ -332,7 +336,9 @@ def _find_label_word(
     return hits
 
 
-def _extract_party_by_label(words_grouped: tuple[dict, list]) -> tuple[str, str]:
+def _extract_party_by_label(
+    words_grouped: tuple[dict[int, list[Word]], list[int]],
+) -> tuple[str, str]:
     """优先用竖排'购/销'标签定位买卖方。返回 (seller_name, buyer_name)。
 
     真实发票有竖排'购买方'(左) / '销售方'(右) 标签字;
@@ -372,7 +378,7 @@ def _extract_party_by_label(words_grouped: tuple[dict, list]) -> tuple[str, str]
     return seller, buyer
 
 
-def _extract_tax_ids(words_grouped: tuple[dict, list]) -> tuple[str, str]:
+def _extract_tax_ids(words_grouped: tuple[dict[int, list[Word]], list[int]]) -> tuple[str, str]:
     """提取买卖方税号。优先用购/销标签 x 定位,退回出现顺序。"""
     rows, keys = words_grouped
     gou_x: list[float] = []
@@ -409,12 +415,12 @@ def _extract_tax_ids(words_grouped: tuple[dict, list]) -> tuple[str, str]:
 # --------------------------------------------------------------------------- #
 
 
-def _row_join_no_space(ws: list[dict]) -> str:
+def _row_join_no_space(ws: list[Word]) -> str:
     """把一行 word 的 text 直接拼接(不加空格),解决'合 计'拆字问题。"""
     return "".join(w["text"] for w in ws)
 
 
-def _extract_amounts(rows: dict[int, list[dict]], keys: list[int]) -> tuple[str, str, str]:
+def _extract_amounts(rows: dict[int, list[Word]], keys: list[int]) -> tuple[str, str, str]:
     """从行 word 提取 不含税金额/税额/价税合计。
 
     合计行判定:拼接后含'合计'(去空格后匹配,容忍'合 计')且不含'价税合计'。
@@ -452,7 +458,7 @@ def _extract_amounts(rows: dict[int, list[dict]], keys: list[int]) -> tuple[str,
 
 
 def _find_amount_in_next_rows(
-    rows: dict[int, list[dict]], keys: list[int], start_key: int, look: int = 2
+    rows: dict[int, list[Word]], keys: list[int], start_key: int, look: int = 2
 ) -> str:
     """从 start_key 之后 look 个 y 行里找第一个金额数字(x.x​x)。
 
@@ -476,7 +482,7 @@ def _find_amount_in_next_rows(
     return ""
 
 
-def _extract_amount_chinese(rows: dict[int, list[dict]], keys: list[int]) -> str:
+def _extract_amount_chinese(rows: dict[int, list[Word]], keys: list[int]) -> str:
     """提取大写金额(含 圆/元/角/分/整 的中文串)。"""
     for key in keys:
         ws = rows[key]
@@ -506,7 +512,7 @@ def parse_pdf(path: Path, source_file: str = "") -> Invoice:
         rows, keys = _group_rows(words)
 
         # 动态学列锚点:从表头行 word 学,失败用保底值
-        header_words: list[dict] = []
+        header_words: list[Word] = []
         for key in keys:
             row_text = "".join(w["text"] for w in rows[key])
             if all(kw in row_text for kw in _HEADER_KEYWORDS):

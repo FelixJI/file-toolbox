@@ -2,10 +2,11 @@
 
 import contextlib
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QThread, QTimer
 from PySide6.QtWidgets import QFileDialog, QListWidget, QMessageBox, QTableWidget, QWidget
 
 from file_toolbox.common.file_utils import format_file_size, get_file_info
@@ -18,20 +19,20 @@ WORKER_STOP_TIMEOUT_MS = 3000
 class SignalManager(QObject):
     """集中管理信号槽连接,便于清理。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._connections: list = []
+        self._connections: list[tuple[Any, Any, str]] = []
 
     # NOTE: 故意不叫 connect() —— 那会与 QObject.connect 签名冲突(mypy [override]),
     # 且本管理器的三参形态(带 description)与 Qt 单参 connect 语义不同。
-    def add_connection(self, signal, slot, description: str = ""):
+    def add_connection(self, signal: Any, slot: Callable[..., Any], description: str = "") -> None:
         try:
             signal.connect(slot)
             self._connections.append((signal, slot, description))
         except Exception:
             pass
 
-    def disconnect_all(self):
+    def disconnect_all(self) -> None:
         for signal, slot, _ in self._connections:
             with contextlib.suppress(RuntimeError):
                 signal.disconnect(slot)
@@ -47,8 +48,11 @@ class BatchDialogMixin:
     # 子类(QDialog 子类,如 PDFGeneratorDialog)必须提供 logger。
     # 声明类型而非赋值:mypy 据此认定 self.logger 合法,且不在此引入实例属性。
     logger: logging.Logger
+    # worker 可能是任意 QThread 子类(如 PdfGenerateWorker),运行期可为 None。
+    # 声明类级类型,避免 mypy 从 self.worker = None 推断出过于窄的 None 类型。
+    worker: QThread | None
 
-    def _init_batch_dialog(self):
+    def _init_batch_dialog(self) -> None:
         """初始化批处理对话框功能（在__init__中调用）"""
         self.selected_files: list[Path] = []
         self.worker = None
@@ -83,7 +87,9 @@ class BatchDialogMixin:
             return True
         return file_path.suffix.lower() in self.SUPPORTED_FORMATS
 
-    def _select_files(self, list_widget: QListWidget | None = None, auto_preview: bool = True):
+    def _select_files(
+        self, list_widget: QListWidget | None = None, auto_preview: bool = True
+    ) -> None:
         """选择文件"""
         files, _ = QFileDialog.getOpenFileNames(
             cast(QWidget, self), "选择文件", "", self._get_file_filter()
@@ -107,7 +113,7 @@ class BatchDialogMixin:
         list_widget: QListWidget | None = None,
         ask_recursive: bool = True,
         auto_preview: bool = True,
-    ):
+    ) -> None:
         """选择文件夹"""
         folder = QFileDialog.getExistingDirectory(cast(QWidget, self), "选择文件夹")
         if not folder:
@@ -155,7 +161,7 @@ class BatchDialogMixin:
 
     def _clear_files(
         self, list_widget: QListWidget | None = None, table_widget: QTableWidget | None = None
-    ):
+    ) -> None:
         """清空文件列表"""
         self.selected_files.clear()
         if list_widget:
@@ -164,16 +170,16 @@ class BatchDialogMixin:
             table_widget.setRowCount(0)
         self._update_status()
 
-    def _refresh_preview(self):
+    def _refresh_preview(self) -> None:
         """刷新预览（带防抖机制）"""
         self._preview_timer.stop()
         self._preview_timer.start(self.PREVIEW_DEBOUNCE_MS)
 
-    def _do_refresh_preview(self):
+    def _do_refresh_preview(self) -> None:
         """执行刷新预览（子类必须实现）"""
         pass
 
-    def _stop_worker(self, timeout_ms: int = WORKER_STOP_TIMEOUT_MS):
+    def _stop_worker(self, timeout_ms: int = WORKER_STOP_TIMEOUT_MS) -> None:
         """停止工作线程"""
         if self.worker and self.worker.isRunning():
             if hasattr(self.worker, "cancel"):
@@ -187,7 +193,7 @@ class BatchDialogMixin:
                 self.worker.wait(1000)
         self.worker = None
 
-    def _set_ui_enabled(self, enabled: bool):
+    def _set_ui_enabled(self, enabled: bool) -> None:
         """设置UI启用状态（子类可覆盖）"""
         pass
 
@@ -195,11 +201,11 @@ class BatchDialogMixin:
         """格式化文件大小"""
         return format_file_size(size)
 
-    def _get_file_info(self, file_path: Path) -> dict:
+    def _get_file_info(self, file_path: Path) -> dict[str, object]:
         """获取文件信息"""
         return get_file_info(file_path)
 
-    def _update_status(self):
+    def _update_status(self) -> None:
         """文件列表变更后的钩子(选择/清空文件后由 mixin 自动调用)。
 
         默认空实现;子类按需覆盖(如更新"已选择 N 个文件"标签)。
@@ -208,7 +214,7 @@ class BatchDialogMixin:
         """
         pass
 
-    def _cleanup_batch_dialog(self):
+    def _cleanup_batch_dialog(self) -> None:
         """清理批处理对话框资源（在closeEvent中调用）"""
         self._preview_timer.stop()
         self._stop_worker()

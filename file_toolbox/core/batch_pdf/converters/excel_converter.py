@@ -7,6 +7,7 @@ Excel转PDF转换器
 
 import contextlib
 from pathlib import Path
+from typing import Any
 
 from ..constants import (
     EXCEL_PAPER_MAP,
@@ -22,7 +23,7 @@ class ExcelConverter:
     def __init__(self, engine_manager: EngineManager):
         self._engine_manager = engine_manager
 
-    def _detect_orientation(self, wb) -> str:  # pragma: no cover
+    def _detect_orientation(self, wb: Any) -> str:  # pragma: no cover
         """
         检测Excel文档应该使用的方向
         根据内容宽度判断
@@ -42,7 +43,7 @@ class ExcelConverter:
         return "portrait"
 
     def convert(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:  # pragma: no cover
         """
         从Excel文档生成PDF

@@ -8,9 +8,10 @@
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 # 业务自定义校验回调签名:(operation, index) -> (ok, msg)
-ExtraValidator = Callable[[dict, int], "tuple[bool, str]"]
+ExtraValidator = Callable[[dict[str, Any], int], "tuple[bool, str]"]
 
 
 @dataclass(frozen=True)
@@ -29,13 +30,13 @@ class ParamRule:
     extra: ExtraValidator | None = None
 
 
-def _is_empty(value) -> bool:
+def _is_empty(value: object) -> bool:
     """空字符串/None 视为缺失。"""
     return value is None or (isinstance(value, str) and value.strip() == "")
 
 
 def validate_params(
-    operation: dict,
+    operation: dict[str, Any],
     index: int,
     rules: dict[str, ParamRule],
     *,

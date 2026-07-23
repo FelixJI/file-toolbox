@@ -24,11 +24,11 @@ from file_toolbox.common import metadata, shortcuts
 class AboutTab(QWidget):
     """关于界面 Tab。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._build_ui()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
 
         # --- 标题区 ---
@@ -118,22 +118,22 @@ class AboutTab(QWidget):
         root.addWidget(sc_box)
 
     # --- 快捷方式操作 ---
-    def _copy_repo_url(self):
+    def _copy_repo_url(self) -> None:
         QGuiApplication.clipboard().setText(metadata.REPO_URL)
         self._status_lbl.setText("已复制开源地址到剪贴板")
 
-    def _add_desktop(self):
+    def _add_desktop(self) -> None:
         r = shortcuts.create_desktop_shortcut()
         self._status_lbl.setText(r.message)
 
-    def _remove_desktop(self):
+    def _remove_desktop(self) -> None:
         r = shortcuts.remove_desktop_shortcut()
         self._status_lbl.setText(r.message)
 
-    def _add_start_menu(self):
+    def _add_start_menu(self) -> None:
         r = shortcuts.create_start_menu_shortcut()
         self._status_lbl.setText(r.message)
 
-    def _remove_start_menu(self):
+    def _remove_start_menu(self) -> None:
         r = shortcuts.remove_start_menu_shortcut()
         self._status_lbl.setText(r.message)

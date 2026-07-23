@@ -8,6 +8,7 @@ import contextlib
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
 
@@ -56,7 +57,7 @@ class EngineManager(LoggableMixin):
     # 缓存检测结果（类变量，所有实例共享）
     _cached_engines: dict[str, bool] | None = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._word_app = None
         self._excel_app = None
         self._ppt_app = None
@@ -154,7 +155,7 @@ class EngineManager(LoggableMixin):
 
         return "可用引擎: " + "、".join(info_parts)
 
-    def detect_engines_async(self, callback=None):
+    def detect_engines_async(self, callback: Callable[[str], None] | None = None) -> None:
         """异步检测引擎(在后台守护线程执行,不阻塞调用线程)。
 
         启动检测走**注册表探测**(force_refresh=False):毫秒级、不启动任何 Office
@@ -176,7 +177,9 @@ class EngineManager(LoggableMixin):
         # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
         threading.Thread(target=self._run_async_detect, args=(callback,), daemon=True).start()
 
-    def _run_async_detect(self, callback=None):  # pragma: no cover
+    def _run_async_detect(
+        self, callback: Callable[[str], None] | None = None
+    ) -> None:  # pragma: no cover
         """后台线程入口:CoInitialize 配对 + 调用 _async_detect_body。"""
         com_inited = False
         try:
@@ -193,7 +196,7 @@ class EngineManager(LoggableMixin):
                 with contextlib.suppress(Exception):
                     pythoncom.CoUninitialize()
 
-    def _async_detect_body(self, callback=None):
+    def _async_detect_body(self, callback: Callable[[str], None] | None = None) -> None:
         """detect_engines_async 的可测核心体(同步可调用,不依赖 COM)。
 
         - 默认走注册表探测(force_refresh=False),不启动 Office。
@@ -230,7 +233,7 @@ class EngineManager(LoggableMixin):
         # ENGINE_AUTO / ENGINE_MS_OFFICE:均优先 MS Office
         return [spec.ms_prog_id, spec.wps_prog_id]
 
-    def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO):  # pragma: no cover
+    def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO) -> Any:  # pragma: no cover
         """通用初始化逻辑,由 init_word/excel/ppt 复用。"""
         if sys.platform != "win32":
             raise RuntimeError("此功能仅支持 Windows 系统")
@@ -270,19 +273,19 @@ class EngineManager(LoggableMixin):
             f"详细错误: {last_error}"
         )
 
-    def init_word(self, engine: str = ENGINE_AUTO):
+    def init_word(self, engine: str = ENGINE_AUTO) -> Any:
         """初始化Word应用，支持引擎切换"""
         return self._init_office_app("word", engine)
 
-    def init_excel(self, engine: str = ENGINE_AUTO):
+    def init_excel(self, engine: str = ENGINE_AUTO) -> Any:
         """初始化Excel应用，支持引擎切换"""
         return self._init_office_app("excel", engine)
 
-    def init_ppt(self, engine: str = ENGINE_AUTO):
+    def init_ppt(self, engine: str = ENGINE_AUTO) -> Any:
         """初始化PowerPoint应用，支持引擎切换"""
         return self._init_office_app("ppt", engine)
 
-    def close(self, _from_del: bool = False):  # pragma: no cover
+    def close(self, _from_del: bool = False) -> None:  # pragma: no cover
         """关闭Office应用。
 
         _from_del:由 __del__ 调用时为 True,此时跳过末尾的 gc.collect()——在 GC 链中
@@ -307,7 +310,7 @@ class EngineManager(LoggableMixin):
             gc.collect()
             time.sleep(0.1)
 
-    def __del__(self):  # pragma: no cover
+    def __del__(self) -> None:  # pragma: no cover
         """析构函数"""
         with contextlib.suppress(Exception):
             self.close(_from_del=True)

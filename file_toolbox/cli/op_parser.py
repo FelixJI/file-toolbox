@@ -10,7 +10,7 @@ class OpParseError(ValueError):
     """--op 解析错误。"""
 
 
-def _coerce(value: str):
+def _coerce(value: str) -> int | bool | str:
     """把字符串值转为 int/bool/str。"""
     low = value.lower()
     if low == "true":
@@ -23,7 +23,7 @@ def _coerce(value: str):
         return value
 
 
-def parse_op(op_str: str) -> dict:
+def parse_op(op_str: str) -> dict[str, object]:
     """解析单个 --op 字符串为 {"type":..., "params":{...}}。"""
     if ":" not in op_str:
         raise OpParseError(f"无效的 --op 格式(缺少冒号): {op_str!r}")
@@ -36,7 +36,7 @@ def parse_op(op_str: str) -> dict:
     if re.search(r"(?:^|,)\s*=", params_part):
         raise OpParseError(f"无效的 --op 参数键(空): {op_str!r}")
 
-    params: dict = {}
+    params: dict[str, int | bool | str] = {}
     for m in _KV_PATTERN.finditer(params_part):
         key, quoted, raw = m.group(1), m.group(2), m.group(3)
         value = quoted if quoted is not None else raw
@@ -44,6 +44,6 @@ def parse_op(op_str: str) -> dict:
     return {"type": type_part, "params": params}
 
 
-def parse_ops(op_strs: list[str]) -> list[dict]:
+def parse_ops(op_strs: list[str]) -> list[dict[str, object]]:
     """解析多个 --op 字符串列表。"""
     return [parse_op(s) for s in op_strs]

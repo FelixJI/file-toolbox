@@ -11,6 +11,7 @@ import hashlib
 import re
 import tempfile
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 from file_toolbox.updater.errors import ChecksumMismatchError, NetworkError
@@ -57,10 +58,13 @@ def _download_bytes(url: str) -> bytes:
     """从单 URL 下载全部字节。失败抛异常(由调用方处理)。"""
     req = urllib.request.Request(url)
     with _urlopen(req, timeout=_DOWNLOAD_TIMEOUT) as resp:
-        return resp.read()
+        data: bytes = resp.read()
+        return data
 
 
-def _download_streaming(url: str, dest: Path, on_progress=None) -> int:
+def _download_streaming(
+    url: str, dest: Path, on_progress: Callable[[int, int], None] | None = None
+) -> int:
     """流式下载到 dest。返回 content_length(total=-1 表未知)。
 
     on_progress(downloaded, total): 每 chunk 回调一次。
@@ -105,7 +109,7 @@ def _fetch_checksum(release: RemoteRelease) -> tuple[str, str] | None:
 
 def download_and_verify(
     release: RemoteRelease,
-    on_progress=None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> Path:
     """下载便携 zip + 强制 SHA256 校验。返回已校验的本地 zip 路径。
 

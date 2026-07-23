@@ -9,7 +9,7 @@ import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import format_file_size
@@ -32,7 +32,7 @@ APP_QUIT_TIMEOUT = 10
 MAX_TEXT_WORKERS = 4
 
 
-def _no_window_flags() -> dict:
+def _no_window_flags() -> dict[str, Any]:
     """Windows GUI 进程(如 PyInstaller 打包的 FileToolbox.exe,PE 子系统 = GUI)启动控制台
     子进程(tasklist/taskkill)时,缺本标志 Windows 会为子进程分配可见控制台 → 黑框一闪。
 
@@ -53,7 +53,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
     CONVERT_FORMATS: ClassVar[set[str]] = {".doc", ".xls"}
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.converter = FileConverterService()
         self._lock = threading.Lock()
         self._initial_word_pids = self._get_office_pids("WINWORD.EXE")
@@ -69,7 +69,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         """获取支持的操作类型列表"""
         return [t.value for t in ReplaceOperationType]
 
-    def _validate_params(self, operation: dict, index: int) -> tuple[bool, str]:
+    def _validate_params(self, operation: dict[str, Any], index: int) -> tuple[bool, str]:
         """验证操作参数(委托给共享的声明式规则表)。"""
         from file_toolbox.common.op_schema import validate_params
 
@@ -111,7 +111,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
         return pids
 
-    def _kill_new_office_processes(self, process_name: str, pids_before: list[int]):
+    def _kill_new_office_processes(self, process_name: str, pids_before: list[int]) -> None:
         """强制结束新启动的 Office 进程"""
         current_pids = self._get_office_pids(process_name)
         new_pids = set(current_pids) - set(pids_before)
@@ -150,9 +150,9 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
     def preview_replace(
         self,
         files: list[Path],
-        operations: list[dict],
+        operations: list[dict[str, Any]],
         cancel_check: Callable[[], bool] | None = None,
-    ) -> dict[Path, dict]:
+    ) -> dict[Path, dict[str, Any]]:
         """
 
         预览替换结果（不修改文件）
@@ -173,7 +173,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
         """
 
-        result = {}
+        result: dict[Path, dict[str, Any]] = {}
 
         for file_path in files:
             # 检查是否取消
@@ -269,10 +269,10 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
     def execute_replace(
         self,
         files: list[Path],
-        operations: list[dict],
+        operations: list[dict[str, Any]],
         keep_new_format: bool = False,
-        progress_callback=None,
-        cancel_check=None,
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> tuple[int, int, list[str]]:
         """
 
@@ -315,8 +315,8 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         total_replacements = 0
         errors = []
 
-        def is_cancelled():
-            return cancel_check and cancel_check()
+        def is_cancelled() -> bool:
+            return bool(cancel_check and cancel_check())
 
         # 按文件类型分组
         docx_files = []
@@ -383,7 +383,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 except Exception as e:
                     errors.append(f"{file_path.name}: 备份失败 - {e!s}")
 
-            def word_file_callback(file_idx):
+            def word_file_callback(file_idx: int) -> None:
                 nonlocal processed
                 processed = len(text_files) + file_idx
                 if progress_callback:
@@ -415,7 +415,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 except Exception as e:
                     errors.append(f"{file_path.name}: 备份失败 - {e!s}")
 
-            def excel_file_callback(file_idx):
+            def excel_file_callback(file_idx: int) -> None:
                 nonlocal processed
                 processed = len(text_files) + len(docx_files) + file_idx
                 if progress_callback:
@@ -442,7 +442,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
         return success_count, total_replacements, errors
 
-    def _count_matches(self, file_path: Path, operations: list[dict]) -> int:
+    def _count_matches(self, file_path: Path, operations: list[dict[str, Any]]) -> int:
         """统计文件中的匹配数量"""
         content = self._read_file_content(file_path)
 
@@ -476,7 +476,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
             return None
 
-    def close(self):
+    def close(self) -> None:
         """关闭服务，释放资源"""
         with contextlib.suppress(Exception):
             self.converter.close()
@@ -515,7 +515,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         self.logger.info(f"创建备份: {file_path} -> {backup_path}")
         return backup_path
 
-    def __del__(self):
+    def __del__(self) -> None:
         """析构函数"""
         with contextlib.suppress(Exception):
             self.close()

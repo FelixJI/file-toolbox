@@ -5,6 +5,7 @@ import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from .constants import (
     DPI_DEFAULT,
@@ -27,7 +28,7 @@ from .pdf_utils import convert_pdf_to_image_pdf, get_file_info, merge_pdfs
 class PDFGeneratorService:
     """PDF生成服务"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._engine_manager = EngineManager()
         self._word_converter = WordConverter(self._engine_manager)
         self._excel_converter = ExcelConverter(self._engine_manager)
@@ -86,30 +87,30 @@ class PDFGeneratorService:
         """获取当前引擎信息"""
         return self._engine_manager.get_engine_info(use_cache)
 
-    def detect_engines_async(self, callback=None):
+    def detect_engines_async(self, callback: Callable[[str], None] | None = None) -> None:
         """异步检测引擎（在后台线程调用）"""
         self._engine_manager.detect_engines_async(callback)
 
     def generate_pdf_from_word(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:  # pragma: no cover
         """从Word文档生成PDF"""
         return self._word_converter.convert(file_path, output_path, config)
 
     def generate_pdf_from_excel(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:  # pragma: no cover
         """从Excel文档生成PDF"""
         return self._excel_converter.convert(file_path, output_path, config)
 
     def generate_pdf_from_ppt(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:  # pragma: no cover
         """从PowerPoint文档生成PDF"""
         return self._ppt_converter.convert(file_path, output_path, config)
 
     def generate_pdf_from_image(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:  # pragma: no cover
         """从图片生成PDF"""
         return self._image_converter.convert(file_path, output_path, config)
@@ -128,7 +129,9 @@ class PDFGeneratorService:
             input_pdf, output_pdf, dpi, paper_size, orientation, scale_mode
         )
 
-    def generate_pdf(self, file_path: Path, output_path: Path, config: dict) -> tuple[bool, str]:
+    def generate_pdf(
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
+    ) -> tuple[bool, str]:
         """
         生成PDF（自动判断文件类型）
 
@@ -208,7 +211,7 @@ class PDFGeneratorService:
             return self._generate_editable_pdf(file_path, output_path, config)
 
     def _generate_editable_pdf(
-        self, file_path: Path, output_path: Path, config: dict
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
     ) -> tuple[bool, str]:
         """生成可编辑型PDF（内部方法）"""
         file_type = self.get_file_type(file_path)
@@ -243,10 +246,10 @@ class PDFGeneratorService:
     def batch_generate(
         self,
         files: list[Path],
-        config: dict,
+        config: dict[str, Any],
         progress_callback: Callable[[int, int, str], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         批量生成PDF
 
@@ -260,7 +263,7 @@ class PDFGeneratorService:
         Returns:
             结果列表 [{'source': Path, 'output': Path, 'success': bool, 'error': str}, ...]
         """
-        results = []
+        results: list[dict[str, Any]] = []
         total = len(files)
         output_mode = config.get("output_mode", OUTPUT_SEPARATE)
         output_dir = config.get("output_dir")
@@ -351,7 +354,7 @@ class PDFGeneratorService:
 
         return results
 
-    def get_file_info(self, file_path: Path) -> dict:
+    def get_file_info(self, file_path: Path) -> dict[str, Any]:
         """
         获取文件信息
 
@@ -363,7 +366,7 @@ class PDFGeneratorService:
         """
         return get_file_info(file_path, SUPPORTED_FORMATS)
 
-    def close(self, _from_del: bool = False):  # pragma: no cover
+    def close(self, _from_del: bool = False) -> None:  # pragma: no cover
         """关闭Office应用。
 
         _from_del:由 __del__ 调用时为 True,透传给 engine_manager.close 以跳过
@@ -374,7 +377,7 @@ class PDFGeneratorService:
         with contextlib.suppress(Exception):
             self._engine_manager.close(_from_del=_from_del)
 
-    def __del__(self):  # pragma: no cover
+    def __del__(self) -> None:  # pragma: no cover
         """析构函数"""
         with contextlib.suppress(Exception):
             self.close(_from_del=True)

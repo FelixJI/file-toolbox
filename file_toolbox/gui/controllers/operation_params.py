@@ -6,7 +6,7 @@ View 提供 QInputDialog 实现,测试提供 stub 实现。这样参数收集逻
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class PromptCancelled(Exception):
@@ -51,7 +51,9 @@ class OperationParamCollector:
     def __init__(self, prompter: Prompter):
         self._p = prompter
 
-    def collect(self, op_type: str, existing: dict | None = None) -> dict | None:
+    def collect(
+        self, op_type: str, existing: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
         """收集指定操作类型的参数。返回 params dict,取消/未知类型返回 None。"""
         existing = existing or {}
         method_name = self._DISPATCH.get(op_type)
@@ -59,26 +61,27 @@ class OperationParamCollector:
             return None
         try:
             method = getattr(self, method_name)
-            return method(existing)
+            result: dict[str, Any] = method(existing)
+            return result
         except PromptCancelled:
             return None
 
     # ---------- rename 操作类型 ----------
 
-    def _collect_add_prefix(self, ex: dict) -> dict:
+    def _collect_add_prefix(self, ex: dict[str, Any]) -> dict[str, Any]:
         # 空 text 视为取消(与原 QInputDialog 行为一致:ok and text)
         text = self._p.get_text("添加前缀", "前缀文本:", text=ex.get("text", ""))
         if not text:
             raise PromptCancelled
         return {"text": text}
 
-    def _collect_add_suffix(self, ex: dict) -> dict:
+    def _collect_add_suffix(self, ex: dict[str, Any]) -> dict[str, Any]:
         text = self._p.get_text("添加后缀", "后缀文本:", text=ex.get("text", ""))
         if not text:
             raise PromptCancelled
         return {"text": text}
 
-    def _collect_replace_text(self, ex: dict) -> dict:
+    def _collect_replace_text(self, ex: dict[str, Any]) -> dict[str, Any]:
         find = self._p.get_text("替换字符", "查找:", text=ex.get("find", ""))
         if not find:
             raise PromptCancelled
@@ -92,7 +95,7 @@ class OperationParamCollector:
             replace = ""
         return {"find": find, "replace": replace}
 
-    def _collect_regex_replace(self, ex: dict) -> dict:
+    def _collect_regex_replace(self, ex: dict[str, Any]) -> dict[str, Any]:
         pattern = self._p.get_text("正则替换", "正则表达式:", text=ex.get("pattern", ""))
         if not pattern:
             raise PromptCancelled
@@ -103,14 +106,14 @@ class OperationParamCollector:
         # ignore_case:rename 与 replace 都读此键(rename 默认 False,replace 由 UI 传入)。
         return {"pattern": pattern, "replace": replace, "ignore_case": ex.get("ignore_case", False)}
 
-    def _collect_add_number(self, ex: dict) -> dict:
+    def _collect_add_number(self, ex: dict[str, Any]) -> dict[str, Any]:
         start = self._p.get_int("添加序号", "起始序号:", value=int(ex.get("start", 1)), minimum=0)
         digits = self._p.get_int(
             "添加序号", "位数:", value=int(ex.get("digits", 3)), minimum=1, maximum=10
         )
         return {"start": start, "digits": digits}
 
-    def _collect_delete_chars(self, ex: dict) -> dict:
+    def _collect_delete_chars(self, ex: dict[str, Any]) -> dict[str, Any]:
         dtype = self._p.get_item(
             "删除字符", "删除类型:", ["prefix", "suffix", "text"], current=0, editable=False
         )
@@ -121,13 +124,13 @@ class OperationParamCollector:
         )
         return {"delete_type": dtype, "value": value}
 
-    def _collect_add_date(self, ex: dict) -> dict:
+    def _collect_add_date(self, ex: dict[str, Any]) -> dict[str, Any]:
         fmt = self._p.get_text("添加日期", "日期格式:", text=ex.get("format", "%Y%m%d"))
         return {"format": fmt}
 
     # ---------- replace 操作类型 ----------
 
-    def _collect_simple_replace(self, ex: dict) -> dict:
+    def _collect_simple_replace(self, ex: dict[str, Any]) -> dict[str, Any]:
         find = self._p.get_text("简单替换", "查找文本:", text=ex.get("find", ""))
         if not find:
             raise PromptCancelled

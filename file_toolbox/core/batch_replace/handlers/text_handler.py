@@ -7,6 +7,7 @@
 import re
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
@@ -51,7 +52,7 @@ class TextHandler:
         with open(file_path, encoding="utf-8", errors="ignore") as f:
             return f.read()
 
-    def replace_file(self, file_path: Path, operations: list[dict]) -> int:
+    def replace_file(self, file_path: Path, operations: list[dict[str, Any]]) -> int:
         """
         替换文本文件内容
 
@@ -77,7 +78,7 @@ class TextHandler:
 
         return total_replacements
 
-    def count_matches(self, content: str, operations: list[dict]) -> int:
+    def count_matches(self, content: str, operations: list[dict[str, Any]]) -> int:
         """
         统计匹配数量
 
@@ -122,7 +123,7 @@ class TextHandler:
 
         return total_count
 
-    def _apply_operation(self, text: str, operation: dict) -> tuple[str, int]:
+    def _apply_operation(self, text: str, operation: dict[str, Any]) -> tuple[str, int]:
         """
         应用单个操作
 

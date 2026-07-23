@@ -46,11 +46,9 @@ quote-style = "double"
 
 [tool.mypy]
 python_version = "3.11"
-warn_unused_ignores = true
-warn_redundant_casts = true
-# check_untyped_defs:即使函数无注解也检查其函数体(捕获真实类型错误)。
-# 不开 disallow_untyped_defs(会强制全仓补注解,247 错误,收益递减)。
-check_untyped_defs = true
+# strict:全仓严格类型检查(函数必须注解、禁止隐式 Any、检查返回值等)。
+# 全仓已补齐注解并通过(strict 0 错误),现在作为门禁防止类型回归。
+strict = true
 files = ["file_toolbox"]
 
 [[tool.mypy.overrides]]

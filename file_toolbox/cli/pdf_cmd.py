@@ -22,7 +22,7 @@ def pdf(
     paper: str = typer.Option("auto", "--paper", help="auto|A3|A4|A5|Letter|Legal"),
     orientation: str = typer.Option("auto", "--orientation", help="auto|portrait|landscape"),
     engine: str = typer.Option("auto", "--engine", help="auto|office|wps"),
-):
+) -> None:
     """批量生成 PDF(Word/Excel/PPT/图片/PDF)。"""
     if not files:
         typer.secho("错误:未提供文件", fg=typer.colors.RED, err=True)

@@ -10,6 +10,7 @@ from file_toolbox.core.invoice.types import Invoice
 try:
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill
+    from openpyxl.worksheet.worksheet import Worksheet
 except ImportError as e:
     raise ImportError("Excel 导出需要 openpyxl: pip install 'file-toolbox[invoice]'") from e
 
@@ -49,7 +50,7 @@ _DETAIL_HEADERS = [
 ]
 
 
-def _summary_row(inv: Invoice) -> list:
+def _summary_row(inv: Invoice) -> list[str]:
     return [
         inv.invoice_number,
         inv.invoice_type,
@@ -69,7 +70,7 @@ def _summary_row(inv: Invoice) -> list:
     ]
 
 
-def _apply_fill(ws, row_idx: int, ncols: int, fill) -> None:
+def _apply_fill(ws: Worksheet, row_idx: int, ncols: int, fill: PatternFill) -> None:
     for col in range(1, ncols + 1):
         ws.cell(row=row_idx, column=col).fill = fill
 

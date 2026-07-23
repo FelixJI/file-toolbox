@@ -6,6 +6,9 @@ Controller 不 import PySide6,仅依赖 core.batch_mkdir;View 读取 QTableWidge
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 from file_toolbox.core.batch_mkdir import ConflictStrategy, FolderCreatorService
 
 
@@ -48,13 +51,13 @@ class MkdirController:
 
     def build_history_record(
         self,
-        root,
+        root: str | Path,
         structure_count: int,
         strategy: ConflictStrategy,
         created: int,
         skipped: int,
         success: bool,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """构造 mkdir 操作的历史记录 dict(与原 _create_folders 内联 dict 一致)。
 
         注意:strategy 以 strategy.name(枚举名字符串)存储。

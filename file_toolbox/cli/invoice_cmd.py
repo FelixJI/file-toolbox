@@ -36,7 +36,7 @@ def invoice(
     output: Path = typer.Option(_DEFAULT_OUTPUT, "--output", "-o", help="输出路径"),
     dedupe: str = typer.Option(KEEP_ALL, "--dedupe", help="keep_all|dedupe|mark"),
     yes: bool = typer.Option(False, "--yes", help="跳过预览直接导出(默认仅预览)"),
-):
+) -> None:
     """识别电子发票(PDF/OFD/XML),导出 Excel 或 JSON。"""
     all_files = _expand(files or [], directory, recursive)
     if not all_files:

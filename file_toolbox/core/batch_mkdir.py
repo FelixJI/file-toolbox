@@ -53,7 +53,7 @@ class FolderCreatorService(LoggableMixin):
     # Windows不允许的文件名字符
     INVALID_CHARS: ClassVar[set[str]] = set('\\/:*?"<>|')
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化服务"""
         self.logger.info("FolderCreatorService 初始化完成")
 

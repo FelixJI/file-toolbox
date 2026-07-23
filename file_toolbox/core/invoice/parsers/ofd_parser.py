@@ -12,11 +12,15 @@ import re
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.core.invoice.parsers.base import UnsupportedFormatError
 from file_toolbox.core.invoice.types import Invoice, LineItem
 
 OFD_NS = "{http://www.ofdspec.org/2016}"
+
+# Content.xml 解析出的 TextObject 字典({"text": str, "x": float, "y": float})
+TextObj = dict[str, Any]
 
 
 # --------------------------------------------------------------------------- #
@@ -124,13 +128,13 @@ def _collect_content_xmls(zf: zipfile.ZipFile, doc_root: str) -> list[str]:
     return pages
 
 
-def _parse_text_objects(content_xml: str) -> list[dict]:
+def _parse_text_objects(content_xml: str) -> list[TextObj]:
     """解析 Content.xml,返回 TextObject 列表。
 
     每项:{"text": str, "x": float, "y": float}。
     坐标取 TextCode 的 X/Y(基线起点);缺失时回退 TextObject 的 Boundary 前两位。
     """
-    objs: list[dict] = []
+    objs: list[TextObj] = []
     if not content_xml:
         return objs
     try:
@@ -206,7 +210,7 @@ def _column_of(x0: float) -> str:
     return min(_COL_ANCHORS, key=lambda a: abs(x0 - a[1]))[0]
 
 
-def _extract_detail_items(objs: list[dict]) -> list[LineItem]:
+def _extract_detail_items(objs: list[TextObj]) -> list[LineItem]:
     """从 TextObject 列表按坐标聚类提取明细行。
 
     流程:按 y 分行(3pt 容差)→ 定位表头行 → 每行按 x 落列 → 合并续行。
@@ -216,7 +220,7 @@ def _extract_detail_items(objs: list[dict]) -> list[LineItem]:
         return []
 
     # 按 y 分行
-    rows: dict[int, list[dict]] = {}
+    rows: dict[int, list[TextObj]] = {}
     keys_in_order: list[int] = []
     for o in objs:
         key = round(o["y"] / 3)
@@ -289,7 +293,7 @@ def _extract_detail_items(objs: list[dict]) -> list[LineItem]:
 # --------------------------------------------------------------------------- #
 
 
-def _extract_party_names_from_objs(objs: list[dict]) -> tuple[str, str]:
+def _extract_party_names_from_objs(objs: list[TextObj]) -> tuple[str, str]:
     """从 TextObject 块列表提取买卖方名称(#3 半角/全角冒号)。
 
     OFD 的标签与值通常在同一个 TextObject 内(如"名称:XXX"),
@@ -384,7 +388,7 @@ def parse_ofd(path: Path, source_file: str = "") -> Invoice:
     custom = _parse_custom_data(ofd_xml)
 
     # 合并所有页的 TextObject(多页发票 #7)
-    all_objs: list[dict] = []
+    all_objs: list[TextObj] = []
     all_texts: list[str] = []
     for cx in content_xmls:
         all_objs.extend(_parse_text_objects(cx))

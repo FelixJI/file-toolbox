@@ -5,6 +5,7 @@ rename 历史额外提供「撤销」按钮:把 rename_map 反转后执行反向
 """
 
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtWidgets import (
     QDialog,
@@ -14,13 +15,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService
 
 
-def _summary_label(tool: str, data: dict) -> str:
+def _summary_label(tool: str, data: dict[str, Any]) -> str:
     """根据工具类型与记录数据,生成一行摘要。"""
     if tool == "rename":
         n = len(data.get("rename_map", {}))
@@ -52,7 +54,9 @@ class HistoryDialog(QDialog):
     tool == "rename" 时额外显示「撤销」按钮(反向重命名)。
     """
 
-    def __init__(self, history_store: JsonHistoryStore, tool: str = "rename", parent=None):
+    def __init__(
+        self, history_store: JsonHistoryStore, tool: str = "rename", parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"历史记录 - {tool}")
         self.resize(560, 440)
@@ -76,7 +80,7 @@ class HistoryDialog(QDialog):
 
         self._load()
 
-    def _load(self):
+    def _load(self) -> None:
         self.list_widget.clear()
         records = self._history.get_records(self._tool, limit=0)
         if not records:
@@ -93,7 +97,7 @@ class HistoryDialog(QDialog):
             item.setData(0x0100, r["id"])
             self.list_widget.addItem(item)
 
-    def _undo_selected(self):
+    def _undo_selected(self) -> None:
         """对选中的 rename 历史记录执行反向重命名并标记已撤销。"""
         item = self.list_widget.currentItem()
         if item is None:

@@ -2,14 +2,17 @@
 
 import contextlib
 import logging
+from typing import Any
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
     QFileDialog,
     QMessageBox,
     QTableWidgetItem,
+    QWidget,
 )
 
 from file_toolbox.common.history import JsonHistoryStore
@@ -71,11 +74,11 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         ".pdf",
     }
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._init_batch_dialog()
         self.ui = Ui_PDFGeneratorDialog()
-        self.ui.setupUi(self)
+        self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
         self._svc = PDFGeneratorService()
         self._history = JsonHistoryStore()
         self._controller = PDFController()
@@ -93,7 +96,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     # ---------- 初始化 ----------
 
-    def _setup_button_groups(self):
+    def _setup_button_groups(self) -> None:
         """为每组单选按钮建立独立的互斥组。
 
         生成的 UI 里所有 QRadioButton 共用同一父控件(group_settings),
@@ -115,7 +118,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         for rb in (self.ui.radio_print_single, self.ui.radio_print_duplex):
             self._print_group.addButton(rb)
 
-    def _init_combos(self):
+    def _init_combos(self) -> None:
         """填充设置区下拉框(DPI / 纸张 / 方向 / 缩放)。"""
         self.ui.combo_dpi.clear()
         for dpi in DPI_OPTIONS:
@@ -143,7 +146,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if default_scale_idx >= 0:
             self.ui.combo_scale.setCurrentIndex(default_scale_idx)
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         self.ui.btn_select_files.clicked.connect(self._on_select_files)
         self.ui.btn_select_folder.clicked.connect(self._on_select_folder)
         self.ui.btn_clear_files.clicked.connect(self._on_clear_files)
@@ -152,7 +155,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.btn_refresh.clicked.connect(self._do_refresh_preview)
         self.ui.btn_cancel.clicked.connect(self._on_cancel)
 
-    def _init_engine_info(self):
+    def _init_engine_info(self) -> None:
         """启动时异步检测可用 Office 引擎并更新提示。
 
         启动检测走**注册表探测**(force_refresh=False,毫秒级、不启动 Office 进程);
@@ -176,7 +179,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
         self.ui.label_engine_info.setText("正在检测可用引擎...")
 
-        def _on_detected(info: str):
+        def _on_detected(info: str) -> None:
             QTimer.singleShot(0, lambda: self.ui.label_engine_info.setText(info))
 
         try:
@@ -187,7 +190,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     # ---------- 配置构建 ----------
 
-    def _build_config(self) -> dict:
+    def _build_config(self) -> dict[str, object]:
         """从 UI 控件读取当前值 → PDFConfigState → 交 controller 编排为 config dict。
 
         UI→值映射(常量字符串)保留在此处(与 Qt 控件耦合);纯编排逻辑落在
@@ -236,27 +239,27 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     # ---------- 文件选择包装器(适配 table,不改 mixin 签名) ----------
 
-    def _on_select_files(self):
+    def _on_select_files(self) -> None:
         """选文件:list_widget 传 None(mixin 只更新 selected_files),再刷新预览表。"""
         self._select_files(list_widget=None)
         self._refresh_preview()
 
-    def _on_select_folder(self):
+    def _on_select_folder(self) -> None:
         """选文件夹:同上。"""
         self._select_folder(list_widget=None)
         self._refresh_preview()
 
-    def _on_clear_files(self):
+    def _on_clear_files(self) -> None:
         """清空:同时清 selected_files 与 table_files。"""
         self._clear_files(table_widget=self.ui.table_files)
         self._refresh_preview()
 
-    def _browse_output_dir(self):
+    def _browse_output_dir(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "选择输出目录")
         if d:
             self.ui.edit_output_dir.setText(d)
 
-    def _generate(self):
+    def _generate(self) -> None:
         if not self.selected_files:
             QMessageBox.information(self, "提示", "请先选择文件。")
             return
@@ -278,12 +281,12 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self._set_ui_enabled(False)
         worker.start()
 
-    def _on_progress(self, cur: int, total: int, msg: str):
+    def _on_progress(self, cur: int, total: int, msg: str) -> None:
         self.ui.label_progress.setText(self._controller.format_progress(cur, total, msg))
         pct = int(cur / total * 100) if total else 0
         self.ui.progress_bar.setValue(pct)
 
-    def _on_generate_ok(self, results: list):
+    def _on_generate_ok(self, results: list[dict[str, Any]]) -> None:
         self._render_results(results)
         ok, fail = self._controller.summarize_results(results)
         self.ui.label_progress.setText(f"完成: 成功 {ok}, 失败 {fail}")
@@ -301,18 +304,18 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if fail:
             QMessageBox.warning(self, "部分失败", f"{fail} 个文件转换失败,详见预览表。")
 
-    def _on_generate_failed(self, msg: str):
+    def _on_generate_failed(self, msg: str) -> None:
         self.ui.label_progress.setText("生成失败")
         self._set_ui_enabled(True)
         self.worker = None
         QMessageBox.critical(self, "生成失败", msg)
 
-    def _on_cancel(self):
+    def _on_cancel(self) -> None:
         if self.worker is not None and hasattr(self.worker, "cancel"):
             self.worker.cancel()
         self.ui.label_progress.setText("正在取消...")
 
-    def _stop_worker(self, timeout_ms: int = 30000):
+    def _stop_worker(self, timeout_ms: int = 30000) -> None:
         """停止 PDF worker —— 协作式取消 + 较长等待,绝不强制 terminate。
 
         覆盖 BatchDialogMixin._stop_worker:PDF worker 持有 COM 对象,强制 terminate
@@ -338,7 +341,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     # ---------- 预览 ----------
 
-    def _do_refresh_preview(self):
+    def _do_refresh_preview(self) -> None:
         """刷新预览表(选文件/清空后由防抖定时器触发)。
 
         把 selected_files 填入 table_files 4 列:
@@ -369,7 +372,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             tbl.setItem(row, 2, QTableWidgetItem(size))
             tbl.setItem(row, 3, QTableWidgetItem("待转换"))
 
-    def _render_results(self, results: list):
+    def _render_results(self, results: list[dict[str, Any]]) -> None:
         """把生成结果填入 table_files(复用预览表)。
 
         结果数可能少于表行数(取消时):已处理的行更新为"成功"/"失败: xxx",
@@ -392,7 +395,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             if item3 is not None:
                 item3.setText(status)
 
-    def _set_ui_enabled(self, enabled: bool):
+    def _set_ui_enabled(self, enabled: bool) -> None:
         """生成进行中禁用选择/生成按钮,显示取消按钮;完成则反之。"""
         self.ui.btn_select_files.setEnabled(enabled)
         self.ui.btn_select_folder.setEnabled(enabled)
@@ -401,10 +404,10 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.btn_refresh.setEnabled(enabled)
         self.ui.btn_cancel.setVisible(not enabled)
 
-    def _update_status(self):
+    def _update_status(self) -> None:
         self.ui.label_status.setText(f"已选择 {len(self.selected_files)} 个文件")
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         self._cleanup_batch_dialog()
         with contextlib.suppress(Exception):
             self._svc.close()

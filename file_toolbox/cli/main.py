@@ -21,7 +21,7 @@ app = typer.Typer(
 
 
 @app.command()
-def gui():
+def gui() -> None:
     """启动图形界面。"""
     try:
         from file_toolbox.gui.main_window import run_gui
@@ -45,7 +45,7 @@ app.command(name="invoice")(invoice)
 def main_callback(
     ctx: typer.Context,
     version: bool = typer.Option(False, "--version", help="显示版本"),
-):
+) -> None:
     """批量文件工具箱。"""
     if version:
         typer.echo(__version__)

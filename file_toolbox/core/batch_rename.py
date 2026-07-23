@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import get_file_info
@@ -22,9 +23,9 @@ class OperationType(Enum):
     ADD_DATE = "add_date"  # 添加日期
 
 
-def _validate_add_number(operation: dict, index: int) -> tuple[bool, str]:
+def _validate_add_number(operation: dict[str, Any], index: int) -> tuple[bool, str]:
     """add_number 的自定义校验:位数>=1、custom 格式含 {n} 占位符。"""
-    params = operation.get("params", {})
+    params: dict[str, Any] = operation.get("params", {})
     n = index + 1
     try:
         int(params.get("start", 1))  # 验证参数有效性
@@ -75,12 +76,12 @@ class FileRenameService(BaseOperationService):
         """获取支持的操作类型列表"""
         return [t.value for t in OperationType]
 
-    def _validate_params(self, operation: dict, index: int) -> tuple[bool, str]:
+    def _validate_params(self, operation: dict[str, Any], index: int) -> tuple[bool, str]:
         """验证操作参数(委托给共享的声明式规则表)。"""
         return validate_params(operation, index, RENAME_PARAM_RULES)
 
     def apply_operations(
-        self, files: list[Path], operations: list[dict]
+        self, files: list[Path], operations: list[dict[str, Any]]
     ) -> dict[Path, tuple[Path, str]]:
         """
         应用重命名操作
@@ -126,7 +127,7 @@ class FileRenameService(BaseOperationService):
         self,
         name: str,
         extension: str,
-        operation: dict,
+        operation: dict[str, Any],
         index: int,
         total: int,
         file_path: Path | None = None,
@@ -146,7 +147,7 @@ class FileRenameService(BaseOperationService):
             新的文件名
         """
         op_type = operation.get("type")
-        params = operation.get("params", {})
+        params: dict[str, Any] = operation.get("params", {})
 
         if op_type == OperationType.ADD_PREFIX.value:
             return self._add_prefix(name, params)
@@ -171,21 +172,21 @@ class FileRenameService(BaseOperationService):
 
         return name
 
-    def _add_prefix(self, name: str, params: dict) -> str:
+    def _add_prefix(self, name: str, params: dict[str, Any]) -> str:
         """添加前缀"""
-        prefix = params.get("text", "")
+        prefix: str = params.get("text", "")
         return prefix + name
 
-    def _add_suffix(self, name: str, params: dict) -> str:
+    def _add_suffix(self, name: str, params: dict[str, Any]) -> str:
         """添加后缀"""
-        suffix = params.get("text", "")
+        suffix: str = params.get("text", "")
         return name + suffix
 
-    def _replace_text(self, name: str, params: dict) -> str:
+    def _replace_text(self, name: str, params: dict[str, Any]) -> str:
         """替换文本"""
-        find_text = params.get("find", "")
-        replace_text = params.get("replace", "")
-        case_sensitive = params.get("case_sensitive", False)
+        find_text: str = params.get("find", "")
+        replace_text: str = params.get("replace", "")
+        case_sensitive: bool = params.get("case_sensitive", False)
 
         if not find_text:
             return name
@@ -197,11 +198,11 @@ class FileRenameService(BaseOperationService):
             pattern = re.compile(re.escape(find_text), re.IGNORECASE)
             return pattern.sub(replace_text, name)
 
-    def _regex_replace(self, name: str, params: dict) -> str:
+    def _regex_replace(self, name: str, params: dict[str, Any]) -> str:
         """正则表达式替换"""
-        pattern = params.get("pattern", "")
-        replace = params.get("replace", "")
-        ignore_case = params.get("ignore_case", False)
+        pattern: str = params.get("pattern", "")
+        replace: str = params.get("replace", "")
+        ignore_case: bool = params.get("ignore_case", False)
 
         if not pattern:
             return name
@@ -213,7 +214,7 @@ class FileRenameService(BaseOperationService):
             # 正则表达式错误，返回原名
             return name
 
-    def _add_number(self, name: str, params: dict, index: int) -> str:
+    def _add_number(self, name: str, params: dict[str, Any], index: int) -> str:
         """
         添加序号
 
@@ -222,10 +223,10 @@ class FileRenameService(BaseOperationService):
             params: 参数配置
             index: 当前索引
         """
-        start = params.get("start", 1)
-        digits = params.get("digits", 3)
-        position = params.get("position", "end")  # start/end/before_ext
-        format_type = params.get(
+        start: int = params.get("start", 1)
+        digits: int = params.get("digits", 3)
+        position: str = params.get("position", "end")  # start/end/before_ext
+        format_type: str = params.get(
             "format", "bracket"
         )  # bracket/parenthesis/underscore/dash/none/custom
 
@@ -257,11 +258,11 @@ class FileRenameService(BaseOperationService):
         else:  # end 和 before_ext 在这里都是在文件名末尾
             return name + formatted
 
-    def _add_date(self, name: str, params: dict, file_path: Path | None = None) -> str:
+    def _add_date(self, name: str, params: dict[str, Any], file_path: Path | None = None) -> str:
         """添加日期"""
-        date_format = params.get("format", "%Y%m%d")
-        position = params.get("position", "end")
-        source = params.get("source", "current")
+        date_format: str = params.get("format", "%Y%m%d")
+        position: str = params.get("position", "end")
+        source: str = params.get("source", "current")
 
         if source == "file" and file_path and file_path.exists():
             try:
@@ -277,10 +278,10 @@ class FileRenameService(BaseOperationService):
         else:
             return name + date_str
 
-    def _delete_chars(self, name: str, params: dict) -> str:
+    def _delete_chars(self, name: str, params: dict[str, Any]) -> str:
         """删除字符"""
-        delete_type = params.get("delete_type", "prefix")  # prefix/suffix/text
-        value = params.get("value", "")
+        delete_type: str = params.get("delete_type", "prefix")  # prefix/suffix/text
+        value: str = params.get("value", "")
 
         if delete_type == "prefix":
             # 删除前N个字符
@@ -339,6 +340,6 @@ class FileRenameService(BaseOperationService):
 
         return success_count, errors
 
-    def get_file_info(self, file_path: Path) -> dict:
+    def get_file_info(self, file_path: Path) -> dict[str, Any]:
         """获取文件信息(委托给通用工具,保持单一实现)。"""
         return get_file_info(file_path)

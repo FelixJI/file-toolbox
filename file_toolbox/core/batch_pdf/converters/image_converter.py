@@ -5,6 +5,7 @@
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from ..constants import (
     DPI_DEFAULT,
@@ -16,12 +17,15 @@ from ..constants import (
     SCALE_FIT_MARGIN,
 )
 
+if TYPE_CHECKING:
+    from PIL import Image
+
 
 class ImageConverter:
     """图片转PDF转换器"""
 
     @staticmethod
-    def _resize_to_fit(img, max_w: int, max_h: int):
+    def _resize_to_fit(img: "Image.Image", max_w: int, max_h: int) -> "Image.Image":
         """
         等比缩放图片以适应目标尺寸，支持放大和缩小。
         与 thumbnail() 不同，当图片小于目标尺寸时会放大。
@@ -51,7 +55,9 @@ class ImageConverter:
             pass
         return "portrait"
 
-    def _apply_scale(self, img, paper_w_px: int, paper_h_px: int, scale_mode: str):
+    def _apply_scale(
+        self, img: "Image.Image", paper_w_px: int, paper_h_px: int, scale_mode: str
+    ) -> "Image.Image":
         """
         应用缩放逻辑
 
@@ -101,7 +107,9 @@ class ImageConverter:
             canvas.paste(img_resized, (offset_x, offset_y))
             return canvas
 
-    def convert(self, file_path: Path, output_path: Path, config: dict) -> tuple[bool, str]:
+    def convert(
+        self, file_path: Path, output_path: Path, config: dict[str, Any]
+    ) -> tuple[bool, str]:
         """
         从图片生成PDF
 

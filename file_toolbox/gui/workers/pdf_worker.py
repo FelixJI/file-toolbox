@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
 
@@ -42,11 +44,11 @@ class PdfGenerateWorker(QThread, LoggableMixin):
 
     def __init__(
         self,
-        svc,
+        svc: Any,
         files: list[Path],
-        config: dict,
-        parent=None,
-    ):
+        config: dict[str, Any],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._svc = svc
         self._files = list(files)

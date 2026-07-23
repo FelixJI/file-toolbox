@@ -5,6 +5,7 @@ import gc
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
 
@@ -16,7 +17,11 @@ FILE_OPERATION_TIMEOUT = 30
 class WordHandler(LoggableMixin):
     """Word 文档处理器"""
 
-    def __init__(self, get_office_pids: Callable, kill_office_processes: Callable):
+    def __init__(
+        self,
+        get_office_pids: Callable[[str], list[int]],
+        kill_office_processes: Callable[[str, list[int]], None],
+    ) -> None:
         """
 
         初始化 Word 处理器
@@ -100,7 +105,7 @@ class WordHandler(LoggableMixin):
                 with contextlib.suppress(Exception):
                     pythoncom.CoUninitialize()
 
-    def _extract_all_text(self, doc) -> str:  # pragma: no cover
+    def _extract_all_text(self, doc: Any) -> str:  # pragma: no cover
         """提取文档全文:正文 + 页眉页脚 + 文本框/形状。
 
         read_content 与 batch_replace 共用此逻辑,避免两处复制粘贴。
@@ -115,11 +120,11 @@ class WordHandler(LoggableMixin):
     def batch_replace(
         self,
         files: list[Path],
-        operations: list[dict],
+        operations: list[dict[str, Any]],
         upgrade_format: bool = False,
-        cancel_check: Callable | None = None,
-        file_progress_callback: Callable | None = None,
-    ) -> dict:  # pragma: no cover
+        cancel_check: Callable[[], bool] | None = None,
+        file_progress_callback: Callable[[int], None] | None = None,
+    ) -> dict[str, Any]:  # pragma: no cover
         """
 
         批量替换 Word 文档
@@ -149,7 +154,7 @@ class WordHandler(LoggableMixin):
         import pythoncom
         import win32com.client
 
-        result: dict = {"success_count": 0, "total_replacements": 0, "errors": []}
+        result: dict[str, Any] = {"success_count": 0, "total_replacements": 0, "errors": []}
 
         if not files:
             return result
@@ -198,7 +203,7 @@ class WordHandler(LoggableMixin):
 
                 try:
 
-                    def check_timeout(start_time=file_start_time):
+                    def check_timeout(start_time: float = file_start_time) -> None:
                         if time.time() - start_time > FILE_OPERATION_TIMEOUT:
                             raise TimeoutError(f"文件操作超时 ({FILE_OPERATION_TIMEOUT}s)")
 
@@ -331,14 +336,14 @@ class WordHandler(LoggableMixin):
 
         return result
 
-    def _execute_operation(self, doc, operation: dict) -> int:  # pragma: no cover
+    def _execute_operation(self, doc: Any, operation: dict[str, Any]) -> int:  # pragma: no cover
         """执行单个替换操作"""
 
         from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
         op_type = operation.get("type")
 
-        params = operation.get("params", {})
+        params: dict[str, Any] = operation.get("params", {})
 
         if op_type == ReplaceOperationType.SIMPLE_REPLACE.value:
             find_text = params.get("find", "")
@@ -374,7 +379,7 @@ class WordHandler(LoggableMixin):
 
         return 0
 
-    def _count_matches_in_text(self, content: str, operations: list[dict]) -> int:
+    def _count_matches_in_text(self, content: str, operations: list[dict[str, Any]]) -> int:
         """统计文本中的匹配数"""
 
         import re
@@ -419,7 +424,7 @@ class WordHandler(LoggableMixin):
         return total
 
     def _count_word_matches(
-        self, doc, find_text: str, match_case: bool, use_wildcards: bool
+        self, doc: Any, find_text: str, match_case: bool, use_wildcards: bool
     ) -> int:  # pragma: no cover
         """统计 Word 文档中的匹配数"""
         count = 0
@@ -471,12 +476,12 @@ class WordHandler(LoggableMixin):
 
     def _word_global_replace(
         self,
-        doc,
+        doc: Any,
         find_text: str,
         replace_text: str,
         match_case: bool,
         use_wildcards: bool,
-    ):  # pragma: no cover
+    ) -> None:  # pragma: no cover
         """Word 全局替换：遍历所有 StoryRanges"""
         story_types = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
         max_story_iterations = 1000  # 防止无限循环的安全限制
@@ -518,7 +523,7 @@ class WordHandler(LoggableMixin):
 
         self._replace_shapes(doc, find_text, replace_text, match_case, use_wildcards)
 
-    def _get_headers_footers_text(self, doc) -> list[str]:  # pragma: no cover
+    def _get_headers_footers_text(self, doc: Any) -> list[str]:  # pragma: no cover
         """获取页眉页脚文本"""
 
         text_parts = []
@@ -550,7 +555,7 @@ class WordHandler(LoggableMixin):
 
         return text_parts
 
-    def _get_shapes_text(self, doc) -> list[str]:  # pragma: no cover
+    def _get_shapes_text(self, doc: Any) -> list[str]:  # pragma: no cover
         """获取形状（文本框）中的文本"""
 
         text_parts = []
@@ -584,7 +589,7 @@ class WordHandler(LoggableMixin):
 
         return text_parts
 
-    def _get_shapes_text_from_collection(self, shapes) -> list[str]:  # pragma: no cover
+    def _get_shapes_text_from_collection(self, shapes: Any) -> list[str]:  # pragma: no cover
         """从 Shapes 集合提取文本"""
 
         text_parts = []
@@ -615,12 +620,12 @@ class WordHandler(LoggableMixin):
 
     def _replace_shapes(
         self,
-        doc,
+        doc: Any,
         find_text: str,
         replace_text: str,
         match_case: bool,
         use_wildcards: bool,
-    ):  # pragma: no cover
+    ) -> None:  # pragma: no cover
         """替换形状中的文本"""
 
         try:
@@ -666,12 +671,12 @@ class WordHandler(LoggableMixin):
 
     def _replace_shapes_in_collection(
         self,
-        shapes,
+        shapes: Any,
         find_text: str,
         replace_text: str,
         match_case: bool,
         use_wildcards: bool,
-    ):  # pragma: no cover
+    ) -> None:  # pragma: no cover
         """在 Shapes 集合中执行替换"""
 
         try:
