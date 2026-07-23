@@ -51,7 +51,7 @@ class RenameTemplateService:
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.templates, f, ensure_ascii=False, indent=2)
-        except OSError as e:
+        except OSError as e:  # pragma: no cover - 磁盘满/权限拒绝难以在测试中触发
             raise Exception(f"保存模板失败: {e!s}") from e
 
     def add_template(self, name: str, operations: list[dict], description: str = "") -> bool:

@@ -49,11 +49,11 @@ def convert_pdf_to_image_pdf(
         with contextlib.suppress(ImportError):
             import fitz
 
-        if fitz is None:
+        if fitz is None:  # pragma: no cover - fitz 在依赖中已安装,此分支在测试环境不可达
             with contextlib.suppress(ImportError):
                 import pymupdf as fitz
 
-        if fitz is None:
+        if fitz is None:  # pragma: no cover - 同上,fitz 已安装
             return (
                 False,
                 "未安装 PyMuPDF 库，请运行: pip install PyMuPDF",
@@ -106,7 +106,7 @@ def convert_pdf_to_image_pdf(
 
         return True, ""
 
-    except ImportError as e:
+    except ImportError as e:  # pragma: no cover - 依赖已安装,ImportError 在测试环境不可达
         return False, f"缺少依赖库: {e!s}，请确保已安装 PyMuPDF 和 Pillow"
     except Exception as e:
         return False, f"转换图片型PDF失败: {e!s}"
@@ -213,11 +213,11 @@ def merge_pdfs(
         with contextlib.suppress(ImportError):
             import fitz
 
-        if fitz is None:
+        if fitz is None:  # pragma: no cover - fitz 在依赖中已安装,此分支在测试环境不可达
             with contextlib.suppress(ImportError):
                 import pymupdf as fitz
 
-        if fitz is None:
+        if fitz is None:  # pragma: no cover - 同上,fitz 已安装
             return (
                 False,
                 "未安装 PyMuPDF 库，请运行: pip install PyMuPDF",
@@ -259,7 +259,7 @@ def merge_pdfs(
 
         return True, ""
 
-    except ImportError:
+    except ImportError:  # pragma: no cover - 依赖已安装,ImportError 在测试环境不可达
         return False, "未安装 PyMuPDF 库，请运行: pip install PyMuPDF"
     except Exception as e:
         return False, f"合并PDF失败: {e!s}"

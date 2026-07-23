@@ -152,3 +152,281 @@ def test_kill_office_processes_uses_create_no_window_on_windows(monkeypatch):
     # _kill_new_office_processes 内部先 _get_office_pids(无新 PID 则不 kill),
     # 确保调用不报错且路径覆盖
     svc._kill_new_office_processes("WINWORD.EXE", [])
+
+
+# ---------------------------------------------------------------------------
+# 文本文件路径(.txt/.md,无需 COM/Office)的 preview/execute/锁定/备份 覆盖
+# ---------------------------------------------------------------------------
+
+
+def _write_text(path: Path, content: str) -> Path:
+    """写入 UTF-8 文本文件并返回路径。"""
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_preview_replace_txt_counts_matches(tmp_path):
+    """preview_replace 对 .txt 简单替换应正确统计 match_count。"""
+    f = _write_text(tmp_path / "a.txt", "hello world hello")
+    svc = ContentReplaceService()
+    result = svc.preview_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "hello", "replace": "hi"}}]
+    )
+    assert result[f]["match_count"] == 2
+    assert result[f]["status"] == "✓ 准备就绪"
+    assert result[f]["needs_conversion"] is False
+
+
+def test_preview_replace_md_counts_matches(tmp_path):
+    """preview_replace 对 .md 同样走文本路径。"""
+    f = _write_text(tmp_path / "note.md", "# Title\nhello hello")
+    svc = ContentReplaceService()
+    result = svc.preview_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "hello"}}]
+    )
+    assert result[f]["match_count"] == 2
+    assert result[f]["needs_conversion"] is False
+
+
+def test_preview_replace_regex(tmp_path):
+    """preview_replace 正则替换统计。"""
+    f = _write_text(tmp_path / "r.txt", "2024 and 2025")
+    svc = ContentReplaceService()
+    result = svc.preview_replace(
+        [f], [{"type": "regex_replace", "params": {"pattern": r"20\d{2}"}}]
+    )
+    assert result[f]["match_count"] == 2
+    assert result[f]["status"] == "✓ 准备就绪"
+
+
+def test_preview_replace_no_matches(tmp_path):
+    """无匹配时 status 为 'ℹ️ 无匹配',match_count 为 0。"""
+    f = _write_text(tmp_path / "a.txt", "nothing here")
+    svc = ContentReplaceService()
+    result = svc.preview_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "hello"}}]
+    )
+    assert result[f]["match_count"] == 0
+    assert result[f]["status"] == "ℹ️ 无匹配"
+
+
+def test_preview_replace_unsupported_format(tmp_path):
+    """不支持的扩展名应给出 '❌ 不支持的格式'。"""
+    f = _write_text(tmp_path / "a.xyz", "whatever")
+    svc = ContentReplaceService()
+    result = svc.preview_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "x"}}]
+    )
+    assert result[f]["match_count"] == 0
+    assert result[f]["status"] == "❌ 不支持的格式"
+
+
+def test_preview_replace_empty_operations(tmp_path):
+    """空操作列表:每个文件 0 匹配。"""
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    result = svc.preview_replace([f], [])
+    assert result[f]["match_count"] == 0
+    assert result[f]["status"] == "ℹ️ 无匹配"
+
+
+def test_execute_replace_txt_creates_backup_and_replaces(tmp_path):
+    """execute_replace 对 .txt 应替换内容并返回 (1, N, [])。"""
+    f = _write_text(tmp_path / "old.txt", "old text old text")
+    svc = ContentReplaceService()
+    success_count, total_replacements, errors = svc.execute_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "old", "replace": "new"}}]
+    )
+    assert success_count == 1
+    assert total_replacements == 2
+    assert errors == []
+    # 文件内容已变更
+    assert f.read_text(encoding="utf-8") == "new text new text"
+
+
+def test_execute_replace_md_file(tmp_path):
+    """execute_replace 对 .md 走文本路径。"""
+    f = _write_text(tmp_path / "note.md", "foo bar foo")
+    svc = ContentReplaceService()
+    success_count, total_replacements, errors = svc.execute_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "foo", "replace": "baz"}}]
+    )
+    assert success_count == 1
+    assert total_replacements == 2
+    assert errors == []
+    assert f.read_text(encoding="utf-8") == "baz bar baz"
+
+
+def test_execute_replace_no_match_not_counted(tmp_path):
+    """无匹配的文件不计入 success_count。"""
+    f = _write_text(tmp_path / "a.txt", "nothing here")
+    svc = ContentReplaceService()
+    success_count, total_replacements, errors = svc.execute_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "zzz", "replace": "qqq"}}]
+    )
+    assert success_count == 0
+    assert total_replacements == 0
+    assert errors == []
+
+
+def test_execute_replace_empty_files():
+    """空文件列表 → (0, 0, ['文件列表为空'])。"""
+    svc = ContentReplaceService()
+    success_count, total_replacements, errors = svc.execute_replace(
+        [], [{"type": "simple_replace", "params": {"find": "a"}}]
+    )
+    assert success_count == 0
+    assert total_replacements == 0
+    assert errors == ["文件列表为空"]
+
+
+def test_execute_replace_empty_operations(tmp_path):
+    """空操作列表 → (0, 0, ['操作列表为空'])。"""
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    success_count, total_replacements, errors = svc.execute_replace([f], [])
+    assert success_count == 0
+    assert total_replacements == 0
+    assert errors == ["操作列表为空"]
+
+
+def test_execute_replace_invalid_operation(tmp_path):
+    """无效操作类型 → 校验失败。"""
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    success_count, total_replacements, errors = svc.execute_replace(
+        [f], [{"type": "bogus_type", "params": {}}]
+    )
+    assert success_count == 0
+    assert total_replacements == 0
+    assert len(errors) == 1
+    assert "无效的操作类型" in errors[0]
+
+
+def test_execute_replace_unsupported_format_in_errors(tmp_path):
+    """不支持的格式应记入 errors 且不处理。"""
+    f = _write_text(tmp_path / "a.xyz", "hello")
+    svc = ContentReplaceService()
+    success_count, total_replacements, errors = svc.execute_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "hello", "replace": "hi"}}]
+    )
+    assert success_count == 0
+    assert total_replacements == 0
+    assert any("不支持的格式" in e for e in errors)
+
+
+def test_execute_replace_progress_callback(tmp_path):
+    """progress_callback 在文本文件处理后应被调用。"""
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    calls = []
+    success_count, total_replacements, errors = svc.execute_replace(
+        [f],
+        [{"type": "simple_replace", "params": {"find": "hello", "replace": "hi"}}],
+        progress_callback=lambda processed, total: calls.append((processed, total)),
+    )
+    assert success_count == 1
+    assert calls and calls[-1] == (1, 1)
+
+
+def test_is_file_locked_nonexistent(tmp_path):
+    """不存在的文件视为锁定(返回 (True, ...))。"""
+    svc = ContentReplaceService()
+    locked, reason = svc.is_file_locked(tmp_path / "missing.txt")
+    assert locked is True
+    assert "不存在" in reason
+
+
+def test_is_file_locked_temp_file(tmp_path):
+    """~$ 开头的临时文件视为锁定。"""
+    f = _write_text(tmp_path / "~$temp.docx", "x")
+    svc = ContentReplaceService()
+    locked, reason = svc.is_file_locked(f)
+    assert locked is True
+    assert "临时" in reason
+
+
+def test_is_file_locked_tmp_suffix(tmp_path):
+    """.tmp 后缀视为锁定。"""
+    f = _write_text(tmp_path / "a.tmp", "x")
+    svc = ContentReplaceService()
+    locked, _ = svc.is_file_locked(f)
+    assert locked is True
+
+
+def test_is_file_locked_normal_file(tmp_path):
+    """可写的普通文件视为未锁定。"""
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    locked, reason = svc.is_file_locked(f)
+    assert locked is False
+    assert reason == ""
+
+
+def test_preview_replace_locked_temp_file(tmp_path):
+    """preview_replace 对 ~$ 临时文件给出锁定状态。"""
+    f = _write_text(tmp_path / "~$wb.docx", "x")
+    svc = ContentReplaceService()
+    result = svc.preview_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "x"}}]
+    )
+    assert result[f]["match_count"] == 0
+    assert "临时" in result[f]["status"]
+
+
+def test_count_matches_via_service_txt(tmp_path):
+    """_count_matches 直接调用,走 _read_file_content 文本分支。"""
+    f = _write_text(tmp_path / "a.txt", "abc abc abc")
+    svc = ContentReplaceService()
+    n = svc._count_matches(
+        f, [{"type": "simple_replace", "params": {"find": "abc"}}]
+    )
+    assert n == 3
+
+
+def test_read_file_content_md(tmp_path):
+    """_read_file_content 对 .md 返回标准化文本。"""
+    f = _write_text(tmp_path / "a.md", "hello\u200bworld")
+    svc = ContentReplaceService()
+    content = svc._read_file_content(f)
+    # 零宽字符被 normalize 掉
+    assert content == "helloworld"
+
+
+def test_create_backup_returns_path(tmp_path, monkeypatch):
+    """_create_backup 复制文件到备份目录并返回路径。"""
+    f = _write_text(tmp_path / "src.txt", "data")
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    svc = ContentReplaceService()
+    monkeypatch.setattr(svc, "_backup_dir", backup_dir)
+    backup_path = svc._create_backup(f)
+    assert backup_path.exists()
+    assert backup_path.parent == backup_dir
+    assert backup_path.read_text(encoding="utf-8") == "data"
+
+
+def test_preview_replace_cancel_check(tmp_path):
+    """cancel_check 返回 True 时预览立即中断。"""
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    result = svc.preview_replace(
+        [f],
+        [{"type": "simple_replace", "params": {"find": "hello"}}],
+        cancel_check=lambda: True,
+    )
+    # 取消后该文件未处理,result 为空
+    assert result == {}
+
+
+def test_execute_replace_cancel_before_text(tmp_path):
+    """execute_replace 在文本处理前取消:success=0 且无替换。"""
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    success_count, total_replacements, _errors = svc.execute_replace(
+        [f],
+        [{"type": "simple_replace", "params": {"find": "hello", "replace": "hi"}}],
+        cancel_check=lambda: True,
+    )
+    assert success_count == 0
+    assert total_replacements == 0

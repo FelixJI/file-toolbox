@@ -164,7 +164,7 @@ class ImageConverter:
 
             return True, ""
 
-        except ImportError:
+        except ImportError:  # pragma: no cover - Pillow 在依赖中已安装,此分支在测试环境不可达
             return False, "未安装 Pillow 库，请运行: pip install Pillow"
         except Exception as e:
             return False, f"图片转PDF失败: {e!s}"
