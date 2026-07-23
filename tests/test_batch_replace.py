@@ -181,9 +181,7 @@ def test_preview_replace_md_counts_matches(tmp_path):
     """preview_replace 对 .md 同样走文本路径。"""
     f = _write_text(tmp_path / "note.md", "# Title\nhello hello")
     svc = ContentReplaceService()
-    result = svc.preview_replace(
-        [f], [{"type": "simple_replace", "params": {"find": "hello"}}]
-    )
+    result = svc.preview_replace([f], [{"type": "simple_replace", "params": {"find": "hello"}}])
     assert result[f]["match_count"] == 2
     assert result[f]["needs_conversion"] is False
 
@@ -203,9 +201,7 @@ def test_preview_replace_no_matches(tmp_path):
     """无匹配时 status 为 'ℹ️ 无匹配',match_count 为 0。"""
     f = _write_text(tmp_path / "a.txt", "nothing here")
     svc = ContentReplaceService()
-    result = svc.preview_replace(
-        [f], [{"type": "simple_replace", "params": {"find": "hello"}}]
-    )
+    result = svc.preview_replace([f], [{"type": "simple_replace", "params": {"find": "hello"}}])
     assert result[f]["match_count"] == 0
     assert result[f]["status"] == "ℹ️ 无匹配"
 
@@ -214,9 +210,7 @@ def test_preview_replace_unsupported_format(tmp_path):
     """不支持的扩展名应给出 '❌ 不支持的格式'。"""
     f = _write_text(tmp_path / "a.xyz", "whatever")
     svc = ContentReplaceService()
-    result = svc.preview_replace(
-        [f], [{"type": "simple_replace", "params": {"find": "x"}}]
-    )
+    result = svc.preview_replace([f], [{"type": "simple_replace", "params": {"find": "x"}}])
     assert result[f]["match_count"] == 0
     assert result[f]["status"] == "❌ 不支持的格式"
 
@@ -367,9 +361,7 @@ def test_preview_replace_locked_temp_file(tmp_path):
     """preview_replace 对 ~$ 临时文件给出锁定状态。"""
     f = _write_text(tmp_path / "~$wb.docx", "x")
     svc = ContentReplaceService()
-    result = svc.preview_replace(
-        [f], [{"type": "simple_replace", "params": {"find": "x"}}]
-    )
+    result = svc.preview_replace([f], [{"type": "simple_replace", "params": {"find": "x"}}])
     assert result[f]["match_count"] == 0
     assert "临时" in result[f]["status"]
 
@@ -378,9 +370,7 @@ def test_count_matches_via_service_txt(tmp_path):
     """_count_matches 直接调用,走 _read_file_content 文本分支。"""
     f = _write_text(tmp_path / "a.txt", "abc abc abc")
     svc = ContentReplaceService()
-    n = svc._count_matches(
-        f, [{"type": "simple_replace", "params": {"find": "abc"}}]
-    )
+    n = svc._count_matches(f, [{"type": "simple_replace", "params": {"find": "abc"}}])
     assert n == 3
 
 

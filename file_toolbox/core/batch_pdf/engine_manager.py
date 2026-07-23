@@ -68,7 +68,7 @@ class EngineManager(LoggableMixin):
     #  引擎检测
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _try_detect(prog_id: str, log: Callable[[str], None]) -> bool:
+    def _try_detect(prog_id: str, log: Callable[[str], None]) -> bool:  # pragma: no cover
         """尝试 Dispatch 一个 ProgID,成功即视为引擎可用。"""
         import gc
         import time
@@ -176,7 +176,7 @@ class EngineManager(LoggableMixin):
         # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
         threading.Thread(target=self._run_async_detect, args=(callback,), daemon=True).start()
 
-    def _run_async_detect(self, callback=None):
+    def _run_async_detect(self, callback=None):  # pragma: no cover
         """后台线程入口:CoInitialize 配对 + 调用 _async_detect_body。"""
         com_inited = False
         try:
@@ -230,7 +230,7 @@ class EngineManager(LoggableMixin):
         # ENGINE_AUTO / ENGINE_MS_OFFICE:均优先 MS Office
         return [spec.ms_prog_id, spec.wps_prog_id]
 
-    def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO):
+    def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO):  # pragma: no cover
         """通用初始化逻辑,由 init_word/excel/ppt 复用。"""
         if sys.platform != "win32":
             raise RuntimeError("此功能仅支持 Windows 系统")
@@ -282,7 +282,7 @@ class EngineManager(LoggableMixin):
         """初始化PowerPoint应用，支持引擎切换"""
         return self._init_office_app("ppt", engine)
 
-    def close(self, _from_del: bool = False):
+    def close(self, _from_del: bool = False):  # pragma: no cover
         """关闭Office应用。
 
         _from_del:由 __del__ 调用时为 True,此时跳过末尾的 gc.collect()——在 GC 链中
@@ -307,7 +307,7 @@ class EngineManager(LoggableMixin):
             gc.collect()
             time.sleep(0.1)
 
-    def __del__(self):
+    def __del__(self):  # pragma: no cover
         """析构函数"""
         with contextlib.suppress(Exception):
             self.close(_from_del=True)

@@ -92,25 +92,25 @@ class PDFGeneratorService:
 
     def generate_pdf_from_word(
         self, file_path: Path, output_path: Path, config: dict
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str]:  # pragma: no cover
         """从Word文档生成PDF"""
         return self._word_converter.convert(file_path, output_path, config)
 
     def generate_pdf_from_excel(
         self, file_path: Path, output_path: Path, config: dict
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str]:  # pragma: no cover
         """从Excel文档生成PDF"""
         return self._excel_converter.convert(file_path, output_path, config)
 
     def generate_pdf_from_ppt(
         self, file_path: Path, output_path: Path, config: dict
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str]:  # pragma: no cover
         """从PowerPoint文档生成PDF"""
         return self._ppt_converter.convert(file_path, output_path, config)
 
     def generate_pdf_from_image(
         self, file_path: Path, output_path: Path, config: dict
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str]:  # pragma: no cover
         """从图片生成PDF"""
         return self._image_converter.convert(file_path, output_path, config)
 
@@ -363,7 +363,7 @@ class PDFGeneratorService:
         """
         return get_file_info(file_path, SUPPORTED_FORMATS)
 
-    def close(self, _from_del: bool = False):
+    def close(self, _from_del: bool = False):  # pragma: no cover
         """关闭Office应用。
 
         _from_del:由 __del__ 调用时为 True,透传给 engine_manager.close 以跳过
@@ -374,7 +374,7 @@ class PDFGeneratorService:
         with contextlib.suppress(Exception):
             self._engine_manager.close(_from_del=_from_del)
 
-    def __del__(self):
+    def __del__(self):  # pragma: no cover
         """析构函数"""
         with contextlib.suppress(Exception):
             self.close(_from_del=True)

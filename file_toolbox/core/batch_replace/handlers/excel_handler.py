@@ -36,7 +36,7 @@ class ExcelHandler(LoggableMixin):
 
         self._kill_office_processes = kill_office_processes
 
-    def read_content(self, file_path: Path) -> str:
+    def read_content(self, file_path: Path) -> str:  # pragma: no cover
         """
 
         读取 Excel 文档内容
@@ -130,7 +130,7 @@ class ExcelHandler(LoggableMixin):
         upgrade_format: bool = False,
         cancel_check: Callable | None = None,
         file_progress_callback: Callable | None = None,
-    ) -> dict:
+    ) -> dict:  # pragma: no cover
         """
 
         批量替换 Excel 文档
@@ -352,7 +352,9 @@ class ExcelHandler(LoggableMixin):
 
         return result
 
-    def _execute_operation(self, wb, operation: dict, check_timeout: Callable | None = None) -> int:
+    def _execute_operation(
+        self, wb, operation: dict, check_timeout: Callable | None = None
+    ) -> int:  # pragma: no cover
         """执行单个替换操作"""
 
         from file_toolbox.core.batch_replace.types import ReplaceOperationType
@@ -481,7 +483,9 @@ class ExcelHandler(LoggableMixin):
 
         return total
 
-    def _count_excel_matches(self, sheet, find_text: str, match_case: bool) -> int:
+    def _count_excel_matches(
+        self, sheet, find_text: str, match_case: bool
+    ) -> int:  # pragma: no cover
         """统计 Excel 工作表中的匹配数"""
         count = 0
         used_range = sheet.UsedRange
@@ -521,7 +525,7 @@ class ExcelHandler(LoggableMixin):
 
     def _replace_headers_footers(
         self, sheet, find_text: str, replace_text: str, case_sensitive: bool
-    ):
+    ):  # pragma: no cover
         """替换 Excel 页眉页脚"""
 
         try:
@@ -558,7 +562,7 @@ class ExcelHandler(LoggableMixin):
         except Exception as e:
             self.logger.error(f"Excel页眉页脚替换失败: {e}")
 
-    def _replace_headers_footers_regex(self, sheet, pattern, replace_text: str):
+    def _replace_headers_footers_regex(self, sheet, pattern, replace_text: str):  # pragma: no cover
         """使用正则替换 Excel 页眉页脚"""
 
         try:

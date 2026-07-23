@@ -44,8 +44,7 @@ def test_word_count_simple_single_match():
 def test_word_count_simple_no_match():
     h = _word()
     assert (
-        h._count_matches_in_text("nothing here", [{"type": SIMPLE, "params": {"find": "zzz"}}])
-        == 0
+        h._count_matches_in_text("nothing here", [{"type": SIMPLE, "params": {"find": "zzz"}}]) == 0
     )
 
 
@@ -119,12 +118,7 @@ def test_word_count_regex_case_sensitive_default():
 
 def test_word_count_regex_no_match():
     h = _word()
-    assert (
-        h._count_matches_in_text(
-            "abc", [{"type": REGEX, "params": {"pattern": r"\d"}}]
-        )
-        == 0
-    )
+    assert h._count_matches_in_text("abc", [{"type": REGEX, "params": {"pattern": r"\d"}}]) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -135,30 +129,19 @@ def test_word_count_regex_no_match():
 def test_word_count_empty_find_skipped():
     """空 find 字符串 → find_text 为假 → 该操作跳过,贡献 0。"""
     h = _word()
-    assert (
-        h._count_matches_in_text("hello", [{"type": SIMPLE, "params": {"find": ""}}])
-        == 0
-    )
+    assert h._count_matches_in_text("hello", [{"type": SIMPLE, "params": {"find": ""}}]) == 0
 
 
 def test_word_count_empty_pattern_skipped():
     """空正则 pattern → 跳过,贡献 0。"""
     h = _word()
-    assert (
-        h._count_matches_in_text("hello", [{"type": REGEX, "params": {"pattern": ""}}])
-        == 0
-    )
+    assert h._count_matches_in_text("hello", [{"type": REGEX, "params": {"pattern": ""}}]) == 0
 
 
 def test_word_count_bad_regex_returns_zero():
     """无效正则触发 re.error → 被 except 捕获,贡献 0(不抛异常)。"""
     h = _word()
-    assert (
-        h._count_matches_in_text(
-            "abc", [{"type": REGEX, "params": {"pattern": "("}}]
-        )
-        == 0
-    )
+    assert h._count_matches_in_text("abc", [{"type": REGEX, "params": {"pattern": "("}}]) == 0
 
 
 def test_word_count_bad_regex_ignore_case_returns_zero():
@@ -175,10 +158,7 @@ def test_word_count_bad_regex_ignore_case_returns_zero():
 def test_word_count_unknown_op_type_ignored():
     """未知操作类型 → 两分支都不命中,贡献 0。"""
     h = _word()
-    assert (
-        h._count_matches_in_text("hello", [{"type": "bogus", "params": {"find": "x"}}])
-        == 0
-    )
+    assert h._count_matches_in_text("hello", [{"type": "bogus", "params": {"find": "x"}}]) == 0
 
 
 def test_word_count_missing_params_key():
@@ -249,12 +229,7 @@ def test_excel_count_case_sensitive():
 
 def test_excel_count_regex_digits():
     h = _excel()
-    assert (
-        h._count_matches_in_text(
-            "a1 b2", [{"type": REGEX, "params": {"pattern": r"\d"}}]
-        )
-        == 2
-    )
+    assert h._count_matches_in_text("a1 b2", [{"type": REGEX, "params": {"pattern": r"\d"}}]) == 2
 
 
 def test_excel_count_regex_ignore_case():
@@ -268,28 +243,17 @@ def test_excel_count_regex_ignore_case():
 
 def test_excel_count_empty_find_skipped():
     h = _excel()
-    assert (
-        h._count_matches_in_text("hello", [{"type": SIMPLE, "params": {"find": ""}}])
-        == 0
-    )
+    assert h._count_matches_in_text("hello", [{"type": SIMPLE, "params": {"find": ""}}]) == 0
 
 
 def test_excel_count_bad_regex_returns_zero():
     h = _excel()
-    assert (
-        h._count_matches_in_text(
-            "abc", [{"type": REGEX, "params": {"pattern": "("}}]
-        )
-        == 0
-    )
+    assert h._count_matches_in_text("abc", [{"type": REGEX, "params": {"pattern": "("}}]) == 0
 
 
 def test_excel_count_unknown_op_type_ignored():
     h = _excel()
-    assert (
-        h._count_matches_in_text("hello", [{"type": "bogus", "params": {"find": "x"}}])
-        == 0
-    )
+    assert h._count_matches_in_text("hello", [{"type": "bogus", "params": {"find": "x"}}]) == 0
 
 
 def test_excel_count_empty_operations():

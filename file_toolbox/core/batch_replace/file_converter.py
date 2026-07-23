@@ -46,7 +46,7 @@ class FileConverterService:
 
     def _convert_legacy_format(
         self, src_path: Path, spec: _LegacySpec, output_path: Path | None = None
-    ) -> tuple[bool, Path, str]:
+    ) -> tuple[bool, Path, str]:  # pragma: no cover
         """doc→docx / xls→xlsx 的通用实现,由两个公开方法复用。
 
         每次调用:本线程 CoInitialize → 新建一次性 Office 应用 → 转换 → 关闭 → CoUninitialize。

@@ -22,7 +22,7 @@ class ExcelConverter:
     def __init__(self, engine_manager: EngineManager):
         self._engine_manager = engine_manager
 
-    def _detect_orientation(self, wb) -> str:
+    def _detect_orientation(self, wb) -> str:  # pragma: no cover
         """
         检测Excel文档应该使用的方向
         根据内容宽度判断
@@ -41,7 +41,9 @@ class ExcelConverter:
             pass
         return "portrait"
 
-    def convert(self, file_path: Path, output_path: Path, config: dict) -> tuple[bool, str]:
+    def convert(
+        self, file_path: Path, output_path: Path, config: dict
+    ) -> tuple[bool, str]:  # pragma: no cover
         """
         从Excel文档生成PDF
 

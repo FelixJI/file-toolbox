@@ -213,9 +213,7 @@ def test_excel_detect_orientation_six_columns_portrait():
 def test_excel_detect_orientation_zero_sheets_portrait():
     """Worksheets.Count == 0 → portrait。"""
     h = _excel_converter()
-    assert (
-        h._detect_orientation(_make_excel_wb(cols=10, rows=1, sheet_count=0)) == "portrait"
-    )
+    assert h._detect_orientation(_make_excel_wb(cols=10, rows=1, sheet_count=0)) == "portrait"
 
 
 def test_excel_detect_orientation_attribute_error_swallowed():
@@ -302,8 +300,6 @@ def test_ppt_detect_orientation_attribute_error_swallowed():
 def test_all_converters_default_orientation_is_portrait():
     """三个 converter 在缺省/异常场景都返回 "portrait"(非 ORIENTATION_PORTRAIT 常量,
     而是源码中硬编码的字面值)。"""
-    assert _word_converter()._detect_orientation(
-        _make_word_doc(500, 1000)
-    ) == "portrait"
+    assert _word_converter()._detect_orientation(_make_word_doc(500, 1000)) == "portrait"
     assert _excel_converter()._detect_orientation(_make_excel_wb(3, 2)) == "portrait"
     assert _ppt_converter()._detect_orientation(_make_ppt(500, 1000)) == "portrait"

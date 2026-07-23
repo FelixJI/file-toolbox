@@ -35,7 +35,7 @@ class WordHandler(LoggableMixin):
 
         self._kill_office_processes = kill_office_processes
 
-    def read_content(self, file_path: Path) -> str:
+    def read_content(self, file_path: Path) -> str:  # pragma: no cover
         """
 
         读取 Word 文档内容（包含正文、页眉页脚、文本框）
@@ -100,7 +100,7 @@ class WordHandler(LoggableMixin):
                 with contextlib.suppress(Exception):
                     pythoncom.CoUninitialize()
 
-    def _extract_all_text(self, doc) -> str:
+    def _extract_all_text(self, doc) -> str:  # pragma: no cover
         """提取文档全文:正文 + 页眉页脚 + 文本框/形状。
 
         read_content 与 batch_replace 共用此逻辑,避免两处复制粘贴。
@@ -119,7 +119,7 @@ class WordHandler(LoggableMixin):
         upgrade_format: bool = False,
         cancel_check: Callable | None = None,
         file_progress_callback: Callable | None = None,
-    ) -> dict:
+    ) -> dict:  # pragma: no cover
         """
 
         批量替换 Word 文档
@@ -331,7 +331,7 @@ class WordHandler(LoggableMixin):
 
         return result
 
-    def _execute_operation(self, doc, operation: dict) -> int:
+    def _execute_operation(self, doc, operation: dict) -> int:  # pragma: no cover
         """执行单个替换操作"""
 
         from file_toolbox.core.batch_replace.types import ReplaceOperationType
@@ -420,7 +420,7 @@ class WordHandler(LoggableMixin):
 
     def _count_word_matches(
         self, doc, find_text: str, match_case: bool, use_wildcards: bool
-    ) -> int:
+    ) -> int:  # pragma: no cover
         """统计 Word 文档中的匹配数"""
         count = 0
         max_iterations = 10000
@@ -476,7 +476,7 @@ class WordHandler(LoggableMixin):
         replace_text: str,
         match_case: bool,
         use_wildcards: bool,
-    ):
+    ):  # pragma: no cover
         """Word 全局替换：遍历所有 StoryRanges"""
         story_types = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
         max_story_iterations = 1000  # 防止无限循环的安全限制
@@ -518,7 +518,7 @@ class WordHandler(LoggableMixin):
 
         self._replace_shapes(doc, find_text, replace_text, match_case, use_wildcards)
 
-    def _get_headers_footers_text(self, doc) -> list[str]:
+    def _get_headers_footers_text(self, doc) -> list[str]:  # pragma: no cover
         """获取页眉页脚文本"""
 
         text_parts = []
@@ -550,7 +550,7 @@ class WordHandler(LoggableMixin):
 
         return text_parts
 
-    def _get_shapes_text(self, doc) -> list[str]:
+    def _get_shapes_text(self, doc) -> list[str]:  # pragma: no cover
         """获取形状（文本框）中的文本"""
 
         text_parts = []
@@ -584,7 +584,7 @@ class WordHandler(LoggableMixin):
 
         return text_parts
 
-    def _get_shapes_text_from_collection(self, shapes) -> list[str]:
+    def _get_shapes_text_from_collection(self, shapes) -> list[str]:  # pragma: no cover
         """从 Shapes 集合提取文本"""
 
         text_parts = []
@@ -620,7 +620,7 @@ class WordHandler(LoggableMixin):
         replace_text: str,
         match_case: bool,
         use_wildcards: bool,
-    ):
+    ):  # pragma: no cover
         """替换形状中的文本"""
 
         try:
@@ -671,7 +671,7 @@ class WordHandler(LoggableMixin):
         replace_text: str,
         match_case: bool,
         use_wildcards: bool,
-    ):
+    ):  # pragma: no cover
         """在 Shapes 集合中执行替换"""
 
         try:

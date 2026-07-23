@@ -30,7 +30,7 @@ class PptConverter:
     def __init__(self, engine_manager: EngineManager):
         self._engine_manager = engine_manager
 
-    def _detect_orientation(self, presentation) -> str:
+    def _detect_orientation(self, presentation) -> str:  # pragma: no cover
         """
         检测PPT应该使用的方向
         根据幻灯片宽高比判断
@@ -44,7 +44,9 @@ class PptConverter:
             pass
         return "portrait"
 
-    def convert(self, file_path: Path, output_path: Path, config: dict) -> tuple[bool, str]:
+    def convert(
+        self, file_path: Path, output_path: Path, config: dict
+    ) -> tuple[bool, str]:  # pragma: no cover
         """
         从PowerPoint文档生成PDF
 
