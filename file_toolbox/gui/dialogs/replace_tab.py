@@ -4,7 +4,6 @@ import contextlib
 
 from PySide6.QtWidgets import (
     QDialog,
-    QInputDialog,
     QMessageBox,
     QTableWidgetItem,
 )
@@ -12,6 +11,8 @@ from PySide6.QtWidgets import (
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_replace import ContentReplaceService, ReplaceOperationType
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
+from file_toolbox.gui.controllers.operation_params import OperationParamCollector
+from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
 from file_toolbox.gui.generated.ui_replace_dialog import Ui_ContentReplaceDialog
 
 
@@ -90,30 +91,9 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             self.ui.list_operations.addItem(QListWidgetItem(label))
 
     def _prompt_params(self, op_type: str, existing: dict | None = None) -> dict | None:
-        existing = existing or {}
-        if op_type == ReplaceOperationType.SIMPLE_REPLACE.value:
-            find, ok = QInputDialog.getText(
-                self, "简单替换", "查找文本:", text=existing.get("find", "")
-            )
-            if not ok or not find:
-                return None
-            replace, ok = QInputDialog.getText(
-                self, "简单替换", f"将 {find!r} 替换为:", text=existing.get("replace", "")
-            )
-            cs = existing.get("case_sensitive", False)
-            return {"find": find, "replace": replace if ok else "", "case_sensitive": cs}
-        if op_type == ReplaceOperationType.REGEX_REPLACE.value:
-            pattern, ok = QInputDialog.getText(
-                self, "正则替换", "正则表达式:", text=existing.get("pattern", "")
-            )
-            if not ok or not pattern:
-                return None
-            replace, ok = QInputDialog.getText(
-                self, "正则替换", "替换为:", text=existing.get("replace", "")
-            )
-            ic = existing.get("ignore_case", False)
-            return {"pattern": pattern, "replace": replace if ok else "", "ignore_case": ic}
-        return None
+        """委托给 OperationParamCollector(纯逻辑),View 仅提供 QInputDialog 实现。"""
+        collector = OperationParamCollector(QInputDialogPrompter(self))
+        return collector.collect(op_type, existing)
 
     # ---------- 预览 / 执行 ----------
     def _do_refresh_preview(self):

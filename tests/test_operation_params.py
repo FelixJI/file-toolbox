@@ -107,12 +107,18 @@ def test_collect_replace_text_replace_empty_allowed():
 
 def test_collect_regex_replace():
     c = _collector(text=[r"\d+", "X"])
-    assert c.collect("regex_replace") == {"pattern": r"\d+", "replace": "X"}
+    assert c.collect("regex_replace") == {"pattern": r"\d+", "replace": "X", "ignore_case": False}
 
 
 def test_collect_regex_replace_empty_pattern_returns_none():
     c = _collector(text=["", "X"])
     assert c.collect("regex_replace") is None
+
+
+def test_collect_regex_replace_preserves_ignore_case():
+    c = _collector(text=[r"\d+", "X"])
+    result = c.collect("regex_replace", existing={"ignore_case": True})
+    assert result == {"pattern": r"\d+", "replace": "X", "ignore_case": True}
 
 
 # ---------- rename: add_number / delete_chars / add_date ----------

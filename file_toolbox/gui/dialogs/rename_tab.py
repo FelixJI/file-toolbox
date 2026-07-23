@@ -12,6 +12,8 @@ from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService, OperationType
 from file_toolbox.core.rename_template import RenameTemplateService
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
+from file_toolbox.gui.controllers.operation_params import OperationParamCollector
+from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
 from file_toolbox.gui.generated.ui_rename_dialog import Ui_FileRenamerDialog
 
 
@@ -119,72 +121,12 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
             self.ui.list_operations.addItem(item)
 
     def _prompt_operation_params(self, op_type: str, existing: dict | None = None) -> dict | None:
-        """通过输入对话框收集操作参数。existing 用于编辑预填。"""
-        existing = existing or {}
-        if op_type == OperationType.ADD_PREFIX.value:
-            text, ok = QInputDialog.getText(
-                self, "添加前缀", "前缀文本:", text=existing.get("text", "")
-            )
-            return {"text": text} if ok and text else None
-        if op_type == OperationType.ADD_SUFFIX.value:
-            text, ok = QInputDialog.getText(
-                self, "添加后缀", "后缀文本:", text=existing.get("text", "")
-            )
-            return {"text": text} if ok and text else None
-        if op_type == OperationType.REPLACE_TEXT.value:
-            find, ok = QInputDialog.getText(
-                self, "替换字符", "查找:", text=existing.get("find", "")
-            )
-            if not ok or not find:
-                return None
-            replace, ok = QInputDialog.getText(
-                self, "替换字符", f"将 {find!r} 替换为:", text=existing.get("replace", "")
-            )
-            return {"find": find, "replace": replace if ok else ""}
-        if op_type == OperationType.REGEX_REPLACE.value:
-            pattern, ok = QInputDialog.getText(
-                self, "正则替换", "正则表达式:", text=existing.get("pattern", "")
-            )
-            if not ok or not pattern:
-                return None
-            replace, ok = QInputDialog.getText(
-                self, "正则替换", "替换为:", text=existing.get("replace", "")
-            )
-            return {"pattern": pattern, "replace": replace if ok else ""}
-        if op_type == OperationType.ADD_NUMBER.value:
-            start, ok = QInputDialog.getInt(
-                self, "添加序号", "起始序号:", value=int(existing.get("start", 1)), min=0
-            )
-            if not ok:
-                return None
-            digits, ok = QInputDialog.getInt(
-                self, "添加序号", "位数:", value=int(existing.get("digits", 3)), min=1, max=10
-            )
-            return {"start": start, "digits": digits}
-        if op_type == OperationType.DELETE_CHARS.value:
-            dtype, ok = QInputDialog.getItem(
-                self,
-                "删除字符",
-                "删除类型:",
-                ["prefix", "suffix", "text"],
-                0,
-                editable=False,
-            )
-            if not ok:
-                return None
-            value, ok = QInputDialog.getText(
-                self,
-                "删除字符",
-                "值(前缀/后缀为数量,文本为要删除的文本):",
-                text=str(existing.get("value", "")),
-            )
-            return {"delete_type": dtype, "value": value} if ok else None
-        if op_type == OperationType.ADD_DATE.value:
-            fmt, ok = QInputDialog.getText(
-                self, "添加日期", "日期格式:", text=existing.get("format", "%Y%m%d")
-            )
-            return {"format": fmt if ok else "%Y%m%d"} if ok else None
-        return None
+        """通过输入对话框收集操作参数。existing 用于编辑预填。
+
+        委托给 OperationParamCollector(纯逻辑,可无 Qt 单测),View 仅提供 QInputDialog 实现。
+        """
+        collector = OperationParamCollector(QInputDialogPrompter(self))
+        return collector.collect(op_type, existing)
 
     # ---------- 预览 / 执行 ----------
     def _do_refresh_preview(self):

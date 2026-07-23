@@ -100,7 +100,8 @@ class OperationParamCollector:
             replace = self._p.get_text("正则替换", "替换为:", text=ex.get("replace", ""))
         except PromptCancelled:
             replace = ""
-        return {"pattern": pattern, "replace": replace}
+        # ignore_case:rename 与 replace 都读此键(rename 默认 False,replace 由 UI 传入)。
+        return {"pattern": pattern, "replace": replace, "ignore_case": ex.get("ignore_case", False)}
 
     def _collect_add_number(self, ex: dict) -> dict:
         start = self._p.get_int("添加序号", "起始序号:", value=int(ex.get("start", 1)), minimum=0)
