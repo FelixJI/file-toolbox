@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from file_toolbox.common.history import JsonHistoryStore
 

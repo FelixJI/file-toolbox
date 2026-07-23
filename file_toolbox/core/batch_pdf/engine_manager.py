@@ -64,10 +64,8 @@ class EngineManager(LoggableMixin):
 
         try:
             app = win32com.client.Dispatch(prog_id)
-            try:
-                app.Quit()
-            except Exception:
-                pass  # Quit 失败不影响"引擎可用"的判定
+            with contextlib.suppress(Exception):
+                app.Quit()  # Quit 失败不影响"引擎可用"的判定
             return True
         except Exception as e:
             log(f"{e}")

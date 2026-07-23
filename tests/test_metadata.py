@@ -5,7 +5,7 @@ from file_toolbox.common import metadata
 
 
 def test_version_matches_package():
-    assert metadata.VERSION == file_toolbox.__version__
+    assert file_toolbox.__version__ == metadata.VERSION
 
 
 def test_app_name_is_file_toolbox():

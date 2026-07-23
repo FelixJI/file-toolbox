@@ -88,7 +88,6 @@ class TextHandler:
         Returns:
             匹配总数
         """
-        from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
         total_count = 0
         for operation in operations:
@@ -134,7 +133,6 @@ class TextHandler:
         Returns:
             (新文本, 替换次数)
         """
-        from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
         op_type = operation.get("type")
         params = operation.get("params", {})

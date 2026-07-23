@@ -89,6 +89,7 @@ source = { registry = "..." }
 
     def test_missing_file_toolbox_raises(self, tmp_path):
         import pytest
+
         from scripts.bump_version import update_uv_lock_version
 
         (tmp_path / "uv.lock").write_text(
@@ -100,6 +101,7 @@ source = { registry = "..." }
     def test_missing_uv_lock_raises(self, tmp_path):
         # 目录里没有 uv.lock → OSError(读失败),而非静默通过
         import pytest
+
         from scripts.bump_version import update_uv_lock_version
 
         with pytest.raises(OSError):

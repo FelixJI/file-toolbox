@@ -59,8 +59,9 @@ class TestSha256File:
 
 
 import io  # noqa: E402
-import pytest  # noqa: E402
 from urllib import error as urlerror  # noqa: E402
+
+import pytest  # noqa: E402
 
 from file_toolbox.updater import downloader as dmod  # noqa: E402
 from file_toolbox.updater.errors import ChecksumMismatchError, NetworkError  # noqa: E402

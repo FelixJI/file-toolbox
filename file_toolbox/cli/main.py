@@ -66,10 +66,10 @@ def main() -> None:
         app(standalone_mode=False)
     except OpParseError as e:
         typer.secho(f"错误:{e}", fg=typer.colors.RED, err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from e
     except typer.Exit as e:
         # standalone_mode=False 下 typer.Exit 以异常抛出,按其退出码退出
-        raise SystemExit(e.exit_code)
+        raise SystemExit(e.exit_code) from e
 
 
 if __name__ == "__main__":

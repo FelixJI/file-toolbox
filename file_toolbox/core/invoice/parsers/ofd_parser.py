@@ -7,9 +7,10 @@ Content.xml 的带坐标 TextObject 补充买卖方名称/大写金额,以及明
 - 多 DocBody(一张 .ofd 内含多张发票)仅处理首张,不拆分多发票。
 """
 
+import contextlib
 import re
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 from file_toolbox.core.invoice.parsers.base import UnsupportedFormatError
@@ -142,10 +143,8 @@ def _parse_text_objects(content_xml: str) -> list[dict]:
         if boundary:
             parts = boundary.split()
             if len(parts) >= 2:
-                try:
+                with contextlib.suppress(ValueError):
                     bx, by = float(parts[0]), float(parts[1])
-                except ValueError:
-                    pass
         # 一个 TextObject 可含多个 TextCode(不同段),逐段收集
         for tc in to.iter(f"{OFD_NS}TextCode"):
             text = (tc.text or "").strip()
@@ -248,7 +247,7 @@ def _extract_detail_items(objs: list[dict]) -> list[LineItem]:
         for o in sorted(ws, key=lambda w: w["x"]):
             col_vals[_column_of(o["x"])].append(o["text"])
 
-        def join(col: str) -> str:
+        def join(col: str, col_vals: dict[str, list[str]] = col_vals) -> str:
             return "".join(col_vals.get(col, []))
 
         name = join("name")

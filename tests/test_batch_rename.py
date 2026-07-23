@@ -1,6 +1,5 @@
-from pathlib import Path
 
-from file_toolbox.core.batch_rename import FileRenameService, OperationType
+from file_toolbox.core.batch_rename import FileRenameService
 
 
 def _svc():

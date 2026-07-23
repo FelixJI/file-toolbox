@@ -7,6 +7,8 @@ PDF工具函数
 import contextlib
 from pathlib import Path
 
+from file_toolbox.common.file_utils import format_file_size
+
 from .constants import (
     DPI_DEFAULT,
     ORIENTATION_AUTO_DETECT,
@@ -17,8 +19,6 @@ from .constants import (
     SCALE_DEFAULT,
     SCALE_FIT_MARGIN,
 )
-
-from file_toolbox.common.file_utils import format_file_size
 
 
 def convert_pdf_to_image_pdf(

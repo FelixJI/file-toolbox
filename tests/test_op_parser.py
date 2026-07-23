@@ -1,6 +1,6 @@
 import pytest
 
-from file_toolbox.cli.op_parser import parse_ops, parse_op, OpParseError
+from file_toolbox.cli.op_parser import OpParseError, parse_op, parse_ops
 
 
 def test_parse_single_op():

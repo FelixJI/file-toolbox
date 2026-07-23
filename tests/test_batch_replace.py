@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
-from file_toolbox.core.batch_replace.types import ReplaceOperationType
-from file_toolbox.core.batch_replace.service import ContentReplaceService
 from file_toolbox.core.batch_replace import service as service_mod
+from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
+from file_toolbox.core.batch_replace.service import ContentReplaceService
+from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
 
 def test_text_count_matches_simple():

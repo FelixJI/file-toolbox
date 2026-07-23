@@ -162,8 +162,8 @@ class TestFetchLatest:
         assert vmod.fetch_latest() is None
 
 
-from file_toolbox.updater import is_portable_exe  # noqa: E402
 import file_toolbox.updater as upkg  # noqa: E402
+from file_toolbox.updater import is_portable_exe  # noqa: E402
 
 
 class TestIsPortableExe:

@@ -25,7 +25,7 @@ _PACKAGE_RE = re.compile(r'name\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"')
 
 def parse_lock_versions(lock_text: str) -> dict[str, str]:
     """从 uv.lock 文本解析 {包名: 版本}。"""
-    return {name: ver for name, ver in _PACKAGE_RE.findall(lock_text)}
+    return dict(_PACKAGE_RE.findall(lock_text))
 
 
 def diff_upgrades(

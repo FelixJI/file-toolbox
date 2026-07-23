@@ -1,5 +1,7 @@
 """内容替换 Tab:批量替换 Word/Excel/txt 文档内容(简单+正则),自动备份。"""
 
+import contextlib
+
 from PySide6.QtWidgets import (
     QDialog,
     QInputDialog,
@@ -174,8 +176,6 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
 
     def closeEvent(self, event):
         self._cleanup_batch_dialog()
-        try:
+        with contextlib.suppress(Exception):
             self._svc.close()
-        except Exception:
-            pass
         super().closeEvent(event)

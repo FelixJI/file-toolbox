@@ -1,5 +1,6 @@
 """生成 PDF Tab:多格式文件批量转 PDF(支持合并、图片型)。"""
 
+import contextlib
 import logging
 from pathlib import Path
 
@@ -14,7 +15,6 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_pdf import PDFGeneratorService
-from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 from file_toolbox.core.batch_pdf.constants import (
     DPI_DEFAULT,
     DPI_OPTIONS,
@@ -30,6 +30,7 @@ from file_toolbox.core.batch_pdf.constants import (
     SCALE_FIT_MARGIN,
     SCALE_SHRINK_OVERSIZED,
 )
+from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.generated.ui_pdf_dialog import Ui_PDFGeneratorDialog
 
@@ -389,8 +390,6 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     def closeEvent(self, event):
         self._cleanup_batch_dialog()
-        try:
+        with contextlib.suppress(Exception):
             self._svc.close()
-        except Exception:
-            pass
         super().closeEvent(event)

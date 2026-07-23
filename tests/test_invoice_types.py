@@ -1,8 +1,8 @@
 from file_toolbox.core.invoice.types import (
+    FailedFile,
     Invoice,
     LineItem,
     ParseResult,
-    FailedFile,
 )
 
 

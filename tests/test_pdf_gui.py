@@ -166,7 +166,6 @@ def test_table_files_in_group_files(dlg):
 
 def test_do_refresh_preview_populates_table(dlg, tmp_path):
     """selected_files 非空 → _do_refresh_preview 填 4 列,状态=待转换。"""
-    from pathlib import Path
 
     f1 = tmp_path / "a.docx"
     f1.write_bytes(b"x" * 1234)
@@ -187,7 +186,6 @@ def test_do_refresh_preview_populates_table(dlg, tmp_path):
 
 def test_do_refresh_preview_merge_mode_uses_merge_filename(dlg, tmp_path):
     """合并模式 → 输出列填合并文件名。"""
-    from pathlib import Path
 
     f1 = tmp_path / "a.docx"
     f1.write_bytes(b"x")
@@ -211,7 +209,6 @@ def test_do_refresh_preview_empty_files_clears_table(dlg):
 
 def test_do_refresh_preview_missing_file_size_blank(dlg, tmp_path):
     """文件不存在 → 大小列空(不崩)。"""
-    from pathlib import Path
 
     dlg.selected_files = [tmp_path / "no_such.docx"]
     dlg._do_refresh_preview()  # 不应抛
@@ -220,7 +217,6 @@ def test_do_refresh_preview_missing_file_size_blank(dlg, tmp_path):
 
 def test_clear_files_resets_table(dlg, tmp_path):
     """_on_clear_files 清空 selected_files 与表。"""
-    from pathlib import Path
 
     f = tmp_path / "a.docx"
     f.write_bytes(b"x")
@@ -251,7 +247,6 @@ def test_generate_with_no_files_shows_message(dlg, monkeypatch):
 
 def test_generate_starts_worker_and_disables_ui(dlg, monkeypatch, tmp_path):
     """有文件 → 创建 worker、start、UI 禁用、cancel 按钮显示。"""
-    from pathlib import Path
 
     from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
 

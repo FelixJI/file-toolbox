@@ -7,7 +7,6 @@ engine_manager.close()),重入 GC 会与 pywin32/Windows 堆交互致堆损坏�
 service.close 必须把 _from_del 透传给 engine_manager.close。
 """
 
-import pytest
 
 from file_toolbox.core.batch_pdf.service import PDFGeneratorService
 

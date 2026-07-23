@@ -295,7 +295,7 @@ def bump(
         except (ValueError, OSError) as e:
             # lockfile 结构异常或读写失败:作为硬错误中止,避免发版后 lock 滞后
             typer.secho(f"✗ 同步 uv.lock 失败: {e}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1) from e
 
     # 迁移 CHANGELOG
     cl_text = _CHANGELOG.read_text(encoding="utf-8")

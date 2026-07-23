@@ -12,7 +12,7 @@ def _make_xml(num: str) -> bytes:
   <BasicInformation><TotalAmWithoutTax>100.00</TotalAmWithoutTax><TotalTaxAm>13.00</TotalTaxAm><TotalTax-includedAmount>113.00</TotalTax-includedAmount><TotalTax-includedAmountInChinese>壹佰圆整</TotalTax-includedAmountInChinese><Drawer>测试</Drawer></BasicInformation>
 </EInvoiceData>
 <TaxSupervisionInfo><InvoiceNumber>{num}</InvoiceNumber><IssueTime>2026-05-19</IssueTime></TaxSupervisionInfo>
-</EInvoice>""".encode("utf-8")
+</EInvoice>""".encode()
 
 
 def _xml_file(tmp_path, num: str) -> Path:

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import re
 import tempfile
@@ -125,18 +126,14 @@ def download_and_verify(
     try:
         _download_streaming(release.zip_url, dest, on_progress=on_progress)
     except Exception as e:
-        try:
+        with contextlib.suppress(OSError):
             dest.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise NetworkError(f"下载失败: {e}") from e
 
     actual_sha = sha256_file(dest)
     if actual_sha != expected_sha:
-        try:
+        with contextlib.suppress(OSError):
             dest.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise ChecksumMismatchError(
             f"SHA256 校验不匹配: expected {expected_sha}, got {actual_sha}"
         )

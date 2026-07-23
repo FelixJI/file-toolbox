@@ -1,7 +1,5 @@
-from datetime import datetime
-from pathlib import Path
 
-from file_toolbox.common.file_utils import format_file_size, format_datetime, get_file_info
+from file_toolbox.common.file_utils import format_datetime, format_file_size, get_file_info
 
 
 def test_format_file_size_bytes():

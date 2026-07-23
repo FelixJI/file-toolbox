@@ -155,7 +155,7 @@ def run_interactive() -> None:
     except KeyboardInterrupt:
         # 交互阶段取消:此时未启动任何子进程,无残留改动
         typer.secho("\n已取消(Ctrl+C),未做任何改动。", fg=typer.colors.YELLOW)
-        raise typer.Exit(130)
+        raise typer.Exit(130) from None
 
 
 def _run_interactive_inner() -> None:
@@ -212,7 +212,7 @@ def _run_interactive_inner() -> None:
     # ---- Step 3: 总览确认 ----
     typer.echo("\n即将执行:")
     typer.echo(f"  • pyproject.toml: {current_ver} → {new_ver}")
-    typer.echo(f"  • uv.lock: 同步 file-toolbox 版本号")
+    typer.echo("  • uv.lock: 同步 file-toolbox 版本号")
     typer.echo(f"  • CHANGELOG.md: 迁移 [Unreleased] 段到 {new_ver}")
     typer.echo(f"  • git commit + tag v{new_ver}")
     typer.echo(f"  • PyInstaller 打包   {'(将执行)' if do_build else '— 跳过 —'}")

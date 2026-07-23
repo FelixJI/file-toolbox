@@ -1,7 +1,7 @@
 import logging
 
-from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.base_operation import BaseOperationService
+from file_toolbox.common.loggable import LoggableMixin
 
 
 class _FakeOp(BaseOperationService):

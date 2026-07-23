@@ -194,12 +194,10 @@ def _extract_detail_items(words: list[dict], col_centers: dict[str, float]) -> l
 
     # 定位表头行(含'项目名称'和'规格型号')
     start_idx = None
-    header_words: list[dict] = []
     for i, key in enumerate(keys_in_order):
         row_text = "".join(w["text"] for w in rows[key])
         if all(kw in row_text for kw in _HEADER_KEYWORDS):
             start_idx = i + 1
-            header_words = rows[key]
             break
     if start_idx is None:
         start_idx = 0
@@ -220,7 +218,7 @@ def _extract_detail_items(words: list[dict], col_centers: dict[str, float]) -> l
         for w in sorted(ws, key=lambda x: x["x0"]):
             col_vals[_column_of(w, col_centers)].append(w["text"])
 
-        def join(col: str) -> str:
+        def join(col: str, col_vals: dict[str, list[str]] = col_vals) -> str:
             return "".join(col_vals.get(col, []))
 
         name = join("name")
@@ -437,7 +435,7 @@ def _extract_amounts(rows: dict[int, list[dict]], keys: list[int]) -> tuple[str,
 
     # 兜底:若价税合计仍未取到,扫描含'小写'或紧跟合计行后的金额行
     if not amount_with_tax:
-        for i, key in enumerate(keys):
+        for key in keys:
             joined = _row_join_no_space(rows[key])
             if "小写" in joined:
                 amount_with_tax = _find_amount_in_next_rows(rows, keys, key, 2)

@@ -1,5 +1,7 @@
 """File Toolbox 主窗口:QMainWindow + 4 Tab。"""
 
+import contextlib
+
 from PySide6.QtCore import QMetaObject, Qt, QTimer
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -232,11 +234,9 @@ class MainWindow(QMainWindow):
             self._about_tab,
         ):
             if hasattr(tab, "closeEvent"):
-                # 触发各 tab 的清理
-                try:
+                # 触发各 tab 的清理(吞掉异常避免一个 tab 清理失败影响其余)
+                with contextlib.suppress(Exception):
                     tab.closeEvent(event)  # type: ignore[arg-type]
-                except Exception:
-                    pass
         super().closeEvent(event)
 
 

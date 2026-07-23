@@ -387,12 +387,17 @@ def pdf_sample_realistic(tmp_path) -> Path:
     hy = h - 140
     c.drawString(47, hy, "项目名称")
     c.drawString(117, hy, "规格型号")
-    c.drawString(189, hy, "单"); c.drawString(207, hy, "位")
-    c.drawString(263, hy, "数"); c.drawString(281, hy, "量")
-    c.drawString(334, hy, "单"); c.drawString(352, hy, "价")
-    c.drawString(408, hy, "金"); c.drawString(426, hy, "额")
+    c.drawString(189, hy, "单")
+    c.drawString(207, hy, "位")
+    c.drawString(263, hy, "数")
+    c.drawString(281, hy, "量")
+    c.drawString(334, hy, "单")
+    c.drawString(352, hy, "价")
+    c.drawString(408, hy, "金")
+    c.drawString(426, hy, "额")
     c.drawString(445, hy, "税率/征收率")
-    c.drawString(549, hy, "税"); c.drawString(567, hy, "额")
+    c.drawString(549, hy, "税")
+    c.drawString(567, hy, "额")
 
     # 明细行 1(跨 2 行:名称主体 + 续行)
     y1 = hy - 20

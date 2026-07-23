@@ -1,5 +1,6 @@
 """批处理对话框混入类 - 提供文件选择、预览、进度显示等公共功能。"""
 
+import contextlib
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer
@@ -28,10 +29,8 @@ class SignalManager(QObject):
 
     def disconnect_all(self):
         for signal, slot, _ in self._connections:
-            try:
+            with contextlib.suppress(RuntimeError):
                 signal.disconnect(slot)
-            except RuntimeError:
-                pass
         self._connections.clear()
 
 
@@ -64,9 +63,7 @@ class BatchDialogMixin:
         name = file_path.name
         if name.startswith("~$") or name.startswith("~"):
             return True
-        if file_path.suffix.lower() == ".tmp":
-            return True
-        return False
+        return file_path.suffix.lower() == ".tmp"
 
     def _is_file_supported(self, file_path: Path) -> bool:
         """检查文件是否支持"""
