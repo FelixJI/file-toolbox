@@ -162,3 +162,67 @@ class TestDownloadAndVerify:
 
         with pytest.raises(NetworkError):
             dmod.download_and_verify(_make_release())
+
+
+class TestProxyApplied:
+    """下载请求经代理:GitHub URL 前缀拼接。"""
+
+    def test_download_url_is_proxied(self, monkeypatch, tmp_path):
+        from file_toolbox.updater import proxy
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv(proxy.ENV_VAR, "https://ghproxy.example")
+
+        import hashlib
+
+        zip_bytes = b"fake-zip"
+        expected_sha = hashlib.sha256(zip_bytes).hexdigest()
+        cs_text = f"{expected_sha}  FileToolbox-1.2.0-win64.zip\n"
+
+        captured_urls: list[str] = []
+
+        def fake_urlopen(req, timeout=None):
+            captured_urls.append(req.full_url if hasattr(req, "full_url") else str(req))
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if url.endswith("checksums.txt"):
+                return _StreamResp(cs_text.encode())
+            return _StreamResp(zip_bytes)
+
+        monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
+        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
+
+        rel = _make_release(
+            zip_url="https://github.com/FelixJI/file-toolbox/releases/download/v1.2.0/FileToolbox-1.2.0-win64.zip",
+            cs_url="https://github.com/FelixJI/file-toolbox/releases/download/v1.2.0/checksums.txt",
+        )
+        dmod.download_and_verify(rel)
+        assert captured_urls, "urlopen 未被调用"
+        # zip 与 checksums 两个请求都应走代理
+        assert all(u.startswith("https://ghproxy.example/") for u in captured_urls), captured_urls
+
+    def test_download_no_proxy_unchanged(self, monkeypatch, tmp_path):
+        from file_toolbox.updater import proxy
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(proxy.ENV_VAR, raising=False)
+
+        import hashlib
+
+        zip_bytes = b"fake-zip"
+        expected_sha = hashlib.sha256(zip_bytes).hexdigest()
+        cs_text = f"{expected_sha}  FileToolbox-1.2.0-win64.zip\n"
+
+        captured_urls: list[str] = []
+
+        def fake_urlopen(req, timeout=None):
+            captured_urls.append(req.full_url if hasattr(req, "full_url") else str(req))
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if url.endswith("checksums.txt"):
+                return _StreamResp(cs_text.encode())
+            return _StreamResp(zip_bytes)
+
+        monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
+        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
+
+        dmod.download_and_verify(_make_release())
+        assert all(not u.startswith("https://ghproxy") for u in captured_urls), captured_urls

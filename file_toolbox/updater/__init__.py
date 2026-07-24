@@ -13,9 +13,10 @@ import sys
 from pathlib import Path
 
 from file_toolbox import __version__
+from file_toolbox.updater.proxy import apply_proxy
 from file_toolbox.updater.versions import RemoteRelease, fetch_latest, is_newer
 
-__all__ = ["check_update", "is_portable_exe", "RemoteRelease"]
+__all__ = ["check_update", "is_portable_exe", "apply_proxy", "RemoteRelease"]
 
 
 def is_portable_exe() -> bool:

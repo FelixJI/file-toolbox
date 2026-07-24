@@ -191,3 +191,40 @@ class TestIsPortableExe:
         exe.touch()
         monkeypatch.setattr(upkg.sys, "executable", str(exe))
         assert is_portable_exe() is False
+
+
+class TestProxyApplied:
+    """_fetch 经代理:GitHub URL 前缀拼接。"""
+
+    def test_fetch_url_is_proxied(self, monkeypatch, tmp_path):
+        from file_toolbox.updater import proxy
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv(proxy.ENV_VAR, "https://ghproxy.example")
+
+        captured_urls: list[str] = []
+
+        def fake_urlopen(req, timeout=None):
+            captured_urls.append(req.full_url if hasattr(req, "full_url") else str(req))
+            return _FakeResp(_make_github_payload("v2.0.0"))
+
+        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
+        vmod.fetch_latest()
+        assert captured_urls, "urlopen 未被调用"
+        assert captured_urls[0].startswith("https://ghproxy.example/https://api.github.com/")
+
+    def test_fetch_no_proxy_unchanged(self, monkeypatch, tmp_path):
+        from file_toolbox.updater import proxy
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv(proxy.ENV_VAR, raising=False)
+
+        captured_urls: list[str] = []
+
+        def fake_urlopen(req, timeout=None):
+            captured_urls.append(req.full_url if hasattr(req, "full_url") else str(req))
+            return _FakeResp(_make_github_payload("v2.0.0"))
+
+        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
+        vmod.fetch_latest()
+        assert captured_urls[0].startswith("https://api.github.com/")
