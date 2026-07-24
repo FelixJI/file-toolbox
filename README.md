@@ -177,6 +177,7 @@ uv run --extra dev python scripts/release.py patch   # bump → build,提示推�
   是否有新版本。便携版发现新版可下载应用;pip/dev 版提示用 `pip install -U file-toolbox` 升级。
 - **GitHub 代理**:关于页「GitHub 代理」输入框可填代理基址(如 `https://ghproxy.com`),
   用于加速版本检查与更新下载;留空则直连。也可用环境变量 `FILE_TOOLBOX_GH_PROXY` 覆盖。
+  代理需为支持前缀拼接、服务端跟随重定向的服务(如 ghproxy/gh-proxy)。
 
 ## 许可证
 

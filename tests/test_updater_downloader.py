@@ -224,5 +224,10 @@ class TestProxyApplied:
         monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
         monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
 
-        dmod.download_and_verify(_make_release())
-        assert all(not u.startswith("https://ghproxy") for u in captured_urls), captured_urls
+        dmod.download_and_verify(
+            _make_release(
+                zip_url="https://github.com/FelixJI/file-toolbox/releases/download/v1.2.0/FileToolbox-1.2.0-win64.zip",
+                cs_url="https://github.com/FelixJI/file-toolbox/releases/download/v1.2.0/checksums.txt",
+            )
+        )
+        assert all(u.startswith("https://github.com/") for u in captured_urls), captured_urls

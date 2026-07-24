@@ -6,6 +6,11 @@
 
 代理来源优先级:环境变量 FILE_TOOLBOX_GH_PROXY > settings["gh_proxy"] > 空(无代理)。
 非 GitHub 域名 / 代理为空 → URL 原样返回。
+
+兼容性:本变换为"前缀拼接"。GitHub release 下载会 302 重定向到 objects.githubusercontent.com,
+urllib 默认重定向处理器原样跟随 Location,不对重定向目标再次拼接代理。故代理需为
+"服务端跟随重定向并流式回传"型(如 ghproxy/gh-proxy 等主流前缀代理);对"把 302 原样
+返回给客户端"型代理,资源下载会绕过代理直连对象存储。
 """
 
 from __future__ import annotations

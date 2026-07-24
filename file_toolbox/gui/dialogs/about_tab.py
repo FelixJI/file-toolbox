@@ -188,7 +188,7 @@ class AboutTab(QWidget):
     def display_check_result(self, kind: str, text: str) -> None:
         """主窗口回调:显示检查结果并恢复按钮。
 
-        kind: "latest" | "available" | "failed"
+        kind: "latest" | "available" | "failed"(预留:未来可按状态着色/加图标,当前仅用 text)
         text: 展示文本。
         """
         self.btn_check_update.setEnabled(True)
