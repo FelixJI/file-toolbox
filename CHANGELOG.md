@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.1.11 - 2026-07-24
+
 ### Fixed
 - 修复 CI(Linux runner)上 `test_batch_replace.py` 2 个测试失败:它们 monkeypatch
   `sys.platform="win32"` 后引用 `subprocess.CREATE_NO_WINDOW`,但该常量仅 Windows 存在
