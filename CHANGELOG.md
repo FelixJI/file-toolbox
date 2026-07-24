@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.1.10 - 2026-07-24
+
 ### Fixed
 - 修复 CI(Linux runner)上 pytest 收集 GUI 测试失败:`PySide6.QtWidgets` 在 import 时
   加载 `libEGL.so.1`/`libGL` 原生库,ubuntu runner 默认未装。
