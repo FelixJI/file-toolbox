@@ -7,17 +7,19 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressDialog,
-    QPushButton,
     QStatusBar,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from file_toolbox import updater as updater_pkg
 from file_toolbox.common.history import JsonHistoryStore
+from file_toolbox.common.metadata import VERSION
 from file_toolbox.gui.dialogs import (
     AboutTab,
     BatchFolderCreatorDialog,
@@ -47,12 +49,24 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 顶部:历史按钮(右对齐,紧贴标签栏,不撑出一大块空白)
+        # 顶部:历史按钮(下拉菜单直达各模块,右对齐)
         top = QHBoxLayout()
         top.setContentsMargins(9, 5, 9, 2)
         top.addStretch(1)
-        self.btn_history = QPushButton("历史")
-        self.btn_history.clicked.connect(self._open_history)
+        self.btn_history = QToolButton()
+        self.btn_history.setText("历史")
+        self.btn_history.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        hist_menu = QMenu(self.btn_history)
+        for label, tool in [
+            ("重命名历史", "rename"),
+            ("建文件夹历史", "mkdir"),
+            ("生成PDF历史", "pdf"),
+            ("内容替换历史", "replace"),
+            ("发票识别历史", "invoice"),
+        ]:
+            act = hist_menu.addAction(label)
+            act.triggered.connect(lambda checked=False, t=tool: self._open_history_tool(t))
+        self.btn_history.setMenu(hist_menu)
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
@@ -95,20 +109,13 @@ class MainWindow(QMainWindow):
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
 
-    def _open_history(self) -> None:
-        # 简单起见:用一个下拉选择工具,默认显示 rename 历史
-        from PySide6.QtWidgets import QInputDialog
+        # 关于页手动检查更新:AboutTab 请求 → 投递 worker → 结果回显
+        self._about_tab.check_requested.connect(self._on_check_requested)
+        self._update_worker.checked.connect(self._on_update_checked)
+        self._manual_check_pending = False  # 区分手动 vs 自动检查
 
-        tool, ok = QInputDialog.getItem(
-            self,
-            "查看历史",
-            "选择工具:",
-            ["rename", "replace", "pdf", "mkdir", "invoice"],
-            0,
-            editable=False,
-        )
-        if not ok:
-            return
+    def _open_history_tool(self, tool: str) -> None:
+        """直接打开指定工具的历史(下拉菜单项触发,无二次选择)。"""
         dlg = HistoryDialog(self._history, tool, self)
         dlg.exec()
 
@@ -122,10 +129,43 @@ class MainWindow(QMainWindow):
             self._update_worker, "do_check", Qt.ConnectionType.QueuedConnection
         )
 
+    def _on_check_requested(self) -> None:
+        """关于页请求检查更新:确保 worker 运行并投递 do_check。"""
+        if not self._update_worker.isRunning():
+            # 非便携形态(pip/dev):按需启动 worker(自动检查不会启)
+            self._update_worker.start()
+        self._manual_check_pending = True
+        self._trigger_check()
+
+    def _on_update_checked(self, release: RemoteRelease | None, status: str) -> None:
+        """worker checked 信号:仅手动检查时回显结果到关于页。
+
+        自动检查场景(启动后台)忽略此回调(由 _on_update_ready 处理 banner)。
+        """
+        if not self._manual_check_pending:
+            return
+        self._manual_check_pending = False
+        if status == "available" and release is not None:
+            if updater_pkg.is_portable_exe():
+                self._about_tab.display_check_result(
+                    "available", f"🆕 发现新版本 {release.version}(点击底部提示更新)"
+                )
+            else:
+                self._about_tab.display_check_result(
+                    "available",
+                    f"🆕 发现新版本 {release.version},请用 pip install -U file-toolbox 升级",
+                )
+        elif status == "failed":
+            self._about_tab.display_check_result("failed", "⚠ 检查更新失败,请检查网络或代理设置")
+        else:  # latest
+            self._about_tab.display_check_result("latest", f"✓ 当前为最新版本 v{VERSION}")
+
     def _on_update_ready(self, release: RemoteRelease) -> None:
-        """检查到新版本 → 状态栏 banner 提示。"""
+        """检查到新版本 → 状态栏 banner 提示(便携版可下载)。"""
         self._pending_release = release
-        self._update_banner.show_release(release)
+        if updater_pkg.is_portable_exe():
+            self._update_banner.show_release(release)
+        # 非便携版(pip/dev):不在状态栏提示,由关于页 display_check_result 引导 pip 升级
 
     def _start_download(self) -> None:
         """用户点击 banner → 弹进度对话框 + 向 worker 投递下载请求。"""
