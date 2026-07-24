@@ -6,7 +6,9 @@ UI 由 generated/ui_invoice_dialog.py(Ui_InvoiceDialog)构建,本测试验证接
 
 import pytest
 
-pytest.importorskip("PySide6")
+# 用 QtWidgets 子模块做 importorskip(而非顶层 PySide6):后者只校验包可 import,
+# 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
+pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 

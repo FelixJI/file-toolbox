@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- 修复 CI(Linux runner)上 pytest 收集 GUI 测试失败:`PySide6.QtWidgets` 在 import 时
+  加载 `libEGL.so.1`/`libGL` 原生库,ubuntu runner 默认未装。
+  - CI 安装 Qt 运行期系统库(libegl1/libgl1/libxkbcommon 等),GUI 测试在 Linux 真正运行。
+  - 6 个 GUI 测试的 `importorskip` 由顶层 `PySide6` 改为 `PySide6.QtWidgets` 子模块,
+    缺原生库时干净跳过而非收集报错(防御性,缺库也能跑其余测试)。
+
 ## 0.1.9 - 2026-07-24
 
 ### Fixed

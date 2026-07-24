@@ -2,7 +2,10 @@
 
 import pytest
 
-pytest.importorskip("PySide6")
+# 用 QtWidgets 子模块做 importorskip:仅检查顶层 PySide6 包不够——它会成功 import,
+# 但 from PySide6.QtWidgets import ... 才真正加载 libEGL/libGL 等原生库。Linux 无
+# 这些系统库时,顶层 importorskip 不跳过,反而在后续 import 处抛 ImportError 致收集失败。
+pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,

@@ -14,6 +14,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 安装 Qt 运行期系统库(Linux)
+        # PySide6 的 QtWidgets 在 import 时加载 libEGL/libGL 等原生库,ubuntu runner 默认
+        # 未装,缺库会让 GUI 测试收集即 ImportError。装上后 GUI 测试在 Linux CI 真正运行
+        # (配合 QT_QPA_PLATFORM=offscreen 离屏渲染),而非被跳过、丢失覆盖。
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libglib2.0-0 libfontconfig1 libdbus-1-3 \
+            libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0
+
       - name: 安装 uv
         uses: astral-sh/setup-uv@v3
         with:
