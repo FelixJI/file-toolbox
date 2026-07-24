@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.1.9 - 2026-07-24
+
 ### Fixed
 - 修复 CI(Linux runner)上 mypy 误报 Windows-only API(`os.startfile` / `winreg`)的 7 个错误:
   mypy 固定 `platform=win32`,与目标平台(Windows 桌面工具)及开发机一致。
