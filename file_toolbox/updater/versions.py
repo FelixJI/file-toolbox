@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from urllib import request as urlrequest
 
+from file_toolbox.updater.proxy import apply_proxy
+
 # owner/repo 硬编码常量(与 git remote 一致,不引入配置真相源)
 GITHUB_REPO = ("FelixJI", "file-toolbox")
 
@@ -127,7 +129,7 @@ def _parse_release(payload: bytes, platform: str) -> RemoteRelease | None:
 
 def _fetch(platform: str) -> RemoteRelease | None:
     """从单个平台拉取并解析最新 Release。失败返回 None(不抛)。"""
-    url = _build_release_url(platform)
+    url = apply_proxy(_build_release_url(platform))
     req = urlrequest.Request(url, headers={"Accept": "application/json"})
     try:
         with _urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
