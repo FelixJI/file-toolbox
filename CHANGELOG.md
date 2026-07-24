@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- 修复 CI(Linux runner)上 mypy 误报 Windows-only API(`os.startfile` / `winreg`)的 7 个错误:
+  mypy 固定 `platform=win32`,与目标平台(Windows 桌面工具)及开发机一致。
+- 修复潜在运行时崩溃:`updater/replacer.py` 模块级取 `os.startfile` 改为 `getattr` 回退,
+  非 Windows 不再 import 即报错;`common/shortcuts.py` 注册表探测补 `ImportError` 捕获。
+- 修复测试在 Linux 上的收集崩溃:`test_engine_manager.py` 改用 `pytest.importorskip("winreg")`,
+  非 Windows 干净跳过。
+
 ## 0.1.8 - 2026-07-23
 
 ## 0.1.7 - 2026-07-22

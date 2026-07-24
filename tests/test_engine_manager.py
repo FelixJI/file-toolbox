@@ -1,6 +1,8 @@
 """EngineManager 注册表探测单元测试。
 
-不触发真实 COM Dispatch,仅用 monkeypatch 替换 winreg。
+不触发真实 COM Dispatch,仅用 monkeypatch 替换 winreg。这些测试直接用 winreg 的
+真实模块对象做 monkeypatch,故仅在 Windows(winreg 存在)上有效;非 Windows 跳过
+(产品本身的 _probe_registry 已对 ImportError 做了回退处理)。
 """
 
 import pytest
@@ -10,7 +12,7 @@ from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
 def test_probe_registry_returns_true_when_key_exists(monkeypatch):
     """HKCR 下存在 ProgID → 返回 True。"""
-    import winreg
+    winreg = pytest.importorskip("winreg")
 
     def fake_open_key(root, subkey, *args, **kwargs):
         if subkey.lower() == "word.application":
@@ -25,7 +27,7 @@ def test_probe_registry_returns_true_when_key_exists(monkeypatch):
 
 
 def test_probe_registry_returns_false_on_file_not_found(monkeypatch):
-    import winreg
+    winreg = pytest.importorskip("winreg")
 
     def raise_fnf(root, subkey, *args, **kwargs):
         raise FileNotFoundError(subkey)
@@ -38,7 +40,7 @@ def test_probe_registry_returns_false_on_file_not_found(monkeypatch):
 
 def test_probe_registry_returns_false_on_os_error(monkeypatch):
     """权限错误等 OSError 也视为不可用。"""
-    import winreg
+    winreg = pytest.importorskip("winreg")
 
     def raise_os(root, subkey, *args, **kwargs):
         raise OSError("denied")

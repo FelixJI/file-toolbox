@@ -14,6 +14,7 @@ import os
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 from file_toolbox.updater.errors import ReplaceError
@@ -102,8 +103,11 @@ mshta "javascript:var s=new ActiveXObject('WScript.Shell');s.Popup('更新失败
 """
 
 
-# 模块级别名,便于测试 monkeypatch(os.startfile 仅 Windows 存在)
-_startfile = os.startfile
+# 模块级别名,便于测试 monkeypatch。os.startfile 仅 Windows 存在;在模块级直接取属性会
+# 让本模块在 Linux(CI 的 pytest 收集阶段)import 即抛 AttributeError。故用 getattr 回退:
+# Windows 上拿到真 os.startfile;其他平台为 None(自更新本就是 Windows 专属功能,非 Windows
+# 调到 replace_dir 会因 _startfile 为 None 而显式失败,而非 import 时崩溃)。
+_startfile: Callable[[str], None] | None = getattr(os, "startfile", None)
 
 
 def _extract_portable_zip(zip_path: Path, dest_dir: Path) -> None:
@@ -165,5 +169,7 @@ def replace_dir(zip_path: Path, exe_path: Path) -> Path:
     bat_path = Path(tempfile.gettempdir()) / f"ftb_update_{pid}.bat"
     bat_path.write_text(bat_content, encoding="utf-8")
 
+    if _startfile is None:  # 非 Windows(os.startfile 不存在)
+        raise ReplaceError("自更新仅在 Windows 上可用:缺少 os.startfile")
     _startfile(str(bat_path))
     return bat_path

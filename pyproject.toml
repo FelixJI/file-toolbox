@@ -46,6 +46,11 @@ quote-style = "double"
 
 [tool.mypy]
 python_version = "3.11"
+# CI 在 Linux runner 上跑,但本应用是 Windows 桌面工具(pywin32/winreg/os.startfile
+# 均为 Windows-only 依赖与 API)。若按宿主平台(Linux)检查,会把这些 Windows-only 符号
+# 全部报为 attr-defined,产生 7 个误报。固定 platform=win32,让 mypy 用 Windows 类型
+# 存根(含 os.startfile / winreg)校验——与开发机(Windows)及 Release 作业一致。
+platform = "win32"
 # strict:全仓严格类型检查(函数必须注解、禁止隐式 Any、检查返回值等)。
 # 全仓已补齐注解并通过(strict 0 错误),现在作为门禁防止类型回归。
 strict = true

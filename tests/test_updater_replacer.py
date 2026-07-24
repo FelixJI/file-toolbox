@@ -94,6 +94,18 @@ import pytest  # noqa: E402
 from file_toolbox.updater import replacer as rmod  # noqa: E402
 
 
+def test_startfile_alias_tolerates_missing_attr():
+    """回归:os.startfile 仅 Windows 存在,模块级取属性不能崩溃。
+
+    此前 `_startfile = os.startfile` 在模块顶层,非 Windows(CI 的 Linux runner)
+    import 即抛 AttributeError,污染 pytest 收集。现用 getattr 回退:_startfile 在
+    Windows 上为真 os.startfile,其他平台为 None。此断言锁定"回退语义":当前平台
+    有 startfile 时拿到可调用对象(Windows),否则为 None(不会是属性错误残留)。
+    """
+    alias = rmod._startfile
+    assert alias is None or callable(alias)
+
+
 def _make_portable_zip(zip_path, version="9.9.9"):
     r"""造一个内含 FileToolbox\<文件> 的便携 zip(模拟 build_exe 产物)。"""
     with zipfile.ZipFile(zip_path, "w") as zf:

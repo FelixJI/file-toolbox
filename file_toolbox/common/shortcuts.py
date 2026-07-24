@@ -28,6 +28,7 @@ def _windows_desktop() -> Path:
     """Windows 真实桌面路径(规避 OneDrive 重定向)。
 
     直接用 ~/Desktop 会因 OneDrive 重定向失败,改读注册表 Shell Folders。
+    非 Windows 上 winreg 不存在(ImportError),回退到 ~/Desktop。
     """
     try:
         import winreg
@@ -38,7 +39,7 @@ def _windows_desktop() -> Path:
         ) as key:
             desktop, _ = winreg.QueryValueEx(key, "Desktop")
             return Path(desktop)
-    except OSError:
+    except (ImportError, OSError):
         return Path.home() / "Desktop"  # 回退
 
 
