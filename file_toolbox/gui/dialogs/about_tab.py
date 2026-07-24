@@ -6,23 +6,27 @@
 
 import platform
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from file_toolbox.common import metadata, shortcuts
+from file_toolbox.common import metadata, settings, shortcuts
 
 
 class AboutTab(QWidget):
     """关于界面 Tab。"""
+
+    # 用户点检查更新时向主窗口请求(主窗口投递 worker 并回调结果)
+    check_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -66,7 +70,43 @@ class AboutTab(QWidget):
         info_layout.addWidget(QLabel(f"许可证: {metadata.LICENSE}"))
         info_layout.addWidget(QLabel(f"Python 要求: {metadata.PYTHON_REQUIREMENT}"))
         info_layout.addWidget(QLabel(f"运行环境: {platform.platform()}"))
+
+        # --- 检查更新行(基本信息组内) ---
+        check_row = QHBoxLayout()
+        self.btn_check_update = QPushButton("检查更新")
+        self.btn_check_update.clicked.connect(self._on_check_clicked)
+        check_row.addWidget(self.btn_check_update)
+        self._check_result_lbl = QLabel("")
+        check_row.addWidget(self._check_result_lbl, stretch=1)
+        info_layout.addLayout(check_row)
+
         root.addWidget(info_box)
+
+        # --- GitHub 代理组 ---
+        proxy_box = QGroupBox("GitHub 代理(可选)")
+        proxy_layout = QVBoxLayout(proxy_box)
+        proxy_intro = QLabel("用于加速版本检查与更新下载。留空则直连 GitHub。")
+        proxy_intro.setWordWrap(True)
+        proxy_layout.addWidget(proxy_intro)
+        proxy_row = QHBoxLayout()
+        proxy_row.addWidget(QLabel("代理地址:"))
+        self._proxy_edit = QLineEdit()
+        self._proxy_edit.setPlaceholderText("如 https://ghproxy.com")
+        # 初始化为已保存的值(环境变量优先显示)
+        from file_toolbox.updater.proxy import get_proxy
+
+        self._proxy_edit.setText(get_proxy())
+        proxy_row.addWidget(self._proxy_edit, stretch=1)
+        self.btn_proxy_save = QPushButton("保存")
+        self.btn_proxy_save.clicked.connect(self._save_proxy)
+        proxy_row.addWidget(self.btn_proxy_save)
+        self.btn_proxy_clear = QPushButton("清空")
+        self.btn_proxy_clear.clicked.connect(self._clear_proxy)
+        proxy_row.addWidget(self.btn_proxy_clear)
+        proxy_layout.addLayout(proxy_row)
+        self._proxy_status_lbl = QLabel("")
+        proxy_layout.addWidget(self._proxy_status_lbl)
+        root.addWidget(proxy_box)
 
         # --- 技术路线组 ---
         tech_box = QGroupBox("技术路线")
@@ -137,3 +177,30 @@ class AboutTab(QWidget):
     def _remove_start_menu(self) -> None:
         r = shortcuts.remove_start_menu_shortcut()
         self._status_lbl.setText(r.message)
+
+    # --- 检查更新 ---
+    def _on_check_clicked(self) -> None:
+        """点击检查更新:禁用按钮 + 显示检查中 + 请求主窗口执行。"""
+        self.btn_check_update.setEnabled(False)
+        self._check_result_lbl.setText("检查中…")
+        self.check_requested.emit()
+
+    def display_check_result(self, kind: str, text: str) -> None:
+        """主窗口回调:显示检查结果并恢复按钮。
+
+        kind: "latest" | "available" | "failed"
+        text: 展示文本。
+        """
+        self.btn_check_update.setEnabled(True)
+        self._check_result_lbl.setText(text)
+
+    # --- GitHub 代理设置 ---
+    def _save_proxy(self) -> None:
+        value = self._proxy_edit.text().strip()
+        settings.set("gh_proxy", value)
+        self._proxy_status_lbl.setText("已保存" if value else "已保存(空 = 直连)")
+
+    def _clear_proxy(self) -> None:
+        self._proxy_edit.setText("")
+        settings.set("gh_proxy", "")
+        self._proxy_status_lbl.setText("已清空")

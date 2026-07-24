@@ -77,3 +77,87 @@ def test_about_tab_has_four_shortcut_buttons(app):
     # 创建 + 删除 各两类
     assert sum(1 for t in texts if "添加" in t) >= 2
     assert sum(1 for t in texts if "移除" in t) >= 2
+
+
+from PySide6.QtWidgets import QLineEdit  # noqa: E402
+
+
+def test_about_tab_has_check_update_button(app):
+    tab = AboutTab()
+    buttons = tab.findChildren(QPushButton)
+    texts = [b.text() for b in buttons]
+    assert any("检查更新" in t for t in texts)
+
+
+def test_about_tab_emits_check_requested(app):
+    """点检查更新按钮 → emit check_requested。"""
+    tab = AboutTab()
+    received: list = []
+    tab.check_requested.connect(lambda: received.append(1))
+    # 找到检查更新按钮并点击
+    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
+    btn.click()
+    assert received == [1]
+
+
+def test_about_tab_check_button_disables_during_check(app):
+    """点击后按钮立即禁用 + 结果标签显示检查中。"""
+    tab = AboutTab()
+    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
+    btn.click()
+    assert btn.isEnabled() is False
+    assert "检查中" in tab._check_result_lbl.text()
+
+
+def test_about_tab_display_check_result_latest(app):
+    tab = AboutTab()
+    # 先触发检查(禁用按钮),再回调结果
+    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
+    btn.click()
+    tab.display_check_result("latest", "✓ 当前为最新版本 v0.1.11")
+    assert btn.isEnabled() is True
+    assert "最新" in tab._check_result_lbl.text()
+
+
+def test_about_tab_display_check_result_available(app):
+    tab = AboutTab()
+    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
+    btn.click()
+    tab.display_check_result("available", "🆕 发现新版本 v9.9.9")
+    assert btn.isEnabled() is True
+    assert "9.9.9" in tab._check_result_lbl.text()
+
+
+def test_about_tab_display_check_result_failed(app):
+    tab = AboutTab()
+    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
+    btn.click()
+    tab.display_check_result("failed", "⚠ 检查失败")
+    assert btn.isEnabled() is True
+    assert "检查失败" in tab._check_result_lbl.text()
+
+
+def test_about_tab_has_proxy_edit(app):
+    tab = AboutTab()
+    assert isinstance(tab._proxy_edit, QLineEdit)
+
+
+def test_about_tab_save_proxy_writes_settings(app, monkeypatch, tmp_path):
+    """保存按钮 → settings 写入输入框值。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    tab = AboutTab()
+    tab._proxy_edit.setText("https://ghproxy.example")
+    tab.btn_proxy_save.click()
+    assert settings.get("gh_proxy") == "https://ghproxy.example"
+
+
+def test_about_tab_clear_proxy_empties_settings(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    settings.set("gh_proxy", "https://old.example")
+    tab = AboutTab()
+    tab.btn_proxy_clear.click()
+    assert settings.get("gh_proxy") == ""
