@@ -86,6 +86,55 @@ class TestUpdateWorker:
         assert got == []
         w.deleteLater()
 
+    def test_checked_signal_exists(self, app):
+        """worker 暴露 checked 信号。"""
+        w = UpdateWorker()
+        assert hasattr(w, "checked")
+        w.deleteLater()
+
+    def test_check_emits_checked_available_when_update(self, app, monkeypatch):
+        """有新版 → emit checked(rel, 'available')。"""
+        import file_toolbox.updater as upkg
+
+        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
+        monkeypatch.setattr(upkg, "check_update", lambda: rel)
+
+        w = UpdateWorker()
+        checked: list = []
+        w.checked.connect(lambda r, s: checked.append((r, s)))
+        w.do_check()
+        assert len(checked) == 1
+        assert checked[0][1] == "available"
+        assert checked[0][0] is rel
+        w.deleteLater()
+
+    def test_check_emits_checked_latest_when_no_update(self, app, monkeypatch):
+        """无新版 → emit checked(None, 'latest')。"""
+        import file_toolbox.updater as upkg
+
+        monkeypatch.setattr(upkg, "check_update", lambda: None)
+        w = UpdateWorker()
+        checked: list = []
+        w.checked.connect(lambda r, s: checked.append((r, s)))
+        w.do_check()
+        assert checked == [(None, "latest")]
+        w.deleteLater()
+
+    def test_check_emits_checked_failed_on_exception(self, app, monkeypatch):
+        """check_update 抛异常 → emit checked(None, 'failed')。"""
+        import file_toolbox.updater as upkg
+
+        def boom():
+            raise RuntimeError("network down")
+
+        monkeypatch.setattr(upkg, "check_update", boom)
+        w = UpdateWorker()
+        checked: list = []
+        w.checked.connect(lambda r, s: checked.append((r, s)))
+        w.do_check()
+        assert checked == [(None, "failed")]
+        w.deleteLater()
+
 
 from file_toolbox.gui.main_window import MainWindow  # noqa: E402
 

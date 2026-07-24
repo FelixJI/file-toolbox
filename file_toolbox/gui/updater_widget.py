@@ -64,6 +64,7 @@ class UpdateWorker(QThread):
     progress = Signal(int, int)
     verified = Signal(Path)
     failed = Signal(str)
+    checked = Signal(object, str)  # (RemoteRelease | None, "available"|"latest"|"failed")
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -75,18 +76,21 @@ class UpdateWorker(QThread):
     def do_check(self) -> None:
         """检查更新(在 worker 线程执行)。
 
-        检查失败静默(不打扰用户);有新版 emit ready。
-        本方法亦保留同步可调性(测试直接调,验证逻辑)。
+        始终 emit checked 反馈结果(供手动检查 UI);有新版额外 emit ready。
+        自动检查场景只消费 ready(忽略 checked),行为不变。
         """
         from file_toolbox import updater as updater_pkg
 
         try:
             rel = updater_pkg.check_update()
         except Exception:
-            # 检查失败静默(不打扰用户)
+            self.checked.emit(None, "failed")
             return
         if rel is not None:
+            self.checked.emit(rel, "available")
             self.ready.emit(rel)
+        else:
+            self.checked.emit(None, "latest")
 
     def do_download(self, release: RemoteRelease) -> None:
         """下载并校验(在 worker 线程执行)。
