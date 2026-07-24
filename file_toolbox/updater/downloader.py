@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from file_toolbox.updater.errors import ChecksumMismatchError, NetworkError
+from file_toolbox.updater.proxy import apply_proxy
 from file_toolbox.updater.versions import RemoteRelease
 
 # 下载超时(秒):便携包几十 MB,给足
@@ -56,7 +57,7 @@ _mkdtemp = tempfile.mkdtemp
 
 def _download_bytes(url: str) -> bytes:
     """从单 URL 下载全部字节。失败抛异常(由调用方处理)。"""
-    req = urllib.request.Request(url)
+    req = urllib.request.Request(apply_proxy(url))
     with _urlopen(req, timeout=_DOWNLOAD_TIMEOUT) as resp:
         data: bytes = resp.read()
         return data
@@ -69,7 +70,7 @@ def _download_streaming(
 
     on_progress(downloaded, total): 每 chunk 回调一次。
     """
-    req = urllib.request.Request(url)
+    req = urllib.request.Request(apply_proxy(url))
     with _urlopen(req, timeout=_DOWNLOAD_TIMEOUT) as resp:
         cl = resp.headers.get("Content-Length")
         total = int(cl) if cl else -1
