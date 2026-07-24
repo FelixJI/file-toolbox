@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- 关于页新增「检查更新」按钮:所有运行形态(便携 exe / pip / dev)均可手动核实更新可用性。
+  便携版发现新版可下载应用;pip/dev 版提示升级命令。
+- 关于页新增「GitHub 代理」设置:填入代理基址(如 `https://ghproxy.com`)加速版本检查与下载,
+  或用环境变量 `FILE_TOOLBOX_GH_PROXY` 覆盖。
+- 新增轻量设置存储(`.file_toolbox/settings.json`)。
+
+### Changed
+- 右上角「历史」按钮改为下拉菜单,各项直达对应模块历史(重命名/建文件夹/生成PDF/内容替换/
+  发票识别),不再二次选择工具。
+- UpdateWorker 新增 `checked` 信号,反馈检查结果(最新/可用/失败),供手动检查 UI 使用。
+
 ## 0.1.11 - 2026-07-24
 
 ### Fixed
