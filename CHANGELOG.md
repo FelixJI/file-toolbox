@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- 修复 CI(Linux runner)上 `test_batch_replace.py` 2 个测试失败:它们 monkeypatch
+  `sys.platform="win32"` 后引用 `subprocess.CREATE_NO_WINDOW`,但该常量仅 Windows 存在
+  (Linux 上 `subprocess` 模块无此属性 → AttributeError)。改用 monkeypatch 注入该常量,
+  使测试在 Linux CI 也能跑(不丢覆盖),验证 `_no_window_flags` 逻辑不变。
+
 ## 0.1.10 - 2026-07-24
 
 ### Fixed

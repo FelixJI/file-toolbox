@@ -97,8 +97,15 @@ def test_get_office_pids_uses_create_no_window_on_windows(monkeypatch):
 
     断言:win32 平台下,_get_office_pids 调 subprocess.run 时 kwargs 含
     creationflags=CREATE_NO_WINDOW。非 win32 则不含该键(跨平台守卫)。
+
+    跨平台:subprocess.CREATE_NO_WINDOW 仅 Windows 存在(Linux CI 上 subprocess 模块无此
+    属性)。测试目标只是验证"win32 下 _no_window_flags 产出该标志",故 monkeypatch 注入该
+    常量,使本测试在 Linux CI 也能跑(不丢覆盖),而非 skipif 跳过。
     """
     import subprocess
+
+    # CREATE_NO_WINDOW 实际值 0x08000000;非 Windows 注入同值,使断言可引用该属性
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
 
     captured = {}
 
@@ -125,8 +132,13 @@ def test_kill_office_processes_uses_create_no_window_on_windows(monkeypatch):
     """taskkill 同样需 CREATE_NO_WINDOW(运行时也会闪黑框)。
 
     造一个真实存在的 PID:_get_office_pids 返回它,_kill 时 taskkill 应带标志。
+
+    跨平台:subprocess.CREATE_NO_WINDOW 仅 Windows 存在,非 Windows 注入同值(0x08000000)
+    使断言可引用,本测试在 Linux CI 也能跑(不丢覆盖)。
     """
     import subprocess
+
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
 
     captured = {}
 
