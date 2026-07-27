@@ -3,7 +3,14 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "手动补发的版本 tag（例如 v1.2.3）。不填时会自动补发最近一个未成功发布的版本。"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -11,21 +18,61 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      resolved_tag: ${{ steps.resolve.outputs.resolved_tag }}
     steps:
+      - name: 解析发布 tag
+        id: resolve
+        shell: bash
+        run: |
+          git fetch --tags
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              for t in $(git tag --list "v*" --sort=-creatordate); do
+                if [ -z "$t" ]; then
+                  continue
+                fi
+                CODE=$(curl -sS -o /tmp/release.json -w "%{http_code}" \
+                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${t}")
+                if [ "$CODE" = "404" ]; then
+                  TAG="$t"
+                  break
+                fi
+              done
+            fi
+            if [ -z "$TAG" ]; then
+              echo "::error::workflow_dispatch 未提供 tag，且未找到可重发的失败版本"
+              exit 1
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [ "${TAG#v}" = "$TAG" ]; then
+            echo "::error::tag 格式应为 vX.Y.Z（例如 v1.2.3）"
+            exit 1
+          fi
+          echo "resolved_tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.resolved_tag }}
 
       - name: 安装 uv
         uses: astral-sh/setup-uv@v3
         with:
           enable-cache: true
 
-      - name: 同步依赖(含 gui + invoice + dev)
+      - name: 安装依赖（GUI + invoice + dev）
         run: uv sync --extra gui --extra invoice --extra dev
 
-      - name: PyInstaller 打包
+      - name: PyInstaller 构建
         run: uv run --extra dev python scripts/build_exe.py --ci
 
-      - name: 上传产物
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: FileToolbox-win64
@@ -39,16 +86,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.resolved_tag }}
 
-      - name: 下载产物
+      - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
           name: FileToolbox-win64
           path: artifacts
 
-      - name: 从 tag 提取版本号
+      - name: 计算 release version
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          TAG="${{ needs.build.outputs.resolved_tag }}"
+          if [ -z "$TAG" ]; then
+            echo "::error::未获取到 tag 信息"
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: 安装 uv
         uses: astral-sh/setup-uv@v3
