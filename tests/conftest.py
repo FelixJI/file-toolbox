@@ -350,6 +350,17 @@ def zip_ofd_only(tmp_path, ofd_sample) -> Path:
     return p
 
 
+# --- 虚构 PNG 图片 fixture(Pillow 生成,纯色,供 pdf CLI/转换器端到端测试共享) ---
+@pytest.fixture
+def png_sample(tmp_path) -> Path:
+    """生成一个纯色 PNG(10x10 RGB)。Pillow 是运行时依赖,Linux CI 已装,不走 COM。"""
+    from PIL import Image
+
+    p = tmp_path / "sample.png"
+    Image.new("RGB", (10, 10), (255, 0, 0)).save(str(p))
+    return p
+
+
 # --- 虚构 PDF fixture:模拟真实发票形态(拆字表头+长单价+购/销标签) ---
 @pytest.fixture
 def pdf_sample_realistic(tmp_path) -> Path:

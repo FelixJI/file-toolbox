@@ -432,3 +432,338 @@ def test_execute_replace_cancel_before_text(tmp_path):
     )
     assert success_count == 0
     assert total_replacements == 0
+
+
+# ---------------------------------------------------------------------------
+# 补充覆盖:_get_office_pids 解析、_kill 路径、is_file_locked 异常分支、
+# preview/execute 异常路径、_read_file_content 边界、close() 早返回。
+# 均 Linux 可测(纯逻辑或 mock subprocess/handler,不触发真实 COM)。
+# ---------------------------------------------------------------------------
+
+
+def test_get_office_pids_parses_tasklist_csv(monkeypatch):
+    """_get_office_pids 解析 tasklist CSV 输出,提取数字 PID。
+
+    覆盖 service.py 行 107(pids.append(int(parts[1])))。mock subprocess.run 返回
+    含两行 PID 的 CSV,Linux 上不依赖真实 tasklist。
+    """
+
+    class _FakeResult:
+        # 模拟 tasklist /FO CSV /NH 输出:text=True 已归一化行尾为 \n
+        stdout = '"WINWORD.EXE","1234"\n"WINWORD.EXE","5678"\n'
+        returncode = 0
+
+    monkeypatch.setattr(service_mod.subprocess, "run", lambda *a, **k: _FakeResult())
+    svc = ContentReplaceService()
+    pids = svc._get_office_pids("WINWORD.EXE")
+    assert pids == [1234, 5678]
+
+
+def test_get_office_pids_swallows_subprocess_error(monkeypatch):
+    """subprocess.run 抛异常(如 tasklist 不存在)→ 返回空列表,不向上抛。"""
+
+    def boom(*a, **k):
+        raise FileNotFoundError("tasklist")
+
+    monkeypatch.setattr(service_mod.subprocess, "run", boom)
+    svc = ContentReplaceService()
+    assert svc._get_office_pids("WINWORD.EXE") == []
+
+
+def test_kill_new_office_processes_calls_taskkill(monkeypatch):
+    """_kill_new_office_processes 对新 PID 调 taskkill。
+
+    覆盖 service.py 行 120-121(_kill 循环)。mock _get_office_pids 返回含一个新 PID
+    (不在 pids_before 中),验证 taskkill 被 argv=["taskkill","/F","/PID",...] 调用。
+    """
+    killed = []
+
+    class _FakeResult:
+        stdout = ""
+        returncode = 0
+
+    def fake_run(argv, *a, **k):
+        killed.append(argv)
+        return _FakeResult()
+
+    svc = ContentReplaceService()
+    # mock _get_office_pids 返回 [9999](pids_before 为空 → 9999 是新 PID)
+    monkeypatch.setattr(svc, "_get_office_pids", lambda name: [9999])
+    monkeypatch.setattr(service_mod.subprocess, "run", fake_run)
+    svc._kill_new_office_processes("WINWORD.EXE", [])
+    assert any("/PID" in a and "9999" in a for a in killed)
+
+
+def test_is_file_locked_permission_error(tmp_path, monkeypatch):
+    """无写权限的文件 → (True, '文件被占用或无写入权限')。
+
+    覆盖 service.py 行 145-146(PermissionError 分支)。Windows chmod 不可靠,
+    故 monkeypatch builtins.open 对该文件抛 PermissionError,确保跨平台稳定。
+    """
+    import builtins
+
+    f = _write_text(tmp_path / "ro.txt", "x")
+    svc = ContentReplaceService()
+    real_open = builtins.open
+
+    def fake_open(*a, **k):
+        if a and str(a[0]) == str(f):
+            raise PermissionError("denied")
+        return real_open(*a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    locked, reason = svc.is_file_locked(f)
+    assert locked is True
+    assert "占用" in reason or "权限" in reason
+
+
+def test_is_file_locked_other_exception(tmp_path, monkeypatch):
+    """open 抛非 Permission 异常 → (True, '无法访问: ...')。
+
+    覆盖 service.py 行 147-148。
+    """
+    import builtins
+
+    f = _write_text(tmp_path / "weird.txt", "x")
+    svc = ContentReplaceService()
+    real_open = builtins.open
+
+    def fake_open(*a, **k):
+        if a and str(a[0]) == str(f):
+            raise OSError("boom")
+        return real_open(*a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    locked, reason = svc.is_file_locked(f)
+    assert locked is True
+    assert "无法访问" in reason
+
+
+def test_preview_replace_handles_exception(tmp_path, monkeypatch):
+    """preview_replace 全局 except:让 is_file_locked 抛异常 → status 含 '错误'。
+
+    覆盖 service.py 行 255-256。
+    """
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    monkeypatch.setattr(svc, "is_file_locked", lambda p: (_ for _ in ()).throw(ValueError("boom")))
+    result = svc.preview_replace([f], [{"type": "simple_replace", "params": {"find": "x"}}])
+    assert "错误" in result[f]["status"]
+
+
+def test_execute_replace_txt_exception_recorded(tmp_path, monkeypatch):
+    """execute_replace 文本处理抛异常 → 记入 errors,不中断。
+
+    覆盖 service.py 行 367-368。mock _create_backup 抛异常(文本分支内的 except)。
+    """
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    monkeypatch.setattr(
+        svc, "_create_backup", lambda p: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    success_count, total_replacements, errors = svc.execute_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "hello", "replace": "hi"}}]
+    )
+    assert success_count == 0
+    assert any("boom" in e for e in errors)
+
+
+def test_read_file_content_unknown_suffix(tmp_path):
+    """_read_file_content 对未知后缀返回 None。
+
+    覆盖 service.py 行 469-470。
+    """
+    f = _write_text(tmp_path / "a.xyz", "hello")
+    svc = ContentReplaceService()
+    assert svc._read_file_content(f) is None
+
+
+def test_count_matches_none_content_returns_zero(monkeypatch):
+    """_count_matches 在 content 为 None 时返回 0。
+
+    覆盖 service.py 行 449-450。mock _read_file_content 返回 None。
+    """
+    svc = ContentReplaceService()
+    monkeypatch.setattr(svc, "_read_file_content", lambda p: None)
+    assert (
+        svc._count_matches(Path("x.txt"), [{"type": "simple_replace", "params": {"find": "a"}}])
+        == 0
+    )
+
+
+def test_read_file_content_handler_exception_returns_none(tmp_path, monkeypatch):
+    """_read_file_content 的 handler 抛异常 → 记日志返回 None。
+
+    覆盖 service.py 行 474-477。mock _text_handler.read_content 抛异常。
+    """
+    f = _write_text(tmp_path / "a.txt", "hello")
+    svc = ContentReplaceService()
+    monkeypatch.setattr(
+        svc._text_handler, "read_content", lambda p: (_ for _ in ()).throw(ValueError("boom"))
+    )
+    assert svc._read_file_content(f) is None
+
+
+def test_close_returns_early_when_interpreter_shutting_down():
+    """close() 在解释器关闭判定为真时早返回(不执行 kill)。
+
+    覆盖 service.py 行 488-489。sys.exitfunc 在 CPython 通常恒存在 → 直接走早返回。
+    确保调用不抛异常即可(此路径不执行 taskkill)。
+    """
+    svc = ContentReplaceService()
+    svc.close()  # 不抛异常即通过
+
+
+# ---------------------------------------------------------------------------
+# TextHandler 边界分支(chardet 回退 / 空查找 / 非法正则 / 大小写 / normalize 空串)
+# 全部纯 Python,Linux 可测,覆盖 text_handler.py 未覆盖行。
+# ---------------------------------------------------------------------------
+
+
+SIMPLE = "simple_replace"
+REGEX = "regex_replace"
+
+
+def test_text_read_content_chardet_fallback(tmp_path):
+    """所有已知编码都失败 → 走 chardet 检测分支。
+
+    覆盖 text_handler.py 行 39-49。用一段无法被 utf-8/gbk/utf-16/latin-1 解码为
+    合理中文的字节触发 chardet 路径( latin-1 总能解码但结果乱码,故用 latin-1
+    能解但 chardet 可识别的 GB18030 边缘字节更稳——这里用混合非法序列)。
+    """
+    # 0x80 单字节在 utf-8 非法、在 gbk 不完整、chardet 能检测并回退
+    f = tmp_path / "weird.bin"
+    f.write_bytes(b"\x80\x81\x82 foo")
+    h = TextHandler()
+    # chardet 已安装(运行时依赖),应能返回字符串而非抛异常
+    content = h.read_content(f)
+    assert isinstance(content, str)
+    assert "foo" in content
+
+
+def test_text_read_content_empty_file_falls_back_to_ignore(tmp_path):
+    """空文件:所有编码读取返回空串,最终走 utf-8 errors=ignore 兜底返回空。
+
+    覆盖 text_handler.py 行 52-53(空文件触发的兜底返回路径)。
+    """
+    f = tmp_path / "empty.txt"
+    f.write_bytes(b"")
+    h = TextHandler()
+    assert h.read_content(f) == ""
+
+
+def test_text_count_matches_empty_find_skipped():
+    """count_matches:simple_replace 空 find → 跳过,贡献 0。
+
+    覆盖 text_handler.py 行 102-103。
+    """
+    h = TextHandler()
+    assert h.count_matches("hello", [{"type": SIMPLE, "params": {"find": ""}}]) == 0
+
+
+def test_text_count_matches_empty_pattern_skipped():
+    """count_matches:regex_replace 空 pattern → 跳过,贡献 0。
+
+    覆盖 text_handler.py 行 114-115。
+    """
+    h = TextHandler()
+    assert h.count_matches("hello", [{"type": REGEX, "params": {"pattern": ""}}]) == 0
+
+
+def test_text_count_matches_bad_regex_swallows_error():
+    """count_matches:非法正则触发 re.error → 被 except 捕获,贡献 0。
+
+    覆盖 text_handler.py 行 121-122。
+    """
+    h = TextHandler()
+    assert h.count_matches("abc", [{"type": REGEX, "params": {"pattern": "("}}]) == 0
+
+
+def test_text_apply_operation_empty_find_returns_unchanged():
+    """_apply_operation:simple_replace 空 find → 返回原文,0 次替换。
+
+    覆盖 text_handler.py 行 146-147。
+    """
+    h = TextHandler()
+    new_text, count = h._apply_operation("hello", {"type": SIMPLE, "params": {"find": ""}})
+    assert new_text == "hello"
+    assert count == 0
+
+
+def test_text_apply_operation_case_sensitive():
+    """_apply_operation:case_sensitive=True 走 text.count/replace 分支。
+
+    覆盖 text_handler.py 行 149-151。
+    """
+    h = TextHandler()
+    new_text, count = h._apply_operation(
+        "ABC abc ABC",
+        {"type": SIMPLE, "params": {"find": "ABC", "replace": "X", "case_sensitive": True}},
+    )
+    assert new_text == "X abc X"
+    assert count == 2
+
+
+def test_text_apply_operation_case_insensitive():
+    """_apply_operation:case_sensitive=False 走 re.compile+IGNORECASE 分支。"""
+    h = TextHandler()
+    new_text, count = h._apply_operation(
+        "ABC abc",
+        {"type": SIMPLE, "params": {"find": "abc", "replace": "X", "case_sensitive": False}},
+    )
+    assert new_text == "X X"
+    assert count == 2
+
+
+def test_text_apply_operation_regex_empty_pattern():
+    """_apply_operation:regex_replace 空 pattern → 返回原文,0 次。
+
+    覆盖 text_handler.py 行 165-166。
+    """
+    h = TextHandler()
+    new_text, count = h._apply_operation("hello", {"type": REGEX, "params": {"pattern": ""}})
+    assert new_text == "hello"
+    assert count == 0
+
+
+def test_text_apply_operation_regex_bad_pattern():
+    """_apply_operation:非法正则触发 re.error → 返回原文,0 次。
+
+    覆盖 text_handler.py 行 173-174。
+    """
+    h = TextHandler()
+    new_text, count = h._apply_operation("hello", {"type": REGEX, "params": {"pattern": "("}})
+    assert new_text == "hello"
+    assert count == 0
+
+
+def test_text_apply_operation_regex_success():
+    """_apply_operation:合法正则替换成功,返回 (新文本, 次数)。
+
+    覆盖 text_handler.py 行 160-172 的正则成功路径。
+    """
+    h = TextHandler()
+    new_text, count = h._apply_operation(
+        "a1 b2", {"type": REGEX, "params": {"pattern": r"\d", "replace": "X"}}
+    )
+    assert new_text == "aX bX"
+    assert count == 2
+
+
+def test_text_apply_operation_unknown_type_returns_unchanged():
+    """_apply_operation:未知操作类型 → 返回原文,0 次。
+
+    覆盖 text_handler.py 行 176(末尾 return text, 0)。
+    """
+    h = TextHandler()
+    new_text, count = h._apply_operation("hello", {"type": "bogus", "params": {}})
+    assert new_text == "hello"
+    assert count == 0
+
+
+def test_text_normalize_empty_string():
+    """normalize_text:空字符串早返回(不进入 NFC 处理)。
+
+    覆盖 text_handler.py 行 189-190。
+    """
+    assert TextHandler.normalize_text("") == ""
