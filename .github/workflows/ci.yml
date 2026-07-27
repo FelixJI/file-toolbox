@@ -7,24 +7,12 @@ on:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     env:
       FILE_TOOLBOX_NO_COM_DETECT: "1"
       QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
-
-      - name: 安装 Qt 运行期系统库(Linux)
-        # PySide6 的 QtWidgets 在 import 时加载 libEGL/libGL 等原生库,ubuntu runner 默认
-        # 未装,缺库会让 GUI 测试收集即 ImportError。装上后 GUI 测试在 Linux CI 真正运行
-        # (配合 QT_QPA_PLATFORM=offscreen 离屏渲染),而非被跳过、丢失覆盖。
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libegl1 libgl1 libglib2.0-0 libfontconfig1 libdbus-1-3 \
-            libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 \
-            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
-            libxcb-render-util0 libxcb-shape0
 
       - name: 安装 uv
         uses: astral-sh/setup-uv@v3
@@ -43,8 +31,8 @@ jobs:
       - name: mypy
         run: uv run mypy
 
-      - name: pytest + core 覆盖率(≥85%)
-        run: uv run pytest --cov=file_toolbox.core --cov-fail-under=85 -q
+      - name: pytest + core 覆盖率(≥88%)
+        run: uv run pytest --cov=file_toolbox.core --cov-fail-under=88 -q
 
-      - name: pytest + 总盘覆盖率(≥65%)
-        run: uv run pytest --cov=file_toolbox --cov-fail-under=65 -q
+      - name: pytest + 总盘覆盖率(≥75%)
+        run: uv run pytest --cov=file_toolbox --cov-fail-under=75 -q

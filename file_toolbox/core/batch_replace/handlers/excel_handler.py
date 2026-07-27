@@ -41,7 +41,7 @@ class ExcelHandler(LoggableMixin):
 
         self._kill_office_processes = kill_office_processes
 
-    def read_content(self, file_path: Path) -> str:  # pragma: no cover
+    def read_content(self, file_path: Path) -> str:
         """
 
         读取 Excel 文档内容
@@ -135,7 +135,9 @@ class ExcelHandler(LoggableMixin):
         upgrade_format: bool = False,
         cancel_check: Callable[[], bool] | None = None,
         file_progress_callback: Callable[[int], None] | None = None,
-    ) -> dict[str, Any]:  # pragma: no cover
+    ) -> dict[str, Any]:  # pragma: no cover —— 入口边界(read_content 同款)已被
+        # test_com_handlers 覆盖;但方法体含大量 Find/Replace 深链式 COM 遍历,
+        # mock 测不可靠,真测需 Office。整体维持排除,避免虚增未覆盖行误导。
         """
 
         批量替换 Excel 文档
