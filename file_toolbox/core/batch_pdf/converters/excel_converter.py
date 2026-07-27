@@ -44,7 +44,7 @@ class ExcelConverter:
 
     def convert(
         self, file_path: Path, output_path: Path, config: dict[str, Any]
-    ) -> tuple[bool, str]:  # pragma: no cover
+    ) -> tuple[bool, str]:
         """
         从Excel文档生成PDF
 

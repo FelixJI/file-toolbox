@@ -12,6 +12,7 @@ build/
 .mypy_cache/
 htmlcov/
 .coverage
+.coverage.*
 
 # App runtime data
 .file_toolbox/
@@ -34,5 +35,20 @@ logs/
 
 # 设计/计划文档,仅本地使用
 docs/
+
+# OS 残留
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# 密钥 / 环境变量(勿误提交)
+.env
+.env.local
+
+# 临时 / 备份 / 散落日志
+*.tmp
+*.bak
+*.swp
+*.log
 
 # uv.lock SHOULD be tracked (intentionally NOT ignored)

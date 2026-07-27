@@ -48,7 +48,7 @@ class WordConverter:
 
     def convert(
         self, file_path: Path, output_path: Path, config: dict[str, Any]
-    ) -> tuple[bool, str]:  # pragma: no cover
+    ) -> tuple[bool, str]:
         """
         从Word文档生成PDF
 

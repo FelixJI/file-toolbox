@@ -69,7 +69,7 @@ class EngineManager(LoggableMixin):
     #  引擎检测
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _try_detect(prog_id: str, log: Callable[[str], None]) -> bool:  # pragma: no cover
+    def _try_detect(prog_id: str, log: Callable[[str], None]) -> bool:
         """尝试 Dispatch 一个 ProgID,成功即视为引擎可用。"""
         import gc
         import time
@@ -233,7 +233,7 @@ class EngineManager(LoggableMixin):
         # ENGINE_AUTO / ENGINE_MS_OFFICE:均优先 MS Office
         return [spec.ms_prog_id, spec.wps_prog_id]
 
-    def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO) -> Any:  # pragma: no cover
+    def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO) -> Any:
         """通用初始化逻辑,由 init_word/excel/ppt 复用。"""
         if sys.platform != "win32":
             raise RuntimeError("此功能仅支持 Windows 系统")
@@ -285,7 +285,7 @@ class EngineManager(LoggableMixin):
         """初始化PowerPoint应用，支持引擎切换"""
         return self._init_office_app("ppt", engine)
 
-    def close(self, _from_del: bool = False) -> None:  # pragma: no cover
+    def close(self, _from_del: bool = False) -> None:
         """关闭Office应用。
 
         _from_del:由 __del__ 调用时为 True,此时跳过末尾的 gc.collect()——在 GC 链中

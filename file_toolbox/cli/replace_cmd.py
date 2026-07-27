@@ -40,7 +40,7 @@ def replace(
         svc.close()
         return
 
-    success, total, errors = svc.execute_replace(files, operations)
+    success, total, errors = svc.execute_replace(files, operations, keep_backup=keep_backup)
     typer.secho(f"\n完成: 处理 {success} 个文件, 替换 {total} 处", fg=typer.colors.GREEN)
     for e in errors:
         typer.secho(f"  失败: {e}", fg=typer.colors.YELLOW)

@@ -5,6 +5,8 @@
 (产品本身的 _probe_registry 已对 ImportError 做了回退处理)。
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from file_toolbox.core.batch_pdf.engine_manager import EngineManager
@@ -117,3 +119,384 @@ def test_async_detect_body_uses_registry_probe_not_dispatch(monkeypatch):
     assert detect_calls[0] is False  # 关键:force_refresh=False(注册表探测)
     assert try_calls == []  # 未触发真 Dispatch
     assert "info" in captured and isinstance(captured["info"], str)
+
+
+# ---------------------------------------------------------------------------
+# 补充覆盖:_probe_registry ImportError 分支、缓存命中、get_engine_info 各分支、
+# _get_prog_id auto 选择、_prog_ids_to_try、init_* 非 win32 抛错、_async_detect_body except。
+# 均纯逻辑/mock,不触发真实 COM。
+# ---------------------------------------------------------------------------
+
+
+def test_probe_registry_import_error_returns_false(monkeypatch):
+    """winreg import 失败(非 win32)→ 返回 False。
+
+    覆盖 engine_manager.py 行 100-101。通过让内置 __import__ 对 winreg 抛 ImportError
+    模拟非 Windows 环境(Linux CI 上 winreg 本就不存在,但确保该分支被显式覆盖)。
+    """
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "winreg":
+            raise ImportError("simulated non-windows")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    assert EngineManager._probe_registry("Word.Application") is False
+
+
+def test_detect_returns_cache_when_present():
+    """已缓存且非 force_refresh → 直接返回缓存,不重新探测。
+
+    覆盖 engine_manager.py 行 115-116。
+    """
+    cached = {"office": True, "wps": False}
+    EngineManager._cached_engines = cached
+    em = EngineManager()
+    assert em._detect_available_engines() is cached
+    # 清理,避免污染后续测试
+    EngineManager._cached_engines = None
+
+
+def test_get_engine_info_both_engines():
+    """office + wps 都可用 → 信息含两者。
+
+    覆盖 engine_manager.py 行 148-151, 156。
+    """
+    EngineManager._cached_engines = {"office": True, "wps": True}
+    em = EngineManager()
+    info = em.get_engine_info()
+    assert "MS Office" in info
+    assert "WPS" in info
+    EngineManager._cached_engines = None
+
+
+def test_get_engine_info_wps_only():
+    """仅 wps 可用 → 信息只含 WPS。
+
+    覆盖 engine_manager.py 行 148-151 的 wps 分支。
+    """
+    EngineManager._cached_engines = {"office": False, "wps": True}
+    em = EngineManager()
+    info = em.get_engine_info()
+    assert "WPS" in info
+    assert "MS Office" not in info
+    EngineManager._cached_engines = None
+
+
+def test_get_engine_info_none_available():
+    """都不可用 → '未检测到Office软件'。
+
+    覆盖 engine_manager.py 行 153-154。
+    """
+    EngineManager._cached_engines = {"office": False, "wps": False}
+    em = EngineManager()
+    assert em.get_engine_info() == "未检测到Office软件"
+    EngineManager._cached_engines = None
+
+
+def test_get_engine_info_detecting_when_no_cache():
+    """无缓存且 use_cache=True → '正在检测...'。
+
+    覆盖 engine_manager.py 行 142-143。
+    """
+    EngineManager._cached_engines = None
+    em = EngineManager()
+    assert em.get_engine_info(use_cache=True) == "正在检测可用引擎..."
+    EngineManager._cached_engines = None
+
+
+def test_get_prog_id_auto_prefers_ms_office(monkeypatch):
+    """auto 引擎:office 可用 → 返回 MS Office ProgID。
+
+    覆盖 engine_manager.py 行 219-223。
+    """
+    EngineManager._cached_engines = None
+    em = EngineManager()
+    monkeypatch.setattr(em, "_detect_available_engines", lambda **k: {"office": True, "wps": True})
+    assert em._get_prog_id("word") == "Word.Application"
+    assert em._get_prog_id("excel") == "Excel.Application"
+    assert em._get_prog_id("ppt") == "PowerPoint.Application"
+
+
+def test_get_prog_id_auto_wps_only(monkeypatch):
+    """auto 引擎:仅 wps 可用 → 返回 WPS ProgID。
+
+    覆盖 engine_manager.py 行 221-222。
+    """
+    em = EngineManager()
+    monkeypatch.setattr(em, "_detect_available_engines", lambda **k: {"office": False, "wps": True})
+    assert em._get_prog_id("word") == "KWPS.Application"
+
+
+def test_get_prog_id_explicit_wps():
+    """显式 engine=wps → 返回 WPS ProgID(不看检测结果)。
+
+    覆盖 engine_manager.py 行 224-225。
+    """
+    em = EngineManager()
+    assert em._get_prog_id("excel", engine="wps") == "Ket.Application"
+
+
+def test_get_prog_id_explicit_ms_office():
+    """显式非 auto 非 wps → 返回 MS Office ProgID。
+
+    覆盖 engine_manager.py 行 226。
+    """
+    em = EngineManager()
+    assert em._get_prog_id("ppt", engine="office") == "PowerPoint.Application"
+
+
+def test_prog_ids_to_try_wps_engine():
+    """engine=wps → [wps, ms] 顺序(优先 WPS,回退 MS)。
+
+    覆盖 engine_manager.py 行 231-232。
+    """
+    em = EngineManager()
+    assert em._prog_ids_to_try("word", "wps") == ["KWPS.Application", "Word.Application"]
+
+
+def test_prog_ids_to_try_auto_engine():
+    """engine=auto → [ms, wps] 顺序(优先 MS,回退 WPS)。
+
+    覆盖 engine_manager.py 行 233-234。
+    """
+    em = EngineManager()
+    assert em._prog_ids_to_try("excel", "auto") == ["Excel.Application", "Ket.Application"]
+    assert em._prog_ids_to_try("ppt", "office") == ["PowerPoint.Application", "KWPP.Application"]
+
+
+def test_async_detect_body_swallows_exception(monkeypatch):
+    """_detect_available_engines 抛异常 → except 捕获并记日志,不波及调用线程。
+
+    覆盖 engine_manager.py 行 210-211。
+    """
+    em = EngineManager()
+    monkeypatch.setattr(
+        em, "_detect_available_engines", lambda **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    # 不抛异常即通过(异常被吞)
+    em._async_detect_body(callback=lambda info: None)
+
+
+def test_init_word_raises_on_non_windows(monkeypatch):
+    """非 win32 平台 init_word → RuntimeError。
+
+    覆盖 engine_manager.py 行 278(经 _init_office_app 行 238-239)。
+    """
+    em = EngineManager()
+    monkeypatch.setattr(
+        "file_toolbox.core.batch_pdf.engine_manager.sys", type("S", (), {"platform": "linux"})()
+    )
+    try:
+        em.init_word()
+        raise AssertionError("应抛 RuntimeError")
+    except RuntimeError as e:
+        assert "Windows" in str(e)
+
+
+def test_init_excel_raises_on_non_windows(monkeypatch):
+    """非 win32 平台 init_excel → RuntimeError。覆盖行 282。"""
+    em = EngineManager()
+    monkeypatch.setattr(
+        "file_toolbox.core.batch_pdf.engine_manager.sys", type("S", (), {"platform": "linux"})()
+    )
+    try:
+        em.init_excel()
+        raise AssertionError()
+    except RuntimeError:
+        pass
+
+
+def test_init_ppt_raises_on_non_windows(monkeypatch):
+    """非 win32 平台 init_ppt → RuntimeError。覆盖行 286。"""
+    em = EngineManager()
+    monkeypatch.setattr(
+        "file_toolbox.core.batch_pdf.engine_manager.sys", type("S", (), {"platform": "linux"})()
+    )
+    try:
+        em.init_ppt()
+        raise AssertionError()
+    except RuntimeError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# COM 真路径(mock Dispatch):_init_office_app 缓存/切换/失败、_try_detect、close。
+# 本机 Windows(pywin32 已装)与 CI Windows runner 上 import win32com.client 成功,
+# Dispatch 被 monkeypatch 替换为 mock,不触发真实 Office。
+# ---------------------------------------------------------------------------
+
+
+def _stub_dispatch(monkeypatch, *, return_value=None, side_effect=None):
+    """替换 win32com.client.Dispatch,返回 mock 便于断言调用次数与参数。"""
+    import win32com.client
+
+    dispatch = MagicMock()
+    if side_effect is not None:
+        dispatch.side_effect = side_effect
+    elif return_value is not None:
+        dispatch.return_value = return_value
+    monkeypatch.setattr(win32com.client, "Dispatch", dispatch)
+    return dispatch
+
+
+def test_init_office_app_success_and_cache(monkeypatch):
+    """_init_office_app 首次 Dispatch 成功 → 缓存实例;同引擎再调 → 复用,不重复 Dispatch。
+
+    覆盖 engine_manager.py 行 246-247(缓存复用分支)。
+    """
+    em = EngineManager()
+    app = MagicMock()
+    dispatch = _stub_dispatch(monkeypatch, return_value=app)
+
+    # 首次初始化 word(auto 引擎,且 _detect 默认返回 office 可用 → ms_prog_id)
+    EngineManager._cached_engines = {"office": True, "wps": True}
+    first = em.init_word()
+    assert first is app
+    assert dispatch.call_count == 1
+
+    # 同引擎再调:缓存命中,不重复 Dispatch
+    second = em.init_word()
+    assert second is app
+    assert dispatch.call_count == 1  # 仍是 1
+    EngineManager._cached_engines = None
+
+
+def test_init_office_app_engine_switch_quits_old(monkeypatch):
+    """引擎切换(已有实例 + 引擎变了)→ 旧实例 Quit 被调用,再 Dispatch 新的。
+
+    覆盖 engine_manager.py 行 250-254(释放旧实例)。
+    """
+    em = EngineManager()
+    old_app = MagicMock()
+    new_app = MagicMock()
+    # 第一次 Dispatch 返回 old_app,第二次返回 new_app
+    dispatch = _stub_dispatch(monkeypatch, side_effect=[old_app, new_app])
+
+    EngineManager._cached_engines = {"office": True, "wps": True}
+    em.init_word(engine="office")  # ms_prog_id → Word.Application
+    assert dispatch.call_count == 1
+
+    # 切换到 wps 引擎 → 旧 app.Quit 被调,再 Dispatch wps_prog_id
+    em.init_word(engine="wps")
+    old_app.Quit.assert_called_once()
+    assert dispatch.call_count == 2
+    EngineManager._cached_engines = None
+
+
+def test_init_office_app_all_progid_fail_raises(monkeypatch):
+    """所有 ProgID 都 Dispatch 失败 → RuntimeError(含 last_error)。
+
+    覆盖 engine_manager.py 行 259-274(回退循环 + raise)。
+    """
+    em = EngineManager()
+    _stub_dispatch(monkeypatch, side_effect=RuntimeError("no office"))
+
+    EngineManager._cached_engines = {"office": True, "wps": True}
+    try:
+        em.init_word()
+        raise AssertionError("应抛 RuntimeError")
+    except RuntimeError as e:
+        assert "无法启动" in str(e) or "Word" in str(e)
+    EngineManager._cached_engines = None
+
+
+def test_init_office_app_falls_back_to_wps(monkeypatch):
+    """ms_prog_id 失败 → 回退到 wps_prog_id 并成功。
+
+    覆盖 engine_manager.py 行 259-269(ProgID 回退顺序)。
+    """
+    em = EngineManager()
+    wps_app = MagicMock()
+    # 第一个 ProgID(ms)失败,第二个(wps)成功
+    dispatch = _stub_dispatch(monkeypatch, side_effect=[RuntimeError("ms fail"), wps_app])
+
+    EngineManager._cached_engines = {"office": True, "wps": True}
+    result = em.init_word()
+    assert result is wps_app
+    assert dispatch.call_count == 2
+    EngineManager._cached_engines = None
+
+
+def test_try_detect_success_returns_true_and_quits(monkeypatch):
+    """_try_detect:Dispatch 成功 → True 且 app.Quit 被调(即便 Quit 失败也不影响 True)。
+
+    覆盖 engine_manager.py 行 79-89(成功路径)。
+    """
+    app = MagicMock()
+    _stub_dispatch(monkeypatch, return_value=app)
+
+    logs: list[str] = []
+    assert EngineManager._try_detect("Word.Application", lambda m: logs.append(m)) is True
+    app.Quit.assert_called_once()
+    assert logs == []  # 成功不记日志
+
+
+def test_try_detect_failure_returns_false_and_logs(monkeypatch):
+    """_try_detect:Dispatch 抛异常 → False 且 log 被调用。
+
+    覆盖 engine_manager.py 行 84-86(失败路径)。
+    """
+    _stub_dispatch(monkeypatch, side_effect=RuntimeError("no office"))
+
+    logs: list[str] = []
+    assert EngineManager._try_detect("Word.Application", lambda m: logs.append(m)) is False
+    assert len(logs) == 1
+    assert "no office" in logs[0]
+
+
+def test_try_detect_quit_failure_still_returns_true(monkeypatch):
+    """_try_detect:Dispatch 成功但 Quit 抛异常 → 仍返回 True(suppress 不影响判定)。
+
+    覆盖 engine_manager.py 行 81-82(with suppress)。
+    """
+    app = MagicMock()
+    app.Quit.side_effect = RuntimeError("quit failed")
+    _stub_dispatch(monkeypatch, return_value=app)
+
+    assert EngineManager._try_detect("Word.Application", lambda m: None) is True
+
+
+def test_close_quits_apps_and_clears(monkeypatch):
+    """close:有 app 时调 Quit、置 None;_from_del=False 时执行 gc.collect。
+
+    覆盖 engine_manager.py 行 297-311。
+    """
+    em = EngineManager()
+    word_app = MagicMock()
+    excel_app = MagicMock()
+    em._word_app = word_app
+    em._excel_app = excel_app
+    em._current_word_engine = "Word.Application"
+    em._current_excel_engine = "Excel.Application"
+
+    em.close(_from_del=False)
+    word_app.Quit.assert_called_once()
+    excel_app.Quit.assert_called_once()
+    assert em._word_app is None
+    assert em._excel_app is None
+    assert em._current_word_engine is None
+
+
+def test_close_skips_gc_when_from_del(monkeypatch):
+    """close(_from_del=True):跳过 gc.collect(__del__ 链中不再触发,防堆损坏)。
+
+    覆盖 engine_manager.py 行 309(if not _from_del 分支的 False 侧)。
+    """
+    import gc
+
+    em = EngineManager()
+    gc_collect = MagicMock()
+    monkeypatch.setattr(gc, "collect", gc_collect)
+
+    em.close(_from_del=True)
+    gc_collect.assert_not_called()
+
+
+def test_close_with_no_apps_does_nothing(monkeypatch):
+    """close:无任何 app 时正常返回,不报错。"""
+    em = EngineManager()
+    em.close()  # 无 app,不抛异常即通过

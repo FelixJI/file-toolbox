@@ -21,12 +21,17 @@ class ParamRule:
     - required: 这些键不能为空(空字符串/None/缺失均视为无效)。
     - empty_messages: required 键 -> 该键为空时的中文提示(缺省回退到 "{key} 不能为空")。
     - regex_key: 该键的值需能被 re.compile 编译为合法正则(且为必填)。
+    - string_keys: 这些键的值在校验时强制转为 str(就地修改 params)。
+      用于文本类参数(find/replace):op_parser._coerce 会把裸数字值转为 int,
+      而文本替换场景"把 2024 替换为 2026"应保持字符串语义,否则 re.subn/text.replace
+      收到 int 会报 TypeError。
     - extra: 业务自定义校验 (operation, index) -> (ok, msg),返回 (True,"") 表示通过。
     """
 
     required: tuple[str, ...] = ()
     empty_messages: dict[str, str] = field(default_factory=dict)
     regex_key: str | None = None
+    string_keys: tuple[str, ...] = ()
     extra: ExtraValidator | None = None
 
 
@@ -62,6 +67,12 @@ def validate_params(
         return True, ""
 
     n = index + 1
+
+    # 0. 文本类参数强制 str:op_parser._coerce 会把裸数字(如 replace=2026)转 int,
+    #    而文本替换语义要求字符串,否则 re.subn/text.replace 收到 int 会报 TypeError。
+    for key in rule.string_keys:
+        if key in params and params[key] is not None:
+            params[key] = str(params[key])
 
     # 1. 必填字段非空
     for key in rule.required:
