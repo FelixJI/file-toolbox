@@ -273,6 +273,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         keep_new_format: bool = False,
         progress_callback: Callable[[int, int], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        keep_backup: bool = True,
     ) -> tuple[int, int, list[str]]:
         """
 
@@ -291,6 +292,8 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
             progress_callback: 进度回调函数
 
             cancel_check: 取消检查回调
+
+            keep_backup: 是否在替换前创建备份(默认 True);CLI --no-backup 透传 False
 
 
 
@@ -352,9 +355,10 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 break
 
             try:
-                # 创建备份
-                backup_path = self._create_backup(file_path)
-                self.logger.debug(f"备份已创建: {backup_path}")
+                # 创建备份(可由 CLI --no-backup 关闭)
+                if keep_backup:
+                    backup_path = self._create_backup(file_path)
+                    self.logger.debug(f"备份已创建: {backup_path}")
 
                 content = self._text_handler.read_content(file_path)
                 match_count = self._text_handler.count_matches(content, operations)
@@ -374,9 +378,11 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
         # 2. 处理 Word 文档(先创建备份)
         if docx_files and not is_cancelled():
-            # 为所有Word文档创建备份
+            # 为所有Word文档创建备份(可由 CLI --no-backup 关闭)
             backup_paths = []
             for file_path in docx_files:
+                if not keep_backup:
+                    continue
                 try:
                     backup_path = self._create_backup(file_path)
                     backup_paths.append((file_path, backup_path))
@@ -408,8 +414,10 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
         # 3. 处理 Excel 文档(先创建备份)
         if xlsx_files and not is_cancelled():
-            # 为所有Excel文档创建备份
+            # 为所有Excel文档创建备份(可由 CLI --no-backup 关闭)
             for file_path in xlsx_files:
+                if not keep_backup:
+                    continue
                 try:
                     backup_path = self._create_backup(file_path)
                 except Exception as e:
