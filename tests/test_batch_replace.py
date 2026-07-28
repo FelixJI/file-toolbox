@@ -625,27 +625,22 @@ REGEX = "regex_replace"
 
 
 def test_text_read_content_chardet_fallback(tmp_path):
-    """所有已知编码都失败 → 走 chardet 检测分支。
+    """混合非法字节序列 → latin-1 兜底解码为字符串(含可识别 ASCII)。
 
-    覆盖 text_handler.py 行 39-49。用一段无法被 utf-8/gbk/utf-16/latin-1 解码为
-    合理中文的字节触发 chardet 路径( latin-1 总能解码但结果乱码,故用 latin-1
-    能解但 chardet 可识别的 GB18030 边缘字节更稳——这里用混合非法序列)。
+    注:text_handler 的 encodings 列表含 latin-1(可解码任意字节),故 chardet 与
+    utf-8 ignore 分支理论不可达,已标注 pragma。此测试验证当前 latin-1 兜底行为。
     """
-    # 0x80 单字节在 utf-8 非法、在 gbk 不完整、chardet 能检测并回退
+    # 0x80 单字节在 utf-8 非法、gbk 不完整,但 latin-1 能解码
     f = tmp_path / "weird.bin"
     f.write_bytes(b"\x80\x81\x82 foo")
     h = TextHandler()
-    # chardet 已安装(运行时依赖),应能返回字符串而非抛异常
     content = h.read_content(f)
     assert isinstance(content, str)
     assert "foo" in content
 
 
-def test_text_read_content_empty_file_falls_back_to_ignore(tmp_path):
-    """空文件:所有编码读取返回空串,最终走 utf-8 errors=ignore 兜底返回空。
-
-    覆盖 text_handler.py 行 52-53(空文件触发的兜底返回路径)。
-    """
+def test_text_read_content_empty_file_returns_empty(tmp_path):
+    """空文件:首个编码(utf-8)读取返回空串。"""
     f = tmp_path / "empty.txt"
     f.write_bytes(b"")
     h = TextHandler()

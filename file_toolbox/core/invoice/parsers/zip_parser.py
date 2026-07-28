@@ -89,7 +89,9 @@ def parse_zip(path: Path, source_file: str = "") -> "Invoice":
         for pdf in _find_files_by_ext(tmp_path, ".pdf"):
             try:
                 return parse_pdf(pdf, source_file=src_name)
-            except UnsupportedFormatError:
+            except UnsupportedFormatError:  # pragma: no cover
+                # parse_pdf 仅在文件不存在时抛 UnsupportedFormatError,但 .pdf 已解压
+                # 到 tmp_path(必然存在),此分支为与 xml/ofd 对称的防御性兜底,不可达。
                 continue
 
     raise UnsupportedFormatError(f"ZIP 内未找到可识别的发票文件: {path.name}")

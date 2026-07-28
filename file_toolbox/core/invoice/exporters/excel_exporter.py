@@ -11,7 +11,8 @@ try:
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill
     from openpyxl.worksheet.worksheet import Worksheet
-except ImportError as e:
+except ImportError as e:  # pragma: no cover
+    # 仅在未安装 openpyxl[invoice] extra 时触发;测试环境始终已装,不可达。
     raise ImportError("Excel 导出需要 openpyxl: pip install 'file-toolbox[invoice]'") from e
 
 

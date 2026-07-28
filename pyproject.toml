@@ -77,6 +77,7 @@ source = ["file_toolbox"]
 omit = [
     "file_toolbox/gui/generated/*",
     "file_toolbox/__main__.py",
+    "file_toolbox/gui_entry.py",
     "*/__init__.py",
 ]
 

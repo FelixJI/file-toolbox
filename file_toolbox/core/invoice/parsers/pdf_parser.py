@@ -20,7 +20,8 @@ from file_toolbox.core.invoice.types import Invoice, LineItem
 # pdfplumber 延迟导入,缺依赖给友好提示
 try:
     import pdfplumber
-except ImportError as e:
+except ImportError as e:  # pragma: no cover
+    # 仅在未安装 pdfplumber[invoice] extra 时触发;测试环境始终已装,不可达。
     raise ImportError("PDF 解析需要 pdfplumber: pip install 'file-toolbox[invoice]'") from e
 
 # pdfplumber 返回的 word 字典(含 x0/x1/top/text 等键,库未提供类型存根)
@@ -447,7 +448,10 @@ def _extract_amounts(rows: dict[int, list[Word]], keys: list[int]) -> tuple[str,
                 amount_with_tax = _find_amount_in_next_rows(rows, keys, key, 2)
 
     # 兜底:若价税合计仍未取到,扫描含'小写'或紧跟合计行后的金额行
-    if not amount_with_tax:
+    if not amount_with_tax:  # pragma: no cover
+        # 防御性兜底:主循环(行 441)已对所有"价税合计"/"小写"行调用同款
+        # _find_amount_in_next_rows(look=2,含向前 1 行)。若主循环未取到,
+        # 此处用相同函数相同参数必然也取不到 —— 理论不可达,保留作未来扩展锚点。
         for key in keys:
             joined = _row_join_no_space(rows[key])
             if "小写" in joined:

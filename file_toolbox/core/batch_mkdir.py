@@ -123,7 +123,9 @@ class FolderCreatorService(LoggableMixin):
                     prev_row = current_row
 
             # 验证结果
-            if not folder_structure:
+            if not folder_structure:  # pragma: no cover
+                # 防御性兜底:text.strip() 非空 → 至少一行非空 → 至少首单元格非空
+                # → current_row 非空 → folder_structure 非空。此分支理论不可达。
                 return ValidationResult(
                     valid=False,
                     folder_structure=[],

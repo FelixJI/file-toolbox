@@ -36,7 +36,8 @@ class TextHandler:
                 continue
 
         # 使用 chardet 检测编码
-        try:
+        # latin-1(上一轮)能解码任意字节流,故整个 chardet/utf-8-ignore 兜底理论不可达。
+        try:  # pragma: no cover
             import chardet
 
             with open(file_path, "rb") as f:
@@ -45,11 +46,11 @@ class TextHandler:
             encoding: str | None = detected.get("encoding", "utf-8")  # type: ignore[no-redef]
             if encoding:
                 return raw_data.decode(encoding)
-        except Exception:
+        except Exception:  # pragma: no cover
             pass
 
         # 最后尝试 utf-8 忽略错误
-        with open(file_path, encoding="utf-8", errors="ignore") as f:
+        with open(file_path, encoding="utf-8", errors="ignore") as f:  # pragma: no cover
             return f.read()
 
     def replace_file(self, file_path: Path, operations: list[dict[str, Any]]) -> int:
