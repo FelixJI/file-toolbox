@@ -55,3 +55,83 @@ class TestSelectReleasesToDelete:
 
     def test_empty_input(self):
         assert select_releases_to_delete([], keep=5) == []
+
+
+from scripts.cleanup_releases import (  # noqa: E402
+    delete_release,
+    list_releases,
+)
+
+# ---- IO 层:用 monkeypatch 桩掉 _api,只测调用契约,不连真实 GitHub ----
+
+
+class TestListReleases:
+    def test_parses_minimal_payload(self, monkeypatch):
+        # 单页 2 个 release
+        payload = [
+            {"id": 11, "tag_name": "v0.2.0", "prerelease": False},
+            {"id": 10, "tag_name": "v0.1.9", "prerelease": False},
+        ]
+        calls = []
+
+        def fake_api(method, url, token, *, expect=200):
+            calls.append((method, url))
+            return payload if url.endswith("page=1") else []
+
+        monkeypatch.setattr("scripts.cleanup_releases._api", fake_api)
+        releases = list_releases("o/r", "tok")
+        assert [r.id for r in releases] == [11, 10]
+        assert releases[0].version == "0.2.0"
+        # 第一页就该停了(返回 < 100)
+        assert len(calls) == 1
+
+    def test_paginates_until_empty(self, monkeypatch):
+        # 第一页满 100,第二页空 → 停
+        page1 = [{"id": i, "tag_name": f"v0.0.{i}", "prerelease": False} for i in range(100)]
+        monkeypatch.setattr(
+            "scripts.cleanup_releases._api",
+            lambda method, url, token, *, expect=200: page1 if url.endswith("page=1") else [],
+        )
+        releases = list_releases("o/r", "tok")
+        assert len(releases) == 100
+
+    def test_skips_unparseable_version(self, monkeypatch, capsys):
+        payload = [
+            {"id": 11, "tag_name": "v0.2.0", "prerelease": False},
+            {"id": 12, "tag_name": "weird-tag", "prerelease": False},  # 无法解析
+        ]
+        monkeypatch.setattr(
+            "scripts.cleanup_releases._api",
+            lambda method, url, token, *, expect=200: payload if url.endswith("page=1") else [],
+        )
+        releases = list_releases("o/r", "tok")
+        assert [r.id for r in releases] == [11]  # 只留可解析的
+        out = capsys.readouterr().out
+        assert "weird-tag" in out  # 有告警
+
+
+class TestDeleteRelease:
+    def test_calls_delete_endpoint(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "scripts.cleanup_releases._api",
+            lambda method, url, token, *, expect=204: calls.append((method, url, token, expect)) or None,
+        )
+        delete_release("o/r", "tok", 42, tag="v0.1.0")
+        assert calls == [("DELETE", "https://api.github.com/repos/o/r/releases/42", "tok", 204)]
+
+    def test_404_is_idempotent(self, monkeypatch):
+        # _api 对 404 返回 None,delete_release 不应抛错
+        monkeypatch.setattr(
+            "scripts.cleanup_releases._api",
+            lambda method, url, token, *, expect=204: None,
+        )
+        delete_release("o/r", "tok", 42, tag="v0.1.0")  # 不抛
+
+    def test_non_2xx_raises(self, monkeypatch):
+        def boom(method, url, token, *, expect=204):
+            raise RuntimeError("403 Forbidden")
+
+        monkeypatch.setattr("scripts.cleanup_releases._api", boom)
+        with pytest.raises(RuntimeError, match="403"):
+            delete_release("o/r", "tok", 42, tag="v0.1.0")
