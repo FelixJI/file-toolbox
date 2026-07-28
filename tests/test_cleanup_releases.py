@@ -115,7 +115,9 @@ class TestDeleteRelease:
         calls = []
         monkeypatch.setattr(
             "scripts.cleanup_releases._api",
-            lambda method, url, token, *, expect=204: calls.append((method, url, token, expect)) or None,
+            lambda method, url, token, *, expect=204: (
+                calls.append((method, url, token, expect)) or None
+            ),
         )
         delete_release("o/r", "tok", 42, tag="v0.1.0")
         assert calls == [("DELETE", "https://api.github.com/repos/o/r/releases/42", "tok", 204)]
@@ -135,3 +137,74 @@ class TestDeleteRelease:
         monkeypatch.setattr("scripts.cleanup_releases._api", boom)
         with pytest.raises(RuntimeError, match="403"):
             delete_release("o/r", "tok", 42, tag="v0.1.0")
+
+
+from typer.testing import CliRunner  # noqa: E402
+
+from scripts.cleanup_releases import cli, run_cleanup  # noqa: E402
+
+
+class TestRunCleanup:
+    def test_nothing_to_delete(self, monkeypatch, capsys):
+        # 3 个 release,keep=5 → 不删
+        monkeypatch.setattr(
+            "scripts.cleanup_releases.list_releases",
+            lambda repo, token: [_r("v0.1.1"), _r("v0.1.2"), _r("v0.1.3")],
+        )
+        deleted: list[int] = []
+        run_cleanup("o/r", "tok", keep=5, deleter=lambda rid, **kw: deleted.append(rid))
+        out = capsys.readouterr().out
+        assert "无需清理" in out
+        assert deleted == []
+
+    def test_deletes_old_releases(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "scripts.cleanup_releases.list_releases",
+            lambda repo, token: [_r(f"v0.1.{i}", rid=i) for i in range(1, 8)],  # 7 个
+        )
+        deleted: list[int] = []
+        run_cleanup("o/r", "tok", keep=5, deleter=lambda rid, **kw: deleted.append(rid))
+        # 删最旧 2 个:0.1.1(id=1),0.1.2(id=2)
+        assert deleted == [1, 2]
+        out = capsys.readouterr().out
+        assert "v0.1.1" in out and "v0.1.2" in out
+
+    def test_dry_run_does_not_delete(self, monkeypatch, capsys):
+        monkeypatch.setattr(
+            "scripts.cleanup_releases.list_releases",
+            lambda repo, token: [_r(f"v0.1.{i}", rid=i) for i in range(1, 8)],
+        )
+        deleted: list[int] = []
+        run_cleanup(
+            "o/r", "tok", keep=5, dry_run=True, deleter=lambda rid, **kw: deleted.append(rid)
+        )
+        assert deleted == []  # dry-run 不实际删
+        out = capsys.readouterr().out
+        assert "dry-run" in out.lower()
+
+
+class TestCli:
+    runner = CliRunner()
+
+    def test_keep_zero_rejected(self, monkeypatch):
+        monkeypatch.setattr("scripts.cleanup_releases.list_releases", lambda repo, token: [])
+        # keep=0 不合理,应拒绝(退出码非 0)
+        result = self.runner.invoke(cli, ["--keep", "0", "--repo", "o/r", "--token", "t"])
+        assert result.exit_code != 0
+        assert "keep" in result.output.lower()
+
+    def test_negative_keep_rejected(self, monkeypatch):
+        monkeypatch.setattr("scripts.cleanup_releases.list_releases", lambda repo, token: [])
+        result = self.runner.invoke(cli, ["--keep", "-1", "--repo", "o/r", "--token", "t"])
+        assert result.exit_code != 0
+
+    def test_dry_run_flag(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.cleanup_releases.list_releases",
+            lambda repo, token: [_r("v0.1.1"), _r("v0.1.2")],
+        )
+        result = self.runner.invoke(
+            cli, ["--keep", "1", "--repo", "o/r", "--token", "t", "--dry-run"]
+        )
+        assert result.exit_code == 0
+        assert "dry-run" in result.output.lower()

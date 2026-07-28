@@ -128,3 +128,91 @@ def delete_release(repo: str, token: str, release_id: int, *, tag: str) -> None:
     except RuntimeError as e:
         # 附上 tag 上下文,让日志更可读
         raise RuntimeError(f"{e} (tag={tag})") from e
+
+
+# ---------------------------------------------------------------------------
+# typer CLI(编排层)
+# ---------------------------------------------------------------------------
+
+from typing import Protocol  # noqa: E402
+
+import typer  # noqa: E402
+
+
+class Deleter(Protocol):
+    """删除回调契约:按 release_id 删除 Release,tag 仅用于日志上下文。"""
+
+    def __call__(self, release_id: int, *, tag: str) -> None: ...
+
+
+cli = typer.Typer(add_completion=False, help="file-toolbox 历史 Release 清理")
+
+
+def run_cleanup(
+    repo: str,
+    token: str,
+    keep: int,
+    *,
+    dry_run: bool = False,
+    deleter: Deleter | None = None,
+) -> None:
+    """核心编排:列出 → 选出待删 →(可选)删除。
+
+    deleter: 可注入的删除回调,签名 (release_id, *, tag) -> None。
+             默认绑定 repo/token 调真实 delete_release;测试注入桩来断言调用。
+    """
+    if deleter is None:
+        # 绑定 repo/token 形成符合 Deleter 契约的闭包,避免依赖全局可变状态
+        def _default_deleter(release_id: int, *, tag: str) -> None:
+            delete_release(repo, token, release_id, tag=tag)
+
+        deleter = _default_deleter
+
+    releases = list_releases(repo, token)
+    to_delete = select_releases_to_delete(releases, keep)
+    # select_releases_to_delete 返回降序(最新优先);删除按从旧到新执行,
+    # 让日志/调用序列与“优先清理最旧版本”的直觉一致。
+    to_delete.reverse()
+
+    if not to_delete:
+        typer.secho(
+            f"✓ 无需清理(共 {len(releases)} 个 Release,≤ keep={keep})",
+            fg=typer.colors.GREEN,
+        )
+        return
+
+    for r in to_delete:
+        flag = "(预发布)" if r.is_prerelease else ""
+        typer.secho(f"  删 #{r.id} {r.tag} {flag}", fg=typer.colors.YELLOW)
+
+    if dry_run:
+        typer.secho(
+            f"[dry-run] 将删除以上 {len(to_delete)} 个,跳过实际删除",
+            fg=typer.colors.CYAN,
+        )
+        return
+
+    for r in to_delete:
+        deleter(r.id, tag=r.tag)
+        typer.secho(f"✓ 已删 #{r.id} {r.tag}", fg=typer.colors.GREEN)
+    typer.secho(
+        f"✓ 清理完成:删除 {len(to_delete)} 个,保留 {len(releases) - len(to_delete)} 个",
+        fg=typer.colors.GREEN,
+    )
+
+
+@cli.command()
+def main(
+    keep: int = typer.Option(5, "--keep", help="保留最近 N 个版本"),
+    repo: str = typer.Option(..., "--repo", help="owner/repo,如 file-toolbox/file-toolbox"),
+    token: str = typer.Option(..., "--token", help="GitHub token(需 repo 权限)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只打印将删哪些,不实际删除"),
+) -> None:
+    """列出 + (可选)删除超出 keep 数量的旧 GitHub Release。保留 git tag。"""
+    if keep <= 0:
+        raise typer.BadParameter("keep 必须 ≥ 1(不允许删全部)", param_hint="--keep")
+    run_cleanup(repo, token, keep, dry_run=dry_run)
+
+
+if __name__ == "__main__":
+    cli()
