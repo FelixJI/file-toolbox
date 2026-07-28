@@ -210,3 +210,19 @@ jobs:
           files: |
             artifacts/FileToolbox-*-win64.zip
             artifacts/checksums.txt
+
+  # ---------- job 4:清理历史 Release(保留最近 5 个)----------
+  cleanup:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: 清理历史 Release(保留最近 5 个,仅删 Release+产物,保留 git tag)
+        run: uv run --extra dev python scripts/cleanup_releases.py --keep 5 --repo "$REPO"
+        env:
+          REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
