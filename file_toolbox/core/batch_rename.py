@@ -264,14 +264,16 @@ class FileRenameService(BaseOperationService):
         position: str = params.get("position", "end")
         source: str = params.get("source", "current")
 
-        if source == "file" and file_path and file_path.exists():
+        date_str = datetime.now().strftime(date_format)
+        if source == "file" and file_path:
+            # exists()/stat() 均可能抛异常(竞态:文件被删/无权限/网络盘抖动),
+            # 任何异常都回退到 now()。与 file_utils.get_file_info 同款 try 包裹。
             try:
-                mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
-                date_str = mtime.strftime(date_format)
+                if file_path.exists():
+                    mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
+                    date_str = mtime.strftime(date_format)
             except Exception:
-                date_str = datetime.now().strftime(date_format)
-        else:
-            date_str = datetime.now().strftime(date_format)
+                pass  # date_str 已是 now(),保持回退
 
         if position == "start":
             return date_str + name
