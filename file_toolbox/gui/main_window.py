@@ -104,8 +104,8 @@ class MainWindow(QMainWindow):
         self._update_dialog: QProgressDialog | None = None
         self._download_cancelled = False  # 用户取消下载后抑制后续 verified/failed 弹窗
 
-        if updater_pkg.is_portable_exe():
-            # 启动 worker 线程(事件循环),稍后投递检查(不阻塞 UI)
+        if updater_pkg.is_portable_exe():  # pragma: no cover
+            # 仅打包便携 exe 形态启动后台检查;pip/dev 形态跳过(测试与开发均非便携)。
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
 
@@ -289,5 +289,5 @@ def run_gui() -> None:
     sys.exit(app.exec())
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     run_gui()

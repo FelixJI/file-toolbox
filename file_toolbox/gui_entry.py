@@ -5,5 +5,5 @@
 
 from file_toolbox.gui.main_window import run_gui
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     run_gui()

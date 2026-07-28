@@ -72,5 +72,5 @@ def main() -> None:
         raise SystemExit(e.exit_code) from e
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
