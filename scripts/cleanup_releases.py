@@ -1,7 +1,8 @@
 """历史 GitHub Release 清理。
 
 仅删 Release 记录及其附带产物(zip/checksums),保留全部 git tag。
-运行方式:uv run --extra dev python scripts/cleanup_releases.py --keep 5 --repo <owner/repo> --token <token>
+运行方式:uv run --extra dev python scripts/cleanup_releases.py --keep 5 --repo <owner/repo>
+(token 默认从 GITHUB_TOKEN / GH_TOKEN 环境变量读取,也可用 --token 显式覆盖)
 """
 
 from __future__ import annotations
