@@ -66,9 +66,7 @@ def test_add_folder_non_recursive(tab, monkeypatch, tmp_path):
     _xml(tmp_path / "1.xml", "1")
     (tmp_path / "ignore.txt").write_text("x")
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     tab._add_folder()
     assert len(tab._files) == 1
     assert tab._files[0].suffix == ".xml"
@@ -80,9 +78,7 @@ def test_add_folder_recursive(tab, monkeypatch, tmp_path):
     sub.mkdir()
     _xml(sub / "2.xml", "2")
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     tab._add_folder()
     assert len(tab._files) == 2
 
@@ -98,9 +94,7 @@ def test_add_folder_dedup(tab, monkeypatch, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
     tab._files.append(f1)
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     tab._add_folder()
     assert len(tab._files) == 1  # 不重复
 
@@ -171,18 +165,57 @@ def test_populate_table_duplicate_color(tab, tmp_path):
     from file_toolbox.core.invoice.types import Invoice, ParseResult
 
     inv1 = Invoice(
-        invoice_number="111", invoice_type="", issue_date="", seller_name="", seller_tax_id="",
-        seller_addr="", seller_tel="", seller_bank="", seller_account="",
-        buyer_name="", buyer_tax_id="", buyer_addr="", buyer_tel="", buyer_bank="", buyer_account="",
-        amount_without_tax="", tax_amount="", amount_with_tax="", amount_chinese="",
-        drawer="", remark="", items=[], source_file="a.xml", parse_method="xml",
+        invoice_number="111",
+        invoice_type="",
+        issue_date="",
+        seller_name="",
+        seller_tax_id="",
+        seller_addr="",
+        seller_tel="",
+        seller_bank="",
+        seller_account="",
+        buyer_name="",
+        buyer_tax_id="",
+        buyer_addr="",
+        buyer_tel="",
+        buyer_bank="",
+        buyer_account="",
+        amount_without_tax="",
+        tax_amount="",
+        amount_with_tax="",
+        amount_chinese="",
+        drawer="",
+        remark="",
+        items=[],
+        source_file="a.xml",
+        parse_method="xml",
     )
     inv2 = Invoice(
-        invoice_number="111", invoice_type="", issue_date="", seller_name="", seller_tax_id="",
-        seller_addr="", seller_tel="", seller_bank="", seller_account="",
-        buyer_name="", buyer_tax_id="", buyer_addr="", buyer_tel="", buyer_bank="", buyer_account="",
-        amount_without_tax="", tax_amount="", amount_with_tax="", amount_chinese="",
-        drawer="", remark="", items=[], source_file="b.xml", parse_method="xml", is_duplicate=True,
+        invoice_number="111",
+        invoice_type="",
+        issue_date="",
+        seller_name="",
+        seller_tax_id="",
+        seller_addr="",
+        seller_tel="",
+        seller_bank="",
+        seller_account="",
+        buyer_name="",
+        buyer_tax_id="",
+        buyer_addr="",
+        buyer_tel="",
+        buyer_bank="",
+        buyer_account="",
+        amount_without_tax="",
+        tax_amount="",
+        amount_with_tax="",
+        amount_chinese="",
+        drawer="",
+        remark="",
+        items=[],
+        source_file="b.xml",
+        parse_method="xml",
+        is_duplicate=True,
     )
     tab._result = ParseResult(invoices=[inv1, inv2], duplicates=[], failed=[])
     tab._populate_table()
@@ -194,11 +227,30 @@ def test_populate_table_pdf_color(tab):
     from file_toolbox.core.invoice.types import Invoice, ParseResult
 
     inv = Invoice(
-        invoice_number="1", invoice_type="", issue_date="", seller_name="", seller_tax_id="",
-        seller_addr="", seller_tel="", seller_bank="", seller_account="",
-        buyer_name="", buyer_tax_id="", buyer_addr="", buyer_tel="", buyer_bank="", buyer_account="",
-        amount_without_tax="", tax_amount="", amount_with_tax="", amount_chinese="",
-        drawer="", remark="", items=[], source_file="a.pdf", parse_method="pdf",
+        invoice_number="1",
+        invoice_type="",
+        issue_date="",
+        seller_name="",
+        seller_tax_id="",
+        seller_addr="",
+        seller_tel="",
+        seller_bank="",
+        seller_account="",
+        buyer_name="",
+        buyer_tax_id="",
+        buyer_addr="",
+        buyer_tel="",
+        buyer_bank="",
+        buyer_account="",
+        amount_without_tax="",
+        tax_amount="",
+        amount_with_tax="",
+        amount_chinese="",
+        drawer="",
+        remark="",
+        items=[],
+        source_file="a.pdf",
+        parse_method="pdf",
     )
     tab._result = ParseResult(invoices=[inv], duplicates=[], failed=[])
     tab._populate_table()
@@ -235,7 +287,9 @@ def test_export_success(tab, monkeypatch, tmp_path):
     tab.ui.edit_outdir.setText(str(tmp_path / "out"))
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
     )
     tab._export()
     assert (tmp_path / "out" / "发票结果.xlsx").exists()
@@ -250,10 +304,14 @@ def test_export_failure_critical(tab, monkeypatch, tmp_path):
     tab.ui.edit_outdir.setText(str(tmp_path))
     # mock svc.export 抛异常
     tab._svc = type(tab._svc)()
-    monkeypatch.setattr(tab._svc, "export", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        tab._svc, "export", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     crit_calls = []
     monkeypatch.setattr(
-        QMessageBox, "critical", lambda *a, **k: crit_calls.append(1) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "critical",
+        lambda *a, **k: crit_calls.append(1) or QMessageBox.StandardButton.Ok,
     )
     tab._export()
     assert crit_calls
@@ -268,7 +326,9 @@ def test_export_default_outdir(tab, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
     )
     tab._export()
     assert (tmp_path / "发票结果.xlsx").exists()

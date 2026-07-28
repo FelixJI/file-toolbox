@@ -154,7 +154,9 @@ def test_execute_no_files_warns(dlg, monkeypatch):
     """无文件/操作 → 提示(行 161-163)。"""
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok,
     )
     dlg._execute()
     assert info_calls
@@ -166,9 +168,7 @@ def test_execute_confirm_and_rename(dlg, monkeypatch, tmp_path):
     f1.write_text("x")
     dlg.selected_files = [f1]
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     info_calls = []
     monkeypatch.setattr(
         QMessageBox,
@@ -186,9 +186,7 @@ def test_execute_declined(dlg, monkeypatch, tmp_path):
     f1.write_text("x")
     dlg.selected_files = [f1]
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     dlg._execute()
     assert not (tmp_path / "P_a.txt").exists()
 
@@ -207,12 +205,8 @@ def test_execute_no_ready_files(dlg, monkeypatch, tmp_path):
     monkeypatch.setattr(
         QMessageBox, "warning", lambda *a, **k: warned.append(a) or QMessageBox.StandardButton.Ok
     )
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
-    monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._execute()
     assert warned
 
@@ -226,7 +220,9 @@ def test_show_history_empty(dlg, monkeypatch):
     """无历史 → 提示暂无(行 189-192)。"""
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok,
     )
     dlg._show_history()
     assert any("暂无" in s for s in info_calls)
@@ -236,7 +232,9 @@ def test_show_history_with_records(dlg, monkeypatch):
     dlg._history.add_record("rename", {"rename_map": {"a": "b"}})
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok,
     )
     dlg._show_history()
     assert info_calls
@@ -251,7 +249,9 @@ def test_load_template_empty(dlg, monkeypatch):
     """无模板 → 提示(行 202-205)。"""
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok,
     )
     dlg._load_template()
     assert any("暂无" in s for s in info_calls)
@@ -261,7 +261,9 @@ def test_save_template_no_operations(dlg, monkeypatch):
     """无操作 → 提示(行 224-226)。"""
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok,
     )
     dlg._save_template()
     assert any("没有操作" in s for s in info_calls)
@@ -271,9 +273,7 @@ def test_save_template_new(dlg, monkeypatch):
     """保存新模板(行 222-239)。"""
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("新模板", True))
-    monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
-    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._save_template()
     assert dlg._template_svc.template_exists("新模板")
 
@@ -283,9 +283,7 @@ def test_load_template_success(dlg, monkeypatch):
     dlg._template_svc.add_template("t1", [{"type": "add_prefix", "params": {"text": "X"}}])
     dlg.operations = []
     monkeypatch.setattr(QInputDialog, "getItem", lambda *a, **k: ("t1  (添加前缀)", True))
-    monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
-    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._load_template()
     assert len(dlg.operations) == 1
 
@@ -295,12 +293,8 @@ def test_save_template_overwrite_existing(dlg, monkeypatch):
     dlg._template_svc.add_template("dup", [{"type": "add_prefix", "params": {"text": "X"}}])
     dlg.operations = [{"type": "add_suffix", "params": {"text": "S_"}}]
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("dup", True))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
-    monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._save_template()
     # 模板被更新为新操作
     templates = dlg._template_svc.get_all_templates()
@@ -313,9 +307,7 @@ def test_save_template_overwrite_declined(dlg, monkeypatch):
     dlg._template_svc.add_template("dup", [{"type": "add_prefix", "params": {"text": "X"}}])
     dlg.operations = [{"type": "add_suffix", "params": {"text": "S_"}}]
     monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("dup", True))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     dlg._save_template()
     templates = dlg._template_svc.get_all_templates()
     dup = [t for t in templates if t["name"] == "dup"][0]

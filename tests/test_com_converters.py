@@ -180,9 +180,7 @@ def test_excel_convert_hides_empty_sheets_and_restores(tmp_path):
 
     conv = ExcelConverter(em)
     # orientation=auto 触发 _detect_orientation(pragma,不执行真逻辑)
-    ok, err = conv.convert(
-        src, out, {"engine": "auto", "orientation": ORIENTATION_AUTO_DETECT}
-    )
+    ok, err = conv.convert(src, out, {"engine": "auto", "orientation": ORIENTATION_AUTO_DETECT})
     assert ok is True
     assert err == ""
 
@@ -261,9 +259,7 @@ def test_excel_convert_sets_orientation_landscape(tmp_path):
     em.init_excel.return_value.Workbooks.Open.return_value = wb
 
     conv = ExcelConverter(em)
-    ok, _ = conv.convert(
-        src, out, {"engine": "auto", "orientation": ORIENTATION_LANDSCAPE}
-    )
+    ok, _ = conv.convert(src, out, {"engine": "auto", "orientation": ORIENTATION_LANDSCAPE})
     assert ok is True
     assert sheet.PageSetup.Orientation == 2  # xlLandscape
 
@@ -395,9 +391,7 @@ def test_ppt_convert_orientation_auto_detect(tmp_path):
     em.init_ppt.return_value.Presentations.Open.return_value = presentation
 
     conv = PptConverter(em)
-    ok, err = conv.convert(
-        src, out, {"engine": "auto", "orientation": ORIENTATION_AUTO_DETECT}
-    )
+    ok, err = conv.convert(src, out, {"engine": "auto", "orientation": ORIENTATION_AUTO_DETECT})
     assert ok is True
     assert err == ""
 
@@ -457,9 +451,7 @@ def test_ppt_convert_paper_size_auto_orientation_swaps_by_ratio(tmp_path):
     em.init_ppt.return_value.Presentations.Open.return_value = presentation
 
     conv = PptConverter(em)
-    ok, _ = conv.convert(
-        src, out, {"engine": "auto", "paper_size": "A4", "orientation": "auto"}
-    )
+    ok, _ = conv.convert(src, out, {"engine": "auto", "paper_size": "A4", "orientation": "auto"})
     assert ok is True
     # auto + 宽>高 → 交换 A4 → (841.89, 595.28)
     assert presentation.PageSetup.SlideWidth == 841.89
@@ -479,9 +471,7 @@ def test_ppt_convert_paper_size_auto_orientation_no_swap_when_tall(tmp_path):
     em.init_ppt.return_value.Presentations.Open.return_value = presentation
 
     conv = PptConverter(em)
-    ok, _ = conv.convert(
-        src, out, {"engine": "auto", "paper_size": "A4", "orientation": "auto"}
-    )
+    ok, _ = conv.convert(src, out, {"engine": "auto", "paper_size": "A4", "orientation": "auto"})
     assert ok is True
     # auto + 高>宽 → 不交换 → (595.28, 841.89)
     assert presentation.PageSetup.SlideWidth == 595.28

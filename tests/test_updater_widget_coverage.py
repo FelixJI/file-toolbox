@@ -23,7 +23,10 @@ def app():
 
 def _release() -> RemoteRelease:
     return RemoteRelease(
-        version="1.0", zip_url="http://x/z.zip", checksum_url="http://x/checksums.txt", source="github"
+        version="1.0",
+        zip_url="http://x/z.zip",
+        checksum_url="http://x/checksums.txt",
+        source="github",
     )
 
 

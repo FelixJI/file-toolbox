@@ -4,7 +4,6 @@ base.parse_invoice 按 .zip/.xml/.ofd/.pdf 后缀路由到对应解析器,
 不支持的格式抛 UnsupportedFormatError。覆盖每个分支 + 默认 source_file 回填。
 """
 
-
 import pytest
 
 from file_toolbox.core.invoice.parsers.base import (

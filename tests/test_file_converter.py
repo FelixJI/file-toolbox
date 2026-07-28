@@ -122,18 +122,14 @@ def test_convert_xls_to_xlsx_delegates_with_excel_spec(monkeypatch):
 
 def test_auto_convert_doc_routes_to_docx(monkeypatch):
     svc = FileConverterService()
-    monkeypatch.setattr(
-        svc, "convert_doc_to_docx", lambda p: (True, Path("x.docx"), "")
-    )
+    monkeypatch.setattr(svc, "convert_doc_to_docx", lambda p: (True, Path("x.docx"), ""))
     ok, out, err = svc.auto_convert_if_needed(Path("a.doc"))
     assert (ok, out, err) == (True, Path("x.docx"), "")
 
 
 def test_auto_convert_xls_routes_to_xlsx(monkeypatch):
     svc = FileConverterService()
-    monkeypatch.setattr(
-        svc, "convert_xls_to_xlsx", lambda p: (True, Path("x.xlsx"), "")
-    )
+    monkeypatch.setattr(svc, "convert_xls_to_xlsx", lambda p: (True, Path("x.xlsx"), ""))
     ok, out, err = svc.auto_convert_if_needed(Path("a.xls"))
     assert (ok, out, err) == (True, Path("x.xlsx"), "")
 

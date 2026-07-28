@@ -298,9 +298,7 @@ def test_execute_replace_excel_block_backup_failure(tmp_path, monkeypatch):
     f = tmp_path / "a.xlsx"
     f.write_bytes(b"fake")
     svc = _svc_with_mocks()
-    monkeypatch.setattr(
-        svc, "_create_backup", lambda p: (_ for _ in ()).throw(RuntimeError("bak"))
-    )
+    monkeypatch.setattr(svc, "_create_backup", lambda p: (_ for _ in ()).throw(RuntimeError("bak")))
     svc._excel_handler.batch_replace.return_value = {
         "success_count": 0,
         "total_replacements": 0,

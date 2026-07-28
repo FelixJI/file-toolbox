@@ -24,7 +24,9 @@ def test_add_date_file_source_stat_exception_falls_back_to_now(tmp_path, monkeyp
     """文件存在但 stat() 抛异常 → except → 用 datetime.now()(行 271-272)。"""
     f = tmp_path / "x.txt"
     f.write_text("y")
-    monkeypatch.setattr(Path, "stat", lambda self: (_ for _ in ()).throw(PermissionError("stat boom")))
+    monkeypatch.setattr(
+        Path, "stat", lambda self: (_ for _ in ()).throw(PermissionError("stat boom"))
+    )
     out = _svc()._add_date("f", {"format": "%Y", "source": "file"}, f)
     # 走 except,用 now() 的年份(4 位数字)
     assert out.startswith("f")
@@ -58,7 +60,9 @@ def test_execute_rename_permission_error_recorded(tmp_path, monkeypatch):
     src = tmp_path / "a.txt"
     src.write_text("x")
     dst = tmp_path / "b.txt"
-    monkeypatch.setattr(Path, "rename", lambda self, other: (_ for _ in ()).throw(PermissionError("denied")))
+    monkeypatch.setattr(
+        Path, "rename", lambda self, other: (_ for _ in ()).throw(PermissionError("denied"))
+    )
     success, errors = _svc().execute_rename({src: dst})
     assert success == 0
     assert any("权限不足" in e for e in errors)

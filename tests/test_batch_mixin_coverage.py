@@ -185,7 +185,9 @@ def test_select_files_auto_preview_refreshes(app, monkeypatch):
     """auto_preview=True → 调 _refresh_preview(行 106-109)。"""
     dlg = _TestDialog()
     refreshed = {"n": 0}
-    monkeypatch.setattr(dlg, "_refresh_preview", lambda: refreshed.__setitem__("n", refreshed["n"] + 1))
+    monkeypatch.setattr(
+        dlg, "_refresh_preview", lambda: refreshed.__setitem__("n", refreshed["n"] + 1)
+    )
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([], ""))
     dlg._select_files(None, auto_preview=True)
     # 无文件 → added_count=0 → 不 refresh
@@ -198,7 +200,9 @@ def test_select_files_with_files_auto_preview(app, monkeypatch, tmp_path):
     f1 = tmp_path / "a.txt"
     f1.write_text("x")
     refreshed = {"n": 0}
-    monkeypatch.setattr(dlg, "_refresh_preview", lambda: refreshed.__setitem__("n", refreshed["n"] + 1))
+    monkeypatch.setattr(
+        dlg, "_refresh_preview", lambda: refreshed.__setitem__("n", refreshed["n"] + 1)
+    )
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(f1)], ""))
     dlg._select_files(None, auto_preview=True)
     assert refreshed["n"] == 1
@@ -210,11 +214,11 @@ def test_select_folder_with_files_auto_preview(app, monkeypatch, tmp_path):
     f1 = tmp_path / "a.txt"
     f1.write_text("x")
     refreshed = {"n": 0}
-    monkeypatch.setattr(dlg, "_refresh_preview", lambda: refreshed.__setitem__("n", refreshed["n"] + 1))
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
+        dlg, "_refresh_preview", lambda: refreshed.__setitem__("n", refreshed["n"] + 1)
     )
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     dlg._select_folder(None, ask_recursive=True, auto_preview=True)
     assert refreshed["n"] == 1
 
@@ -231,9 +235,7 @@ def test_select_folder_non_recursive(app, monkeypatch, tmp_path):
     f1.write_text("x")
     f2.write_text("y")
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     lw = QListWidget()
     dlg._select_folder(lw, ask_recursive=True, auto_preview=False)
     assert any(p.name == "a.txt" for p in dlg.selected_files)
@@ -248,9 +250,7 @@ def test_select_folder_recursive(app, monkeypatch, tmp_path):
     sub.mkdir()
     (sub / "b.md").write_text("y")
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     dlg._select_folder(None, ask_recursive=True, auto_preview=False)
     names = [p.name for p in dlg.selected_files]
     assert "a.txt" in names and "b.md" in names
@@ -283,6 +283,7 @@ def test_select_folder_no_ask_recursive(app, monkeypatch, tmp_path):
 
 def test_select_folder_recursive_no_formats(app, monkeypatch, tmp_path):
     """递归 + 无格式限制 → 加入所有文件(行 142-145)。"""
+
     class _Empty(QObject, BatchDialogMixin):
         SUPPORTED_FORMATS = set()
         logger = logging.getLogger("test")
@@ -296,9 +297,7 @@ def test_select_folder_recursive_no_formats(app, monkeypatch, tmp_path):
     f1 = tmp_path / "a.xyz"
     f1.write_text("x")
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     dlg._select_folder(None, ask_recursive=True, auto_preview=False)
     assert any(p.name == "a.xyz" for p in dlg.selected_files)
 

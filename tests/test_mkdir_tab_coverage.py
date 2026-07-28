@@ -103,9 +103,7 @@ def test_fix_special_chars_replace(dlg, monkeypatch):
     """选'替换为下划线' → 替换非法字符(行 172-202)。"""
     _fill_row(dlg, 0, "a*b")
     monkeypatch.setattr(QInputDialog, "getItem", lambda *a, **k: ("替换为下划线", True))
-    monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
-    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._fix_special_chars()
     assert dlg.ui.table_paste.item(0, 0).text() == "a_b"
 
@@ -114,9 +112,7 @@ def test_fix_special_chars_delete(dlg, monkeypatch):
     """选'删除' → 删除非法字符。"""
     _fill_row(dlg, 0, "a*b")
     monkeypatch.setattr(QInputDialog, "getItem", lambda *a, **k: ("删除", True))
-    monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
-    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._fix_special_chars()
     assert dlg.ui.table_paste.item(0, 0).text() == "ab"
 
@@ -150,9 +146,7 @@ def test_fix_special_chars_no_change(dlg, monkeypatch):
 
 def test_make_skip_callback_yes(dlg, monkeypatch):
     """callback:question Yes → 返回 True(跳过)。"""
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     cb = dlg._make_skip_callback()
     from file_toolbox.core.batch_mkdir import FolderStructureItem
 
@@ -161,9 +155,7 @@ def test_make_skip_callback_yes(dlg, monkeypatch):
 
 def test_make_skip_callback_no(dlg, monkeypatch):
     """callback:question No → 返回 False(保留)。"""
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     cb = dlg._make_skip_callback()
     from file_toolbox.core.batch_mkdir import FolderStructureItem
 
@@ -209,9 +201,7 @@ def test_create_folders_success_merge(dlg, monkeypatch, tmp_path):
     """确认 Yes + merge → 创建成功(行 266-303)。"""
     dlg.ui.line_edit_root_path.setText(str(tmp_path))
     _fill_row(dlg, 0, "newdir")
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     info_calls = []
     monkeypatch.setattr(
         QMessageBox,
@@ -227,9 +217,7 @@ def test_create_folders_declined(dlg, monkeypatch, tmp_path):
     """确认 No → 不创建(行 281-282)。"""
     dlg.ui.line_edit_root_path.setText(str(tmp_path))
     _fill_row(dlg, 0, "newdir")
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     dlg._create_folders()
     assert not (tmp_path / "newdir").exists()
 
@@ -241,12 +229,8 @@ def test_create_folders_confirm_strategy(dlg, monkeypatch, tmp_path):
     _fill_row(dlg, 0, "exists")
     # 设 combo 到 CONFIRM
     dlg._combo_conflict.setCurrentText("逐个确认")
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
-    monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._create_folders()
 
 
@@ -254,9 +238,7 @@ def test_create_folders_failure_shown(dlg, monkeypatch, tmp_path):
     """create 失败 → information 显示错误(行 300-303)。"""
     dlg.ui.line_edit_root_path.setText(str(tmp_path))
     _fill_row(dlg, 0, "newdir")
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     # mock create_folders 返回失败
     from file_toolbox.core.batch_mkdir import CreateResult
 

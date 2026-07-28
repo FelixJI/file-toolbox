@@ -7,7 +7,6 @@
 - 69-73: --yes 执行 + 失败输出(已有部分,补确认)
 """
 
-
 from typer.testing import CliRunner
 
 from file_toolbox.cli.main import app
@@ -54,9 +53,7 @@ def test_rename_with_dir(tmp_path):
     """--dir 批量加入目录文件。"""
     f1 = tmp_path / "a.txt"
     f1.write_text("x")
-    r = runner.invoke(
-        app, ["rename", "--dir", str(tmp_path), "--op", "add_prefix:text=P_"]
-    )
+    r = runner.invoke(app, ["rename", "--dir", str(tmp_path), "--op", "add_prefix:text=P_"])
     assert r.exit_code == 0
     assert "a.txt" in r.output
 

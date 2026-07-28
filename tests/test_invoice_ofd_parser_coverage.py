@@ -98,7 +98,7 @@ def test_parse_text_objects_skips_empty_textcode():
     """TextCode 文本为空 → 跳过(行 155-156)。"""
     xml = (
         '<?xml version="1.0"?><ofd:Page xmlns:ofd="http://www.ofdspec.org/2016">'
-        '<ofd:TextObject><ofd:TextCode></ofd:TextCode></ofd:TextObject>'  # 空 → 跳过
+        "<ofd:TextObject><ofd:TextCode></ofd:TextCode></ofd:TextObject>"  # 空 → 跳过
         '<ofd:TextObject><ofd:TextCode X="10" Y="20">有效</ofd:TextCode></ofd:TextObject>'
         "</ofd:Page>"
     )
@@ -114,7 +114,7 @@ def test_parse_text_objects_boundary_fallback_when_no_xy():
     xml = (
         '<?xml version="1.0"?><ofd:Page xmlns:ofd="http://www.ofdspec.org/2016">'
         '<ofd:TextObject Boundary="100 200 50 12">'
-        '<ofd:TextCode>无坐标</ofd:TextCode></ofd:TextObject>'
+        "<ofd:TextCode>无坐标</ofd:TextCode></ofd:TextObject>"
         "</ofd:Page>"
     )
     objs = _parse_text_objects(xml)
@@ -242,7 +242,7 @@ def test_parse_first_doc_root_strips_whitespace():
     """DocRoot 文本被 strip。"""
     xml = (
         '<?xml version="1.0"?><ofd:OFD xmlns:ofd="http://www.ofdspec.org/2016">'
-        '<ofd:DocBody><ofd:DocRoot>  Doc_0/Document.xml  </ofd:DocRoot></ofd:DocBody></ofd:OFD>'
+        "<ofd:DocBody><ofd:DocRoot>  Doc_0/Document.xml  </ofd:DocRoot></ofd:DocBody></ofd:OFD>"
     )
     assert _parse_first_doc_root(xml) == "Doc_0/Document.xml"
 
@@ -251,7 +251,7 @@ def test_parse_first_doc_root_empty_text_skipped():
     """DocRoot text 为空 → 跳过,返回 ''。"""
     xml = (
         '<?xml version="1.0"?><ofd:OFD xmlns:ofd="http://www.ofdspec.org/2016">'
-        '<ofd:DocBody><ofd:DocRoot></ofd:DocRoot></ofd:DocBody></ofd:OFD>'
+        "<ofd:DocBody><ofd:DocRoot></ofd:DocRoot></ofd:DocBody></ofd:OFD>"
     )
     assert _parse_first_doc_root(xml) == ""
 
@@ -486,16 +486,16 @@ def test_parse_ofd_amount_fallback_when_price_missing(tmp_path):
     ofd_xml = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<ofd:OFD xmlns:ofd="http://www.ofdspec.org/2016" Version="1.2" DocType="OFD">'
-        '<ofd:DocBody><ofd:DocRoot>Doc_0/Document.xml</ofd:DocRoot>'
-        '<ofd:DocInfo><ofd:CustomDatas>'
+        "<ofd:DocBody><ofd:DocRoot>Doc_0/Document.xml</ofd:DocRoot>"
+        "<ofd:DocInfo><ofd:CustomDatas>"
         '<ofd:CustomData Name="发票号码">99990000000000000077</ofd:CustomData>'
         '<ofd:CustomData Name="合计金额">1000.00</ofd:CustomData>'
         '<ofd:CustomData Name="合计税额">130.00</ofd:CustomData>'
-        '</ofd:CustomDatas></ofd:DocInfo></ofd:DocBody></ofd:OFD>'
+        "</ofd:CustomDatas></ofd:DocInfo></ofd:DocBody></ofd:OFD>"
     )
     doc_xml = (
         '<?xml version="1.0"?><ofd:Document xmlns:ofd="http://www.ofdspec.org/2016">'
-        '<ofd:CommonData><ofd:PageArea><ofd:PhysicalBox>0 0 210 297</ofd:PhysicalBox></ofd:PageArea></ofd:CommonData>'
+        "<ofd:CommonData><ofd:PageArea><ofd:PhysicalBox>0 0 210 297</ofd:PhysicalBox></ofd:PageArea></ofd:CommonData>"
         '<ofd:Pages><ofd:Page ID="1" BaseLoc="Pages/Page_0/Content.xml"/></ofd:Pages></ofd:Document>'
     )
     content_xml = (
@@ -503,7 +503,11 @@ def test_parse_ofd_amount_fallback_when_price_missing(tmp_path):
         '<ofd:Content><ofd:Layer Type="Body"/></ofd:Content></ofd:Page>'
     )
     zbytes = _make_zip(
-        {"OFD.xml": ofd_xml, "Doc_0/Document.xml": doc_xml, "Doc_0/Pages/Page_0/Content.xml": content_xml}
+        {
+            "OFD.xml": ofd_xml,
+            "Doc_0/Document.xml": doc_xml,
+            "Doc_0/Pages/Page_0/Content.xml": content_xml,
+        }
     )
     p = tmp_path / "fallback.ofd"
     p.write_bytes(zbytes)

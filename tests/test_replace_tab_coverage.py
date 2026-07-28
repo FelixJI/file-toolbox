@@ -138,7 +138,9 @@ def test_do_refresh_preview_renders(dlg, monkeypatch, tmp_path):
 def test_execute_no_files(dlg, monkeypatch):
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
     )
     dlg._execute()
     assert info_calls
@@ -149,12 +151,12 @@ def test_execute_confirm(dlg, monkeypatch, tmp_path):
     f1.write_text("hello")
     dlg.selected_files = [f1]
     dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
     )
     dlg._execute()
     assert f1.read_text() == "hi"
@@ -166,9 +168,7 @@ def test_execute_declined(dlg, monkeypatch, tmp_path):
     f1.write_text("hello")
     dlg.selected_files = [f1]
     dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     dlg._execute()
     assert f1.read_text() == "hello"  # 未改
 
@@ -179,9 +179,7 @@ def test_execute_with_errors(dlg, monkeypatch, tmp_path):
     f1.write_text("hello")
     dlg.selected_files = [f1]
     dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     info_calls = []
     monkeypatch.setattr(
         QMessageBox,

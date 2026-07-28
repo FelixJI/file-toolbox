@@ -85,13 +85,9 @@ def test_convert_pdf_to_image_pdf_delegates(tmp_path, monkeypatch):
     """_convert_pdf_to_image_pdf 委托 convert_pdf_to_image_pdf(行 128)。"""
     from file_toolbox.core.batch_pdf import service as svc_mod
 
-    monkeypatch.setattr(
-        svc_mod, "convert_pdf_to_image_pdf", lambda *a, **k: (True, "ok")
-    )
+    monkeypatch.setattr(svc_mod, "convert_pdf_to_image_pdf", lambda *a, **k: (True, "ok"))
     svc = PDFGeneratorService()
-    ok, err = svc._convert_pdf_to_image_pdf(
-        tmp_path / "in.pdf", tmp_path / "out.pdf", dpi=72
-    )
+    ok, err = svc._convert_pdf_to_image_pdf(tmp_path / "in.pdf", tmp_path / "out.pdf", dpi=72)
     assert (ok, err) == (True, "ok")
 
 

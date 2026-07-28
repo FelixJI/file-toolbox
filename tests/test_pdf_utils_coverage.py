@@ -85,7 +85,9 @@ def test_convert_pdf_to_image_pdf_generic_exception(tmp_path, monkeypatch):
 
     import fitz
 
-    monkeypatch.setattr(fitz, "open", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("fitz boom")))
+    monkeypatch.setattr(
+        fitz, "open", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("fitz boom"))
+    )
     ok, err = convert_pdf_to_image_pdf(src, out, dpi=72)
     assert ok is False
     assert "转换图片型PDF失败" in err
@@ -141,7 +143,9 @@ def test_merge_pdfs_generic_exception(tmp_path, monkeypatch):
 
     import fitz
 
-    monkeypatch.setattr(fitz, "open", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("merge boom")))
+    monkeypatch.setattr(
+        fitz, "open", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("merge boom"))
+    )
     ok, err = merge_pdfs([src], out)
     assert ok is False
     assert "合并PDF失败" in err

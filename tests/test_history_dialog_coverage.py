@@ -127,7 +127,9 @@ def test_history_dialog_undo_no_selection(app, tmp_path, monkeypatch):
     # 不选中任何项
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok,
     )
     dlg._undo_selected()
     assert info_calls  # 弹了提示
@@ -143,9 +145,7 @@ def test_history_dialog_undo_cancelled(app, tmp_path, monkeypatch):
     (tmp_path / "b.txt").write_text("x")  # 目标存在,可反向
     dlg = HistoryDialog(store, tool="rename")
     dlg.list_widget.setCurrentRow(0)
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     # 不应抛异常,不执行重命名
     dlg._undo_selected()
 
@@ -157,7 +157,9 @@ def test_history_dialog_undo_empty_map(app, tmp_path, monkeypatch):
     dlg.list_widget.setCurrentRow(0)
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok,
     )
     dlg._undo_selected()
     assert any("无可撤销" in str(args) for args in info_calls)
@@ -173,9 +175,7 @@ def test_history_dialog_undo_success(app, tmp_path, monkeypatch):
     (tmp_path / "b.txt").write_text("x")  # b 存在,反向 b→a
     dlg = HistoryDialog(store, tool="rename")
     dlg.list_widget.setCurrentRow(0)
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     info_calls = []
     monkeypatch.setattr(
         QMessageBox,
@@ -200,7 +200,9 @@ def test_history_dialog_undo_record_not_found(app, tmp_path, monkeypatch):
     dlg._history.get_record.return_value = None
     warn_calls = []
     monkeypatch.setattr(
-        QMessageBox, "warning", lambda *a, **k: warn_calls.append(a) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "warning",
+        lambda *a, **k: warn_calls.append(a) or QMessageBox.StandardButton.Ok,
     )
     dlg._undo_selected()
     assert warn_calls
@@ -216,9 +218,7 @@ def test_history_dialog_undo_with_errors(app, tmp_path, monkeypatch):
     )
     dlg = HistoryDialog(store, tool="rename")
     dlg.list_widget.setCurrentRow(0)
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     info_calls = []
     monkeypatch.setattr(
         QMessageBox,
@@ -246,7 +246,9 @@ def test_history_dialog_undo_rid_none_returns(app, tmp_path, monkeypatch):
     # 不应抛异常,不弹任何框
     info_calls = []
     monkeypatch.setattr(
-        QMessageBox, "information", lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok,
     )
     dlg._undo_selected()
     # rid None → 直接 return,未进入后续逻辑

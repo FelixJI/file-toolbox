@@ -9,7 +9,6 @@
 - 文件不存在 / 非 XML 解析失败
 """
 
-
 import pytest
 
 from file_toolbox.core.invoice.parsers.base import UnsupportedFormatError

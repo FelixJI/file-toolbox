@@ -120,7 +120,9 @@ def test_parse_global_exception_handled(monkeypatch):
     svc = _svc()
     # 让 INVALID_CHARS 迭代时抛异常 → 触发全局 except
     monkeypatch.setattr(
-        type(svc), "INVALID_CHARS", property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+        type(svc),
+        "INVALID_CHARS",
+        property(lambda self: (_ for _ in ()).throw(RuntimeError("boom"))),
     )
     r = svc.parse_excel_table_data("a\tb")
     assert r.valid is False
@@ -246,7 +248,9 @@ def test_create_folders_mkdir_failure_returns_error(tmp_path, monkeypatch):
     svc = _svc()
     items = svc.build_folder_paths(tmp_path, [("new",)])
     # mock Path.mkdir 抛异常
-    monkeypatch.setattr(Path, "mkdir", lambda *a, **k: (_ for _ in ()).throw(PermissionError("denied")))
+    monkeypatch.setattr(
+        Path, "mkdir", lambda *a, **k: (_ for _ in ()).throw(PermissionError("denied"))
+    )
     result = svc.create_folders(items, ConflictStrategy.MERGE)
     assert result.success is False
     assert "创建文件夹失败" in result.error_message

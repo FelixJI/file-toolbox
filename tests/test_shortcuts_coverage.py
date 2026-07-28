@@ -277,7 +277,9 @@ def test_remove_shortcut_unlink_oserror(tmp_path, monkeypatch):
     f.write_text("x")
     monkeypatch.setattr(shortcuts, "desktop_dir", lambda: tmp_path)
     monkeypatch.setattr(shortcuts.sys, "platform", "win32")
-    monkeypatch.setattr(Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(OSError("locked")))
+    monkeypatch.setattr(
+        Path, "unlink", lambda self, *a, **k: (_ for _ in ()).throw(OSError("locked"))
+    )
     result = _remove_shortcut(LOCATION_DESKTOP)
     assert result.success is False
     assert "locked" in result.message

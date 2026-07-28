@@ -63,9 +63,7 @@ def test_trigger_check_invokes_method_when_running(win, monkeypatch):
     win._update_worker = MagicMock()
     win._update_worker.isRunning.return_value = True
     invoked = []
-    monkeypatch.setattr(
-        QMetaObject, "invokeMethod", lambda *a, **k: invoked.append(a)
-    )
+    monkeypatch.setattr(QMetaObject, "invokeMethod", lambda *a, **k: invoked.append(a))
     win._trigger_check()
     assert invoked
 
@@ -130,7 +128,9 @@ def test_on_update_checked_failed(win):
     win._manual_check_pending = True
     win._about_tab = MagicMock()
     win._on_update_checked(None, "failed")
-    win._about_tab.display_check_result.assert_called_with("failed", "⚠ 检查更新失败,请检查网络或代理设置")
+    win._about_tab.display_check_result.assert_called_with(
+        "failed", "⚠ 检查更新失败,请检查网络或代理设置"
+    )
 
 
 def test_on_update_checked_latest(win):
@@ -240,7 +240,9 @@ def test_on_update_progress_complete(win):
 def test_on_update_verified_cancelled_silent(win, monkeypatch):
     win._update_dialog = MagicMock()
     win._download_cancelled = True
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Cancel)
+    monkeypatch.setattr(
+        QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Cancel
+    )
     win._on_update_verified("x.zip")
     # 取消 → 不弹信息(但 _update_dialog 被 close)
 
