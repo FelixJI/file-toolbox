@@ -157,6 +157,68 @@ def test_excel_read_content_returns_empty_on_dispatch_failure(excel_handler, mon
     assert excel_handler.read_content(f) == ""
 
 
+def test_excel_read_content_returns_text_on_success(excel_handler, monkeypatch, tmp_path):
+    """Excel read_content 成功路径:遍历 Worksheets → UsedRange.Value 拼接文本。
+
+    覆盖三种 values 形态:tuple-of-tuples / 单层 tuple(行非 tuple) / 非 tuple 标量。
+    """
+    f = tmp_path / "a.xlsx"
+    f.write_bytes(b"fake")
+
+    # 构造三张表,分别触发三个分支
+    sheet_grid = MagicMock()
+    sheet_grid.UsedRange.Value = (("a", "b"), ("c", None))  # tuple-of-tuples
+
+    single_row = MagicMock()
+    single_row.UsedRange.Value = ("scalar_row",)  # 行非 tuple → elif 分支
+
+    scalar_sheet = MagicMock()
+    scalar_sheet.UsedRange.Value = "one_string"  # 非 tuple → else 分支
+
+    app = MagicMock()
+    wb = app.Workbooks.Open.return_value
+    wb.Worksheets = [sheet_grid, single_row, scalar_sheet]
+    _stub_com_modules(monkeypatch, dispatch_returns=app)
+
+    result = excel_handler.read_content(f)
+    # tuple-of-tuples: a,b,c(None 跳过); 单层: scalar_row; 标量: one_string
+    assert "a" in result and "b" in result and "c" in result
+    assert "scalar_row" in result
+    assert "one_string" in result
+    # 资源清理契约
+    app.Workbooks.Open.assert_called_once()
+    wb.Close.assert_called()
+    app.Quit.assert_called()
+
+
+def test_excel_read_content_empty_used_range(excel_handler, monkeypatch, tmp_path):
+    """UsedRange 为 None → 跳过该表,返回空串(不崩)。"""
+    f = tmp_path / "a.xlsx"
+    f.write_bytes(b"fake")
+
+    sheet = MagicMock()
+    sheet.UsedRange = None  # 空 → if used_range is not None 跳过
+    app = MagicMock()
+    app.Workbooks.Open.return_value.Worksheets = [sheet]
+    _stub_com_modules(monkeypatch, dispatch_returns=app)
+
+    assert excel_handler.read_content(f) == ""
+
+
+def test_excel_read_content_none_values(excel_handler, monkeypatch, tmp_path):
+    """UsedRange.Value 为 None → 跳过,返回空串。"""
+    f = tmp_path / "a.xlsx"
+    f.write_bytes(b"fake")
+
+    sheet = MagicMock()
+    sheet.UsedRange.Value = None  # values None → if values is not None 跳过
+    app = MagicMock()
+    app.Workbooks.Open.return_value.Worksheets = [sheet]
+    _stub_com_modules(monkeypatch, dispatch_returns=app)
+
+    assert excel_handler.read_content(f) == ""
+
+
 def test_excel_batch_replace_empty_files_no_dispatch(excel_handler, monkeypatch):
     """Excel batch_replace:空文件列表 → 零结果,不 Dispatch。"""
     import pythoncom
