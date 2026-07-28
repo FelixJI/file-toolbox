@@ -51,4 +51,8 @@ Desktop.ini
 *.swp
 *.log
 
+# COM 测试误落根目录的占位文件(内容仅 "fake")
+/a_*.docx
+/a_*.xlsx
+
 # uv.lock SHOULD be tracked (intentionally NOT ignored)
