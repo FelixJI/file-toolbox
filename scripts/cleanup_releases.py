@@ -49,6 +49,7 @@ def _is_valid_version(version: str) -> bool:
 # ---------------------------------------------------------------------------
 
 import json  # noqa: E402
+import os  # noqa: E402
 import urllib.error  # noqa: E402
 import urllib.request  # noqa: E402
 from typing import Any, cast  # noqa: E402
@@ -205,13 +206,24 @@ def run_cleanup(
 def main(
     keep: int = typer.Option(5, "--keep", help="保留最近 N 个版本"),
     repo: str = typer.Option(..., "--repo", help="owner/repo,如 file-toolbox/file-toolbox"),
-    token: str = typer.Option(..., "--token", help="GitHub token(需 repo 权限)"),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help="GitHub token(需 repo 权限);未提供时回退到 GITHUB_TOKEN/GH_TOKEN 环境变量",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="只打印将删哪些,不实际删除"),
 ) -> None:
     """列出 + (可选)删除超出 keep 数量的旧 GitHub Release。保留 git tag。"""
     if keep <= 0:
         raise typer.BadParameter("keep 必须 ≥ 1(不允许删全部)", param_hint="--keep")
-    run_cleanup(repo, token, keep, dry_run=dry_run)
+    # token 优先用 CLI 显式参数;未给则回退到环境变量,避免密钥出现在 argv(ps/proc 可见)
+    resolved_token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if resolved_token is None:
+        raise typer.BadParameter(
+            "未提供 token:请通过 --token 或 GITHUB_TOKEN/GH_TOKEN 环境变量提供",
+            param_hint="--token / GITHUB_TOKEN",
+        )
+    run_cleanup(repo, resolved_token, keep, dry_run=dry_run)
 
 
 if __name__ == "__main__":

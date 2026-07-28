@@ -222,7 +222,7 @@ jobs:
         uses: astral-sh/setup-uv@v3
 
       - name: 清理历史 Release(保留最近 5 个,仅删 Release+产物,保留 git tag)
-        run: uv run --extra dev python scripts/cleanup_releases.py --keep 5 --repo "$REPO" --token "$TOKEN"
+        run: uv run --extra dev python scripts/cleanup_releases.py --keep 5 --repo "$REPO"
         env:
           REPO: ${{ github.repository }}
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

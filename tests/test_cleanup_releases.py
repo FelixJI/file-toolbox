@@ -208,3 +208,23 @@ class TestCli:
         )
         assert result.exit_code == 0
         assert "dry-run" in result.output.lower()
+
+    def test_token_falls_back_to_env(self, monkeypatch):
+        # 省略 --token 时,应回退到 GITHUB_TOKEN 环境变量
+        monkeypatch.setenv("GITHUB_TOKEN", "envtok")
+        captured: list[str] = []
+        monkeypatch.setattr(
+            "scripts.cleanup_releases.list_releases",
+            lambda repo, token: (captured.append(token), [])[1],
+        )
+        result = self.runner.invoke(cli, ["--keep", "5", "--repo", "o/r"])
+        assert result.exit_code == 0
+        assert captured == ["envtok"]
+
+    def test_token_missing_flag_and_env_fails(self, monkeypatch):
+        # 既没给 --token,也没设环境变量 → 非 0 退出
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.delenv("GH_TOKEN", raising=False)
+        monkeypatch.setattr("scripts.cleanup_releases.list_releases", lambda repo, token: [])
+        result = self.runner.invoke(cli, ["--keep", "5", "--repo", "o/r"])
+        assert result.exit_code != 0
