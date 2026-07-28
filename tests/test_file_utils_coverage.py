@@ -98,7 +98,9 @@ def test_get_file_info_stat_exception_recorded(tmp_path, monkeypatch):
 
     f = tmp_path / "a.txt"
     f.write_text("x")
-    monkeypatch.setattr(Path, "stat", lambda self: (_ for _ in ()).throw(PermissionError("boom")))
+    monkeypatch.setattr(
+        Path, "stat", lambda self, **kw: (_ for _ in ()).throw(PermissionError("boom"))
+    )
     info = get_file_info(f)
     assert "error" in info
     assert "boom" in info["error"]

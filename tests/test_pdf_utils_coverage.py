@@ -38,7 +38,9 @@ def test_get_file_info_stat_exception_swallowed(tmp_path, monkeypatch):
     """file 存在但 stat 抛异常 → except pass,info 保留默认 size=0(行 308-309)。"""
     f = tmp_path / "a.pdf"
     f.write_bytes(b"fake")
-    monkeypatch.setattr(Path, "stat", lambda self: (_ for _ in ()).throw(PermissionError("stat")))
+    monkeypatch.setattr(
+        Path, "stat", lambda self, **kw: (_ for _ in ()).throw(PermissionError("stat"))
+    )
     supported = {"pdf": [".pdf"]}
     info = get_file_info(f, supported)
     assert info["supported"] is True

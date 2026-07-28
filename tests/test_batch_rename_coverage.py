@@ -25,7 +25,12 @@ def test_add_date_file_source_stat_exception_falls_back_to_now(tmp_path, monkeyp
     f = tmp_path / "x.txt"
     f.write_text("y")
     monkeypatch.setattr(
-        Path, "stat", lambda self: (_ for _ in ()).throw(PermissionError("stat boom"))
+        Path,
+        "stat",
+        # 真实 Path.stat 接受 *, follow_symlinks 等关键字参数(Python 3.12+ exists() 会传
+        # follow_symlinks)。用 **kwargs 兼容,避免 pytest 内部 cleanup 调 .exists() 时
+        # 因签名不符 INTERNALERROR。
+        lambda self, **kw: (_ for _ in ()).throw(PermissionError("stat boom")),
     )
     out = _svc()._add_date("f", {"format": "%Y", "source": "file"}, f)
     # 走 except,用 now() 的年份(4 位数字)
