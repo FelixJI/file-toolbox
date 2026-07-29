@@ -30,6 +30,11 @@ include = ["file_toolbox*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# generated/ 下的 ui_*.py 由 scripts/regen_ui.py 从 .ui 经 pyside6-uic 再生(或手维护)。
+# uic 输出含 u"" 前缀、(object) 基类、# -*- coding -*- 等会被 UP/format 规则改写的写法,
+# 手动格式化会与再生产生冲突;故把 generated/ 排除出 ruff(lint+format),
+# 由 regen_ui.py --check 作为这些文件的质量门。
+exclude = ["file_toolbox/gui/generated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
