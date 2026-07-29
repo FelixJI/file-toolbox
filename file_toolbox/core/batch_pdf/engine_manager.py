@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.office_session import init_office_app
 
 from .constants import ENGINE_AUTO, ENGINE_WPS
 
@@ -253,14 +254,13 @@ class EngineManager(LoggableMixin):
             setattr(self, spec.app_attr, None)
             setattr(self, spec.engine_attr, None)
 
-        import win32com.client
-
         last_error = None
         for prog_id in self._prog_ids_to_try(kind, engine):
             try:
-                app = win32com.client.Dispatch(prog_id)
-                app.Visible = False
-                app.DisplayAlerts = False
+                # 最内层 Dispatch + Visible/DisplayAlerts 复用共享辅助(行为等价于原
+                # app = win32com.client.Dispatch(prog_id); app.Visible=False;
+                # app.DisplayAlerts=False)。缓存/fallback/属性 setattr 仍在此处。
+                app = init_office_app(prog_id)
                 setattr(self, spec.app_attr, app)
                 setattr(self, spec.engine_attr, prog_id)
                 return app
