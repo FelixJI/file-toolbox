@@ -114,3 +114,117 @@ def test_mkdir_on_conflict_skip(tmp_path):
     # skip 策略:existing 已存在,跳过(不报错)
     assert r.exit_code == 0
     assert "跳过" in r.output or "完成" in r.output
+
+
+# ---------------------------------------------------------------------------
+# mkdir:--from-table 解析失败(parse_excel_table_data valid=False,行 26-28)
+# ---------------------------------------------------------------------------
+
+
+def test_mkdir_from_table_parse_invalid_errors(tmp_path):
+    """--from-table 内容缺少 Tab 分隔 → parse_excel_table_data 返回 valid=False
+    → 红字提示 + Exit(1)(行 27-28)。
+
+    注:非法路径字符(* : 等)不会使 valid=False,只会记入 invalid_folders 后被替换
+    (见 test_mkdir_from_table)。真正触发 valid=False 的是空文本或缺 Tab 分隔符。
+    """
+    table = tmp_path / "bad_structure.txt"
+    # 整段无 Tab 分隔 → parse_excel_table_data 返回 valid=False
+    table.write_text("部门A\n部门B\n", encoding="utf-8")
+    r = runner.invoke(app, ["mkdir", "--root", str(tmp_path), "--from-table", str(table)])
+    assert r.exit_code == 1
+    assert "错误" in r.output
+    assert "Tab" in r.output
+
+
+# ---------------------------------------------------------------------------
+# mkdir:create_folders 失败(行 51-53)
+# ---------------------------------------------------------------------------
+
+
+def test_mkdir_create_folders_failure_errors(tmp_path, monkeypatch):
+    """create_folders 返回 success=False → 红字打印 error_message + Exit(1)(行 51-53)。"""
+    from file_toolbox.core.batch_mkdir import CreateResult, FolderCreatorService
+
+    def fake_create(self, items, strategy, skip_callback=None):
+        return CreateResult(
+            created_count=0,
+            skipped_count=0,
+            total_count=len(items),
+            success=False,
+            error_message="模拟创建失败:权限不足",
+        )
+
+    monkeypatch.setattr(FolderCreatorService, "create_folders", fake_create)
+
+    r = runner.invoke(app, ["mkdir", "--root", str(tmp_path), "--levels", "部门A/项目1"])
+    assert r.exit_code == 1
+    assert "模拟创建失败:权限不足" in r.output
+
+
+# ---------------------------------------------------------------------------
+# replace:--yes 执行返回 errors(行 45-46)
+# ---------------------------------------------------------------------------
+
+
+def test_replace_execute_echoes_failures(tmp_path, monkeypatch):
+    """--yes 执行,execute_replace 返回非空 errors → 每条失败被 echo(行 45-46)。"""
+    from file_toolbox.core.batch_replace.service import ContentReplaceService
+
+    f = tmp_path / "a.txt"
+    f.write_text("hello", encoding="utf-8")
+
+    def fake_execute(
+        self,
+        files,
+        operations,
+        keep_new_format=False,
+        progress_callback=None,
+        cancel_check=None,
+        keep_backup=True,
+    ):
+        # 与真实 execute_replace 形状一致:(success, total, errors)
+        return 0, 0, ["文件被占用: a.txt"]
+
+    monkeypatch.setattr(ContentReplaceService, "execute_replace", fake_execute)
+
+    r = runner.invoke(
+        app,
+        ["replace", str(f), "--op", "simple_replace:find=hello,replace=world", "--yes"],
+    )
+    assert r.exit_code == 0, r.output
+    # 失败行被 echo(行 46)
+    assert "失败" in r.output
+    assert "文件被占用: a.txt" in r.output
+
+
+# ---------------------------------------------------------------------------
+# pdf:batch_generate 返回失败 result(行 53-54)
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_batch_generate_failure_echoes_error(tmp_path, monkeypatch):
+    """batch_generate 返回 success=False 的 result → error 被 echo(行 53-54)。"""
+    from file_toolbox.core.batch_pdf.service import PDFGeneratorService
+
+    # 源文件存在与否不影响(mock 接管 batch_generate),但创建一个保持真实
+    src = tmp_path / "photo.png"
+    src.write_bytes(b"\x89PNG\r\n\x1a\n")  # PNG 魔数占位
+
+    def fake_batch(self, files, config, progress_callback=None, cancel_check=None):
+        return [
+            {
+                "source": src,
+                "output": tmp_path / "photo.pdf",
+                "success": False,
+                "error": "模拟转换失败:引擎不可用",
+            }
+        ]
+
+    monkeypatch.setattr(PDFGeneratorService, "batch_generate", fake_batch)
+
+    r = runner.invoke(app, ["pdf", str(src)])
+    assert r.exit_code == 0, r.output
+    # 失败结果被标记 FAIL + error 被 echo(行 54)
+    assert "FAIL" in r.output
+    assert "模拟转换失败:引擎不可用" in r.output
