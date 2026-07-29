@@ -6,6 +6,7 @@ UI 布局由 generated/ui_invoice_dialog.py 的 Ui_InvoiceDialog(setupUi) 构建
 """
 
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
@@ -15,6 +16,7 @@ from file_toolbox.core.invoice.service import InvoiceService
 from file_toolbox.core.invoice.types import ParseResult
 from file_toolbox.gui.controllers.invoice_controller import InvoiceController
 from file_toolbox.gui.generated.ui_invoice_dialog import Ui_InvoiceDialog
+from file_toolbox.gui.workers.invoice_worker import InvoiceParseWorker
 
 _DUP_COLOR = QColor(255, 242, 204)  # 浅黄(重复)
 _PDF_COLOR = QColor(230, 230, 230)  # 浅灰(PDF 弱解析)
@@ -34,6 +36,7 @@ class InvoiceTab(QWidget):
         self._controller = InvoiceController()
         self._result: ParseResult | None = None
         self._files: list[Path] = []
+        self._parse_worker: InvoiceParseWorker | None = None
         self._connect()
 
     def _connect(self) -> None:
@@ -103,8 +106,28 @@ class InvoiceTab(QWidget):
         if not self._files:
             QMessageBox.warning(self, "提示", "请先添加发票文件")
             return
+        # 避免重复启动(重复点击不泄漏多个 worker)
+        if self._parse_worker is not None and self._parse_worker.isRunning():
+            return
         strategy = self._dedupe_strategy()
-        self._result = self._svc.parse_files(self._files, dedupe_strategy=strategy)
+        worker = InvoiceParseWorker(self._svc, list(self._files), strategy, parent=self)
+        worker.progress.connect(self._on_parse_progress)
+        worker.finished_ok.connect(self._on_parse_ok)
+        worker.failed.connect(self._on_parse_failed)
+        self._parse_worker = worker  # 持有引用防 GC
+        # 解析期间禁用相关按钮
+        self.ui.btn_parse.setEnabled(False)
+        self.ui.btn_export.setEnabled(False)
+        self.ui.lbl_status.setText("解析中…")
+        worker.start()
+
+    def _on_parse_progress(self, current: int, total: int) -> None:
+        self.ui.lbl_status.setText(f"解析中… {current}/{total}")
+
+    def _on_parse_ok(self, result: Any) -> None:
+        self._result = result
+        self._parse_worker = None
+        self.ui.btn_parse.setEnabled(True)
         self._populate_table()
         self.ui.btn_export.setEnabled(bool(self._result.invoices))
         dup = sum(1 for i in self._result.invoices if i.is_duplicate)
@@ -116,6 +139,12 @@ class InvoiceTab(QWidget):
                 len(self._result.failed),
             )
         )
+
+    def _on_parse_failed(self, msg: str) -> None:
+        self._parse_worker = None
+        self.ui.btn_parse.setEnabled(True)
+        self.ui.lbl_status.setText("解析失败")
+        QMessageBox.warning(self, "解析失败", msg)
 
     def _populate_table(self) -> None:
         assert self._result is not None

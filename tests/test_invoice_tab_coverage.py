@@ -1,4 +1,8 @@
-"""invoice_tab GUI 测试:文件管理、解析、表格填充、导出(mock QFileDialog)。"""
+"""invoice_tab GUI 测试:文件管理、解析、表格填充、导出(mock QFileDialog)。
+
+解析经后台 worker(子项 4.3),_parse 不再同步填充。测试用 _wait_parse 等待
+worker 线程结束并 flush 事件,使跨线程的 finished_ok 槽在主线程执行后再断言。
+"""
 
 import pytest
 
@@ -22,6 +26,25 @@ def tab(app, tmp_path):
     t = InvoiceTab()
     t._history = JsonHistoryStore(tmp_path)
     return t
+
+
+def _wait_parse(tab) -> None:
+    """等待 tab._parse 启动的后台 worker 完成,并投递 finished_ok 槽到主线程。
+
+    worker 解析真实小 XML 文件极快,wait(5s) 即结束;之后 processEvents 让
+    queued 的 finished_ok(_on_parse_ok) 在主线程跑,完成表格填充。
+    用 QApplication.instance() 取当前应用(与各 test 的 app fixture 同一实例)。
+    """
+    worker = tab._parse_worker
+    if worker is None:
+        return
+    worker.wait(5000)
+    # 跨线程 queued 信号需主线程事件循环 flush
+    app = QApplication.instance()
+    if app is not None:
+        app.processEvents()
+        if tab._parse_worker is not None:
+            app.processEvents()
 
 
 def _xml(path: Path, num: str) -> Path:
@@ -141,6 +164,7 @@ def test_parse_success(tab, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
     tab._files = [f1]
     tab._parse()
+    _wait_parse(tab)
     assert tab._result is not None
     assert len(tab._result.invoices) == 1
     assert tab.ui.btn_export.isEnabled()
@@ -154,6 +178,7 @@ def test_parse_mixed_results(tab, tmp_path):
     bad.write_text("not xml", encoding="utf-8")
     tab._files = [f1, bad]
     tab._parse()
+    _wait_parse(tab)
     assert len(tab._result.failed) == 1
 
 
@@ -284,6 +309,7 @@ def test_export_success(tab, monkeypatch, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
     tab._files = [f1]
     tab._parse()
+    _wait_parse(tab)
     tab.ui.edit_outdir.setText(str(tmp_path / "out"))
     info_calls = []
     monkeypatch.setattr(
@@ -301,6 +327,7 @@ def test_export_failure_critical(tab, monkeypatch, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
     tab._files = [f1]
     tab._parse()
+    _wait_parse(tab)
     tab.ui.edit_outdir.setText(str(tmp_path))
     # mock svc.export 抛异常
     tab._svc = type(tab._svc)()
@@ -322,6 +349,7 @@ def test_export_default_outdir(tab, monkeypatch, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
     tab._files = [f1]
     tab._parse()
+    _wait_parse(tab)
     tab.ui.edit_outdir.setText("")  # 空
     monkeypatch.chdir(tmp_path)
     info_calls = []
