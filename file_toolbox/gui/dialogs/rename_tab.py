@@ -19,6 +19,7 @@ from file_toolbox.core.rename_template import RenameTemplateService
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.operation_params import OperationParamCollector
 from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
+from file_toolbox.gui.controllers.rename_controller import RenameController
 from file_toolbox.gui.generated.ui_rename_dialog import Ui_FileRenamerDialog
 
 
@@ -27,25 +28,16 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
 
     SUPPORTED_FORMATS: set[str] = set()
 
-    # 操作类型 -> 中文标签(操作列表展示、模板描述共用)
-    _OP_LABELS: dict[str, str] = {
-        OperationType.ADD_PREFIX.value: "添加前缀",
-        OperationType.ADD_SUFFIX.value: "添加后缀",
-        OperationType.REPLACE_TEXT.value: "替换字符",
-        OperationType.REGEX_REPLACE.value: "正则替换",
-        OperationType.ADD_NUMBER.value: "添加序号",
-        OperationType.DELETE_CHARS.value: "删除字符",
-        OperationType.ADD_DATE.value: "添加日期",
-    }
-
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._init_batch_dialog()
         self.ui = Ui_FileRenamerDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
 
-        self._svc = FileRenameService()
+        self._controller = RenameController()
+        # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()
+        self._svc = FileRenameService(history_store=self._history)
         self._template_svc = RenameTemplateService()
         self.operations: list[dict[str, Any]] = []
 
@@ -121,7 +113,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
     def _refresh_operation_list(self) -> None:
         self.ui.list_operations.clear()
         for op in self.operations:
-            label = self._OP_LABELS.get(op["type"], op["type"])
+            label = self._controller.op_label(op["type"])
             item = QListWidgetItem(f"{label}: {op['params']}")
             self.ui.list_operations.addItem(item)
 
@@ -174,10 +166,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         if reply != QMessageBox.StandardButton.Yes:
             return
         count, errors = self._svc.execute_rename(ready)
-        # 记录历史(用于撤销)
-        self._history.add_record(
-            "rename", {"rename_map": {str(k): str(v) for k, v in ready.items()}}
-        )
+        # 历史记录已下沉 FileRenameService.execute_rename(注入了 history_store)
         QMessageBox.information(
             self,
             "完成",
@@ -190,10 +179,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         if not records:
             QMessageBox.information(self, "历史", "暂无历史记录。")
             return
-        lines = [
-            f"#{r['id']} {r['timestamp'][:19]}  {len(r['data'].get('rename_map', {}))} 个文件"
-            for r in records
-        ]
+        lines = [self._controller.format_history_line(r) for r in records]
         QMessageBox.information(self, "历史", "\n".join(lines))
 
     # ---------- 模板管理 ----------
@@ -239,10 +225,8 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         QMessageBox.information(self, "保存模板", f"已保存模板「{name}」。")
 
     def _op_label(self, op: dict[str, Any]) -> str:
-        """操作转简短描述(供模板列表展示)。"""
-        op_type = op.get("type", "")
-        op_type_str = op_type if isinstance(op_type, str) else ""
-        return self._OP_LABELS.get(op_type_str, op_type_str)
+        """操作转简短描述(供模板列表展示)。委托给 RenameController。"""
+        return self._controller.op_label(op.get("type", ""))
 
     # ---------- 文件列表变更后刷新状态/预览 ----------
     def _update_status(self) -> None:

@@ -1,15 +1,14 @@
-"""MkdirController —— 把建文件夹 Tab 的结构收集、校验、历史记录从 Qt 依赖中抽离。
+"""MkdirController —— 把建文件夹 Tab 的结构收集、校验从 Qt 依赖中抽离。
 
 Controller 不 import PySide6,仅依赖 core.batch_mkdir;View 读取 QTableWidget
 得到 list[list[str]] 后传入,逻辑可无 Qt 单测。
+历史记录构建已下沉 FolderCreatorService.create_folders(本控制器不再含
+build_history_record)。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
-from file_toolbox.core.batch_mkdir import ConflictStrategy, FolderCreatorService
+from file_toolbox.core.batch_mkdir import FolderCreatorService
 
 
 class MkdirController:
@@ -17,7 +16,6 @@ class MkdirController:
 
     - collect_structures:从粘贴表读取的二维文本构建层级结构元组。
     - find_invalid_names:找出含非法字符的文件夹名。
-    - build_history_record:构造 history 记录 dict(strategy 以 enum 名存储)。
     """
 
     def __init__(self, svc: FolderCreatorService | None = None):
@@ -48,25 +46,3 @@ class MkdirController:
                 if not self._svc.validate_folder_name(name) and name not in invalid:
                     invalid.append(name)
         return invalid
-
-    def build_history_record(
-        self,
-        root: str | Path,
-        structure_count: int,
-        strategy: ConflictStrategy,
-        created: int,
-        skipped: int,
-        success: bool,
-    ) -> dict[str, Any]:
-        """构造 mkdir 操作的历史记录 dict(与原 _create_folders 内联 dict 一致)。
-
-        注意:strategy 以 strategy.name(枚举名字符串)存储。
-        """
-        return {
-            "root": str(root),
-            "structure_count": structure_count,
-            "strategy": strategy.name,
-            "created": created,
-            "skipped": skipped,
-            "success": success,
-        }

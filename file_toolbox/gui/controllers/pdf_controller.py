@@ -49,7 +49,9 @@ class PDFController:
     - build_config:PDFConfigState -> config dict(与 pdf_tab._build_config 等价)
     - summarize_results:统计成功/失败计数
     - format_progress:格式化进度文案 "[cur/total] msg"
-    - build_history_record:构建写入 JsonHistoryStore 的记录 dict
+
+    历史记录构建已下沉 PDFGeneratorService.batch_generate(本控制器不再含
+    build_history_record)。
     """
 
     def build_config(self, state: PDFConfigState) -> dict[str, Any]:
@@ -84,26 +86,6 @@ class PDFController:
     def format_progress(self, cur: int, total: int, msg: str) -> str:
         """进度文案:与原 pdf_tab._on_progress 的 label 格式一致。"""
         return f"[{cur}/{total}] {msg}"
-
-    def build_history_record(
-        self, files: list[Path], ok: int, fail: int, config: dict[str, Any]
-    ) -> dict[str, Any]:
-        """构建写入 JsonHistoryStore 的记录 dict。
-
-        与原 pdf_tab._on_generate_ok 内联结构完全一致:files 转 str 列表,
-        config 只取 pdf_type/output_mode/engine/dpi 四个键(审计/复现所需的最小子集)。
-        """
-        return {
-            "files": [str(f) for f in files],
-            "success": ok,
-            "failed": fail,
-            "config": {
-                "pdf_type": config["pdf_type"],
-                "output_mode": config["output_mode"],
-                "engine": config["engine"],
-                "dpi": config["dpi"],
-            },
-        }
 
 
 __all__ = ["PDFConfigState", "PDFController", "_MERGE_FILENAME_DEFAULT"]

@@ -17,6 +17,7 @@ from file_toolbox.core.batch_replace import ContentReplaceService, ReplaceOperat
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.operation_params import OperationParamCollector
 from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
+from file_toolbox.gui.controllers.replace_controller import ReplaceController
 from file_toolbox.gui.generated.ui_replace_dialog import Ui_ContentReplaceDialog
 
 
@@ -30,8 +31,10 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self._init_batch_dialog()
         self.ui = Ui_ContentReplaceDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
-        self._svc = ContentReplaceService()
+        self._controller = ReplaceController()
+        # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()
+        self._svc = ContentReplaceService(history_store=self._history)
         self.operations: list[dict[str, Any]] = []
         self.ui.btn_cancel.setVisible(False)
         self._connect_signals()
@@ -87,11 +90,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
 
         self.ui.list_operations.clear()
         for op in self.operations:
-            p = op["params"]
-            if op["type"] == ReplaceOperationType.SIMPLE_REPLACE.value:
-                label = f"替换: {p.get('find', '')!r} -> {p.get('replace', '')!r}"
-            else:
-                label = f"正则: /{p.get('pattern', '')}/ -> {p.get('replace', '')!r}"
+            label = self._controller.format_op_label(op)
             self.ui.list_operations.addItem(QListWidgetItem(label))
 
     def _prompt_params(
@@ -135,10 +134,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         success, total, errors = self._svc.execute_replace(
             list(self.selected_files), self.operations
         )
-        self._history.add_record(
-            "replace",
-            {"files": [str(f) for f in self.selected_files], "operations": self.operations},
-        )
+        # 历史记录已下沉 ContentReplaceService.execute_replace(注入了 history_store)
         QMessageBox.information(
             self,
             "完成",
@@ -152,9 +148,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         if not records:
             QMessageBox.information(self, "历史", "暂无历史记录。")
             return
-        lines = [
-            f"#{r['id']} {r['timestamp'][:19]}  {r['data'].get('files', [])[:1]}" for r in records
-        ]
+        lines = [self._controller.format_history_line(r) for r in records]
         QMessageBox.information(self, "历史", "\n".join(lines))
 
     def _update_status(self) -> None:

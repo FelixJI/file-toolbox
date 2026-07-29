@@ -42,9 +42,10 @@ class BatchFolderCreatorDialog(QDialog):
         super().__init__(parent)
         self.ui = Ui_BatchFolderCreatorDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
-        self._svc = FolderCreatorService()
-        self._controller = MkdirController(self._svc)
+        # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()
+        self._svc = FolderCreatorService(history_store=self._history)
+        self._controller = MkdirController(self._svc)
 
         self.ui.btn_cancel.setVisible(False)
         # label_error 带红色边框样式,默认空内容时会显示一个空红框 -> 默认隐藏
@@ -282,19 +283,14 @@ class BatchFolderCreatorDialog(QDialog):
             return
         # CONFIRM 策略:对每个已存在文件夹弹窗询问是否跳过
         skip_callback = self._make_skip_callback() if strategy == ConflictStrategy.CONFIRM else None
-        result = self._svc.create_folders(items, strategy, skip_callback=skip_callback)
-        # 记录历史(文件夹创建不可逆,仅供审计/复现)
-        self._history.add_record(
-            "mkdir",
-            self._controller.build_history_record(
-                root=root,
-                structure_count=len(structures),
-                strategy=strategy,
-                created=result.created_count,
-                skipped=result.skipped_count,
-                success=result.success,
-            ),
+        result = self._svc.create_folders(
+            items,
+            strategy,
+            skip_callback=skip_callback,
+            root=str(root),
+            structure_count=len(structures),
         )
+        # 历史记录已下沉 FolderCreatorService.create_folders(注入了 history_store)
         QMessageBox.information(
             self,
             "完成" if result.success else "出错",

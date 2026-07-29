@@ -28,8 +28,9 @@ class InvoiceTab(QWidget):
         super().__init__(parent)
         self.ui = Ui_InvoiceDialog()
         self.ui.setupUi(self)
-        self._svc = InvoiceService()
+        # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()
+        self._svc = InvoiceService(history_store=self._history)
         self._controller = InvoiceController()
         self._result: ParseResult | None = None
         self._files: list[Path] = []
@@ -156,20 +157,11 @@ class InvoiceTab(QWidget):
                 fmt=self._format(),
                 json_path=json_path,
                 dedupe_strategy=self._dedupe_strategy(),
+                file_count=len(self._files),
+                invoice_count=len(self._result.invoices),
             )
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "导出失败", str(e))
             return
-        # 记录历史(发票识别结果不可逆,仅供审计/复现)
-        assert self._result is not None
-        self._history.add_record(
-            "invoice",
-            self._controller.build_history_record(
-                len(self._files),
-                len(self._result.invoices),
-                self._dedupe_strategy(),
-                self._format(),
-                written,
-            ),
-        )
+        # 历史记录已下沉 InvoiceService.export(注入了 history_store)
         QMessageBox.information(self, "完成", "已导出:\n" + "\n".join(str(w) for w in written))

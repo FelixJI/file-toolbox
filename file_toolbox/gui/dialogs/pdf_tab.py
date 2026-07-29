@@ -79,8 +79,9 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self._init_batch_dialog()
         self.ui = Ui_PDFGeneratorDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
-        self._svc = PDFGeneratorService()
+        # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()
+        self._svc = PDFGeneratorService(history_store=self._history)
         self._controller = PDFController()
         # 各组 QButtonGroup,避免所有单选按钮因共享父控件而互相排斥
         self._type_group = QButtonGroup(self)
@@ -290,15 +291,8 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self._render_results(results)
         ok, fail = self._controller.summarize_results(results)
         self.ui.label_progress.setText(f"完成: 成功 {ok}, 失败 {fail}")
-        # 记录历史(PDF 生成不可逆,仅供审计/复现)
-        try:
-            config = self._build_config()
-            self._history.add_record(
-                "pdf",
-                self._controller.build_history_record(list(self.selected_files), ok, fail, config),
-            )
-        except Exception as e:
-            self._module_logger.warning(f"写入历史失败: {e}", exc_info=True)
+        # 历史记录已下沉 PDFGeneratorService.batch_generate(注入了 history_store,
+        # 在 worker 线程内由 JsonHistoryStore 的锁保护写入)
         self._set_ui_enabled(True)
         self.worker = None
         if fail:
