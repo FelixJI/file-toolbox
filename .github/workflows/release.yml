@@ -107,6 +107,10 @@ jobs:
     needs: decide
     if: needs.decide.outputs.should_release == 'true'
     runs-on: windows-latest
+    env:
+      # 英文区域 runner 的 Python 默认 stdout/stderr 编码为 cp1252,
+      # 脚本(release.py / bump_version.py 等)打印中文时 UnicodeEncodeError。UTF-8 模式覆盖所有子进程。
+      PYTHONUTF8: "1"
     outputs:
       resolved_tag: ${{ steps.resolve_tag.outputs.resolved_tag }}
     steps:

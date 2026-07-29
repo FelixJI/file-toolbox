@@ -29,6 +29,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# CI(如 GitHub Actions windows-latest,英文区域)控制台默认 cp1252,
+# 无法编码脚本里的中文/✓/✗ 字符 → print 抛 UnicodeEncodeError。
+# 把标准流重配为 UTF-8,使脚本不依赖控制台代码页(reconfigure 原地生效)。
+# Python 3.7+。与 build_exe.py 同模式。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 _ROOT = Path(__file__).resolve().parents[1]
 _FORMS_DIR = _ROOT / "file_toolbox" / "gui" / "forms"
 _GENERATED_DIR = _ROOT / "file_toolbox" / "gui" / "generated"

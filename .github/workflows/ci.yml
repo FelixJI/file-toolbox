@@ -16,6 +16,9 @@ jobs:
     env:
       FILE_TOOLBOX_NO_COM_DETECT: "1"
       QT_QPA_PLATFORM: offscreen
+      # 英文区域 runner 的 Python 默认 stdout/stderr 编码为 cp1252,
+      # 脚本打印中文/✓/✗ 时会 UnicodeEncodeError。UTF-8 模式覆盖所有子进程。
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
