@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.office_session import (
+    ComSession,
+    dispose_office_app,
+    init_office_app,
+)
 
 # 单个文件操作超时时间（秒）
 
@@ -60,73 +65,58 @@ class ExcelHandler(LoggableMixin):
 
         """
 
-        import pythoncom
-        import win32com.client
-
         excel_app = None
 
         wb = None
 
-        com_initialized = False
+        # ComSession 负责本线程 CoInitialize/CoUninitialize 配对(非 Windows no-op)。
+        # 原 com_initialized 标志 + 手写 CoUninitialize 由 ComSession.__exit__ 取代:
+        # CoInit 失败时 ComSession 为 no-op,后续 Dispatch 会抛异常被外层 except 捕获
+        # 返回 ""(与原行为等价:原 CoInit 失败也是异常传播至此 except 返回 "")。
+        with ComSession():
+            try:
+                excel_app = init_office_app("Excel.Application")
 
-        try:
-            pythoncom.CoInitialize()
+                wb = excel_app.Workbooks.Open(str(file_path.absolute()), ReadOnly=True)
 
-            com_initialized = True
+                text_parts = []
 
-            excel_app = win32com.client.Dispatch("Excel.Application")
+                for sheet in wb.Worksheets:
+                    used_range = sheet.UsedRange
 
-            excel_app.Visible = False
+                    if used_range is not None:
+                        values = used_range.Value
 
-            excel_app.DisplayAlerts = False
+                        if values is not None:
+                            if isinstance(values, tuple):
+                                for row in values:
+                                    if isinstance(row, tuple):
+                                        for cell_val in row:
+                                            if cell_val is not None:
+                                                text_parts.append(str(cell_val))
 
-            wb = excel_app.Workbooks.Open(str(file_path.absolute()), ReadOnly=True)
+                                    elif row is not None:
+                                        text_parts.append(str(row))
 
-            text_parts = []
+                            else:
+                                text_parts.append(str(values))
 
-            for sheet in wb.Worksheets:
-                used_range = sheet.UsedRange
+                return "\n".join(text_parts)
 
-                if used_range is not None:
-                    values = used_range.Value
+            except Exception as e:
+                self.logger.error(f"读取Excel文档失败: {file_path} - {e}")
 
-                    if values is not None:
-                        if isinstance(values, tuple):
-                            for row in values:
-                                if isinstance(row, tuple):
-                                    for cell_val in row:
-                                        if cell_val is not None:
-                                            text_parts.append(str(cell_val))
+                return ""
 
-                                elif row is not None:
-                                    text_parts.append(str(row))
+            finally:
+                if wb is not None:
+                    with contextlib.suppress(Exception):
+                        wb.Close(False)
 
-                        else:
-                            text_parts.append(str(values))
-
-            return "\n".join(text_parts)
-
-        except Exception as e:
-            self.logger.error(f"读取Excel文档失败: {file_path} - {e}")
-
-            return ""
-
-        finally:
-            if wb is not None:
-                with contextlib.suppress(Exception):
-                    wb.Close(False)
-
-            if excel_app is not None:
-                with contextlib.suppress(Exception):
-                    excel_app.Quit()
-
-            wb = None
-            excel_app = None
-            gc.collect()
-
-            if com_initialized:
-                with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+                # dispose_office_app = Quit(suppress) + gc.collect,等价于原
+                # excel_app.Quit(suppress) + gc.collect 的清理时序。
+                dispose_office_app(excel_app)
+                excel_app = None
 
     def batch_replace(
         self,
@@ -165,7 +155,6 @@ class ExcelHandler(LoggableMixin):
         """
 
         import pythoncom
-        import win32com.client
 
         result: dict[str, Any] = {"success_count": 0, "total_replacements": 0, "errors": []}
 
@@ -190,12 +179,10 @@ class ExcelHandler(LoggableMixin):
                 return result
 
             try:
-                excel_app = win32com.client.Dispatch("Excel.Application")
+                excel_app = init_office_app("Excel.Application")
 
-                excel_app.Visible = False
-
-                excel_app.DisplayAlerts = False
-
+                # ScreenUpdating 是 batch_replace 的业务优化(批量替换时关闭屏幕刷新以
+                # 提速),init_office_app 不设此项——故在此单独保留。
                 excel_app.ScreenUpdating = False
 
             except Exception as e:
@@ -326,9 +313,7 @@ class ExcelHandler(LoggableMixin):
                     time.sleep(0.5)
 
                     try:
-                        excel_app = win32com.client.Dispatch("Excel.Application")
-                        excel_app.Visible = False
-                        excel_app.DisplayAlerts = False
+                        excel_app = init_office_app("Excel.Application")
                     except Exception:
                         break
 
@@ -344,13 +329,11 @@ class ExcelHandler(LoggableMixin):
             result["errors"].append(f"Excel批量处理失败: {e!s}")
 
         finally:
-            if excel_app is not None:
-                with contextlib.suppress(Exception):
-                    excel_app.Quit()
-
+            # dispose_office_app(excel_app, gc_pause=0.3) 等价于原:
+            # if excel_app is not None: suppress(excel_app.Quit()); gc.collect();
+            # time.sleep(0.3)。kill 与 CoUninitialize 仍在此处保留(业务/配对语义)。
+            dispose_office_app(excel_app, gc_pause=0.3)
             excel_app = None
-            gc.collect()
-            time.sleep(0.3)
             self._kill_office_processes("EXCEL.EXE", excel_pids_before)
 
             if com_initialized:
