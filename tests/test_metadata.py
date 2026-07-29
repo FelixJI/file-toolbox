@@ -76,3 +76,46 @@ def test_get_changelog_finds_portable_exe_sibling(tmp_path, monkeypatch):
 
     text = metadata.get_changelog()
     assert text == "# Portable changelog content"
+
+
+def test_get_changelog_skips_unreadable_file(tmp_path, monkeypatch):
+    """某候选 is_file() 真 but read_text 抛 OSError → continue 到下一候选
+    (覆盖 metadata.py 66-67 OSError 分支)。
+
+    让第一候选指向一个"声称是文件但读取抛 OSError"的路径,第二候选 cwd 真实可读
+    → get_changelog 应跳过失败候选,返回 cwd 候选内容(不抛 OSError)。
+    """
+    # cwd 下放真实可读 CHANGELOG.md,作为回退链命中
+    real_cwd = tmp_path / "cwd"
+    real_cwd.mkdir()
+    (real_cwd / "CHANGELOG.md").write_text("# cwd changelog content", encoding="utf-8")
+    monkeypatch.chdir(real_cwd)
+
+    # 构造一个"坏"路径对象:is_file() 返回 True,read_text 抛 OSError
+    import pathlib
+
+    bad_path = tmp_path / "unreadable.md"
+    bad_path.write_text("placeholder", encoding="utf-8")  # 真实存在,便于 mock
+
+    real_is_file = pathlib.Path.is_file
+    real_read_text = pathlib.Path.read_text
+
+    def fake_is_file(self):
+        if self == bad_path:
+            return True
+        return real_is_file(self)
+
+    def fake_read_text(self, *args, **kwargs):
+        if self == bad_path:
+            raise OSError("simulated read failure")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(metadata.Path, "is_file", fake_is_file)
+    monkeypatch.setattr(metadata.Path, "read_text", fake_read_text)
+
+    # 让全部 3 个候选都指向 bad_path,确保 OSError 分支被命中
+    monkeypatch.setattr(metadata, "_repo_root_changelog_path", lambda: bad_path)
+    monkeypatch.setattr(metadata.sys, "executable", str(bad_path))
+    # 注意:cwd 候选是真实可读的,但前两候选(is_file=True、read_text 抛 OSError)会 continue
+    text = metadata.get_changelog()
+    assert text == "# cwd changelog content"
