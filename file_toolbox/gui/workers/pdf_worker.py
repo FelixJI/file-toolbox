@@ -20,6 +20,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.office_session import ComSession
 
 
 class PdfGenerateWorker(QThread, LoggableMixin):
@@ -64,39 +65,32 @@ class PdfGenerateWorker(QThread, LoggableMixin):
 
     def run(self) -> None:  # noqa: D401 (QThread 命名)
         """worker 入口(在后台线程执行)。"""
-        # COM:win32com 要求使用它的线程先 CoInitialize,否则进程退出抛致命异常
-        try:
-            import pythoncom
-
-            pythoncom.CoInitialize()
-            com_inited = True
-        except Exception:
-            com_inited = False  # 非 Windows / 无 pywin32
-
-        try:
-            # 首次引擎兑现:注册表说有 → 真 Dispatch 验证一次
-            # (force_refresh=True 才走真 Dispatch;失败则修正缓存,转换单元内会尝试另一引擎)
+        # COM:win32com 要求使用它的线程先 CoInitialize,否则进程退出抛致命异常。
+        # ComSession 负责本线程 CoInitialize/CoUninitialize 配对(非 Windows / 无 pywin32
+        # 时为 no-op)。__exit__ 在 with 体(含下方 finally)之后执行,故 svc.close() 仍在
+        # CoUninitialize 之前——与原手写顺序一致。
+        with ComSession():
             try:
-                from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+                # 首次引擎兑现:注册表说有 → 真 Dispatch 验证一次
+                # (force_refresh=True 才走真 Dispatch;失败则修正缓存,转换单元内会尝试另一引擎)
+                try:
+                    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
-                EngineManager()._detect_available_engines(force_refresh=True)
+                    EngineManager()._detect_available_engines(force_refresh=True)
+                except Exception as e:
+                    # 兑现失败不致命:auto 引擎下转换单元会逐个 ProgID 尝试
+                    self.logger.warning(f"引擎兑现检测失败(继续生成): {e}")
+
+                results = self._svc.batch_generate(
+                    self._files,
+                    self._config,
+                    progress_callback=lambda c, t, m: self.progress.emit(c, t, m),
+                    cancel_check=self._cancel_check,
+                )
+                self.finished_ok.emit(results)
             except Exception as e:
-                # 兑现失败不致命:auto 引擎下转换单元会逐个 ProgID 尝试
-                self.logger.warning(f"引擎兑现检测失败(继续生成): {e}")
-
-            results = self._svc.batch_generate(
-                self._files,
-                self._config,
-                progress_callback=lambda c, t, m: self.progress.emit(c, t, m),
-                cancel_check=self._cancel_check,
-            )
-            self.finished_ok.emit(results)
-        except Exception as e:
-            self.logger.error(f"PDF 生成 worker 异常: {e}")
-            self.failed.emit(str(e))
-        finally:
-            with contextlib.suppress(Exception):
-                self._svc.close()
-            if com_inited:
+                self.logger.error(f"PDF 生成 worker 异常: {e}")
+                self.failed.emit(str(e))
+            finally:
                 with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+                    self._svc.close()
