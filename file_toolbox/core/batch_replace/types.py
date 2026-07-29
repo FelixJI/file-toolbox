@@ -2,7 +2,9 @@
 内容替换类型定义与参数校验规则
 """
 
+import re
 from enum import Enum
+from typing import Any
 
 from file_toolbox.common.op_schema import ParamRule
 
@@ -30,3 +32,40 @@ REPLACE_PARAM_RULES: dict[str, ParamRule] = {
         string_keys=("replace",),
     ),
 }
+
+
+def count_text_matches(content: str, operations: list[dict[str, Any]]) -> int:
+    """统计文本 content 中按 operations 规则可命中的匹配数。
+
+    供 word/excel/text 三个 handler 复用,统一 simple/regex 两类替换的计数口径:
+    - simple_replace:大小写敏感时 content.count(find),否则 lower() 后 count。
+    - regex_replace:re.finditer 计数;非法 pattern 静默跳过(返回 0)。
+    - 空 find/空 pattern 贡献 0。
+    """
+    total = 0
+    for operation in operations:
+        op_type = operation.get("type")
+        params = operation.get("params", {})
+
+        if op_type == ReplaceOperationType.SIMPLE_REPLACE.value:
+            find_text = params.get("find", "")
+            case_sensitive = params.get("case_sensitive", False)
+            if not find_text:
+                continue
+            if case_sensitive:
+                total += content.count(find_text)
+            else:
+                total += content.lower().count(find_text.lower())
+
+        elif op_type == ReplaceOperationType.REGEX_REPLACE.value:
+            pattern = params.get("pattern", "")
+            ignore_case = params.get("ignore_case", False)
+            if not pattern:
+                continue
+            try:
+                flags = re.IGNORECASE if ignore_case else 0
+                total += len(list(re.finditer(pattern, content, flags)))
+            except re.error:
+                pass
+
+    return total

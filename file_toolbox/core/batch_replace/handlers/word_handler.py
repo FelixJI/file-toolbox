@@ -383,47 +383,9 @@ class WordHandler(LoggableMixin):
 
     def _count_matches_in_text(self, content: str, operations: list[dict[str, Any]]) -> int:
         """统计文本中的匹配数"""
+        from file_toolbox.core.batch_replace.types import count_text_matches
 
-        import re
-
-        from file_toolbox.core.batch_replace.types import ReplaceOperationType
-
-        total = 0
-
-        for operation in operations:
-            op_type = operation.get("type")
-
-            params = operation.get("params", {})
-
-            if op_type == ReplaceOperationType.SIMPLE_REPLACE.value:
-                find_text = params.get("find", "")
-
-                case_sensitive = params.get("case_sensitive", False)
-
-                if find_text:
-                    if case_sensitive:
-                        total += content.count(find_text)
-
-                    else:
-                        total += content.lower().count(find_text.lower())
-
-            elif op_type == ReplaceOperationType.REGEX_REPLACE.value:
-                pattern = params.get("pattern", "")
-
-                ignore_case = params.get("ignore_case", False)
-
-                if pattern:
-                    try:
-                        flags = re.IGNORECASE if ignore_case else 0
-
-                        matches = list(re.finditer(pattern, content, flags))
-
-                        total += len(matches)
-
-                    except re.error:
-                        pass
-
-        return total
+        return count_text_matches(content, operations)
 
     def _count_word_matches(
         self, doc: Any, find_text: str, match_case: bool, use_wildcards: bool

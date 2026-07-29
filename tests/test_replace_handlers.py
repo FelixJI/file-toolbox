@@ -7,6 +7,7 @@
 
 from file_toolbox.core.batch_replace.handlers.excel_handler import ExcelHandler
 from file_toolbox.core.batch_replace.handlers.word_handler import WordHandler
+from file_toolbox.core.batch_replace.types import count_text_matches
 
 SIMPLE = "simple_replace"
 REGEX = "regex_replace"
@@ -271,3 +272,111 @@ def test_excel_count_multiple_operations_summed():
         ],
     )
     assert n == 2  # 1 + 1
+
+
+# ===========================================================================
+# count_text_matches:共享函数(types.py)直接单测。
+# 三个 handler 委托至此,故这里覆盖核心口径 + 边界,保证去重后行为不变。
+# ===========================================================================
+
+
+def test_count_text_matches_empty_operations():
+    """空操作列表 → 0。"""
+    assert count_text_matches("anything", []) == 0
+
+
+def test_count_text_matches_empty_content():
+    """空文本 → 0。"""
+    assert count_text_matches("", [{"type": SIMPLE, "params": {"find": "x"}}]) == 0
+
+
+def test_count_text_matches_simple_case_sensitive():
+    """simple_replace + case_sensitive=True:只计精确大小写命中,多次累加。"""
+    n = count_text_matches(
+        "Foo foo Foo",
+        [{"type": SIMPLE, "params": {"find": "Foo", "case_sensitive": True}}],
+    )
+    assert n == 2
+
+
+def test_count_text_matches_simple_case_insensitive():
+    """simple_replace 默认 case_sensitive=False:lower() 后计数,跨大小写命中。"""
+    n = count_text_matches(
+        "Hello HELLO hello",
+        [{"type": SIMPLE, "params": {"find": "hello"}}],
+    )
+    assert n == 3
+
+
+def test_count_text_matches_simple_empty_find_skipped():
+    """simple_replace 空 find → 跳过,贡献 0。"""
+    assert count_text_matches("hello", [{"type": SIMPLE, "params": {"find": ""}}]) == 0
+
+
+def test_count_text_matches_regex_multiple():
+    """regex_replace:re.finditer 多次命中。"""
+    assert count_text_matches("a1 b2 c3", [{"type": REGEX, "params": {"pattern": r"\d"}}]) == 3
+
+
+def test_count_text_matches_regex_ignore_case():
+    """regex_replace + ignore_case=True:re.IGNORECASE 跨大小写命中。"""
+    n = count_text_matches(
+        "Foo FOO foo",
+        [{"type": REGEX, "params": {"pattern": "foo", "ignore_case": True}}],
+    )
+    assert n == 3
+
+
+def test_count_text_matches_regex_case_sensitive_default():
+    """regex_replace 默认 ignore_case=False:正则区分大小写。"""
+    assert (
+        count_text_matches(
+            "Foo FOO foo",
+            [{"type": REGEX, "params": {"pattern": "foo"}}],
+        )
+        == 1
+    )
+
+
+def test_count_text_matches_regex_empty_pattern_skipped():
+    """regex_replace 空 pattern → 跳过,贡献 0。"""
+    assert count_text_matches("hello", [{"type": REGEX, "params": {"pattern": ""}}]) == 0
+
+
+def test_count_text_matches_bad_regex_returns_zero():
+    """非法正则触发 re.error → 被 except 捕获,贡献 0(不抛异常)。"""
+    assert count_text_matches("abc", [{"type": REGEX, "params": {"pattern": "("}}]) == 0
+
+
+def test_count_text_matches_bad_regex_ignore_case_returns_zero():
+    """非法正则 + ignore_case 同样被吞掉,返回 0。"""
+    assert (
+        count_text_matches(
+            "abc",
+            [{"type": REGEX, "params": {"pattern": "(", "ignore_case": True}}],
+        )
+        == 0
+    )
+
+
+def test_count_text_matches_unknown_op_type_ignored():
+    """未知操作类型 → 两分支都不命中,贡献 0。"""
+    assert count_text_matches("hello", [{"type": "bogus", "params": {"find": "x"}}]) == 0
+
+
+def test_count_text_matches_missing_params_key():
+    """操作 dict 缺 params 键 → params={},find 默认 '' → 贡献 0。"""
+    assert count_text_matches("hello", [{"type": SIMPLE}]) == 0
+
+
+def test_count_text_matches_mixed_operations_summed():
+    """多操作混合(simple + simple + regex)总匹配数应累加。"""
+    n = count_text_matches(
+        "hello world 2024",
+        [
+            {"type": SIMPLE, "params": {"find": "hello"}},
+            {"type": SIMPLE, "params": {"find": "o"}},  # 出现在 hello & world = 2
+            {"type": REGEX, "params": {"pattern": r"\d{4}"}},
+        ],
+    )
+    assert n == 1 + 2 + 1

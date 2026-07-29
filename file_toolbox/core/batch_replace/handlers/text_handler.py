@@ -80,49 +80,10 @@ class TextHandler:
         return total_replacements
 
     def count_matches(self, content: str, operations: list[dict[str, Any]]) -> int:
-        """
-        统计匹配数量
+        """统计匹配数量"""
+        from file_toolbox.core.batch_replace.types import count_text_matches
 
-        Args:
-            content: 文本内容
-            operations: 操作列表
-
-        Returns:
-            匹配总数
-        """
-
-        total_count = 0
-        for operation in operations:
-            op_type = operation.get("type")
-            params = operation.get("params", {})
-
-            if op_type == ReplaceOperationType.SIMPLE_REPLACE.value:
-                find_text = params.get("find", "")
-                case_sensitive = params.get("case_sensitive", False)
-
-                if not find_text:
-                    continue
-
-                if case_sensitive:
-                    total_count += content.count(find_text)
-                else:
-                    total_count += content.lower().count(find_text.lower())
-
-            elif op_type == ReplaceOperationType.REGEX_REPLACE.value:
-                pattern = params.get("pattern", "")
-                ignore_case = params.get("ignore_case", False)
-
-                if not pattern:
-                    continue
-
-                try:
-                    flags = re.IGNORECASE if ignore_case else 0
-                    matches = list(re.finditer(pattern, content, flags))
-                    total_count += len(matches)
-                except re.error:
-                    pass
-
-        return total_count
+        return count_text_matches(content, operations)
 
     def _apply_operation(self, text: str, operation: dict[str, Any]) -> tuple[str, int]:
         """
