@@ -36,6 +36,11 @@ jobs:
       - name: mypy
         run: uv run mypy
 
+      - name: UI 漂移检查(regen_ui --check)
+        # 检测 ui_*.py 是否与 .ui 源漂移;当前全部为手维护(无 .ui)时此步通过。
+        # 补齐 .ui 后会自动校验「pyside6-uic 再生成结果 == 已提交 ui_*.py」。
+        run: uv run --extra dev python scripts/regen_ui.py --check
+
       - name: pytest + core 覆盖率(≥88%)
         run: uv run pytest --cov=file_toolbox.core --cov-fail-under=88 -q
 
