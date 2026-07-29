@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.office_session import (
+    ComSession,
+    dispose_office_app,
+    init_office_app,
+)
 
 # 单个文件操作超时时间（秒）
 
@@ -59,51 +64,36 @@ class WordHandler(LoggableMixin):
 
         """
 
-        import pythoncom
-        import win32com.client
-
         word_app = None
 
         doc = None
 
-        com_initialized = False
+        # ComSession 负责本线程 CoInitialize/CoUninitialize 配对(非 Windows no-op)。
+        # 原 com_initialized 标志 + 手写 CoUninitialize 由 ComSession.__exit__ 取代:
+        # CoInit 失败时 ComSession 为 no-op,后续 Dispatch 会抛异常被外层 except 捕获
+        # 返回 ""(与原行为等价:原 CoInit 失败也是异常传播至此 except 返回 "")。
+        with ComSession():
+            try:
+                word_app = init_office_app("Word.Application")
 
-        try:
-            pythoncom.CoInitialize()
+                doc = word_app.Documents.Open(str(file_path.absolute()), ReadOnly=True)
 
-            com_initialized = True
+                return self._extract_all_text(doc)
 
-            word_app = win32com.client.Dispatch("Word.Application")
+            except Exception as e:
+                self.logger.error(f"读取Word文档失败: {file_path} - {e}")
 
-            word_app.Visible = False
+                return ""
 
-            word_app.DisplayAlerts = False
+            finally:
+                if doc is not None:
+                    with contextlib.suppress(Exception):
+                        doc.Close(False)
 
-            doc = word_app.Documents.Open(str(file_path.absolute()), ReadOnly=True)
-
-            return self._extract_all_text(doc)
-
-        except Exception as e:
-            self.logger.error(f"读取Word文档失败: {file_path} - {e}")
-
-            return ""
-
-        finally:
-            if doc is not None:
-                with contextlib.suppress(Exception):
-                    doc.Close(False)
-
-            if word_app is not None:
-                with contextlib.suppress(Exception):
-                    word_app.Quit()
-
-            doc = None
-            word_app = None
-            gc.collect()
-
-            if com_initialized:
-                with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+                # dispose_office_app = Quit(suppress) + gc.collect,等价于原
+                # word_app.Quit(suppress) + gc.collect 的清理时序。
+                dispose_office_app(word_app)
+                word_app = None
 
     def _extract_all_text(self, doc: Any) -> str:  # pragma: no cover
         """提取文档全文:正文 + 页眉页脚 + 文本框/形状。
@@ -154,7 +144,6 @@ class WordHandler(LoggableMixin):
         """
 
         import pythoncom
-        import win32com.client
 
         result: dict[str, Any] = {"success_count": 0, "total_replacements": 0, "errors": []}
 
@@ -179,12 +168,10 @@ class WordHandler(LoggableMixin):
                 return result
 
             try:
-                word_app = win32com.client.Dispatch("Word.Application")
+                word_app = init_office_app("Word.Application")
 
-                word_app.Visible = False
-
-                word_app.DisplayAlerts = False
-
+                # ScreenUpdating 是 batch_replace 的业务优化(批量替换时关闭屏幕刷新以
+                # 提速),init_office_app 不设此项——故在此单独保留。
                 word_app.ScreenUpdating = False
 
             except Exception as e:
@@ -301,11 +288,7 @@ class WordHandler(LoggableMixin):
                     time.sleep(0.5)
 
                     try:
-                        word_app = win32com.client.Dispatch("Word.Application")
-
-                        word_app.Visible = False
-
-                        word_app.DisplayAlerts = False
+                        word_app = init_office_app("Word.Application")
 
                     except Exception:
                         break
@@ -322,13 +305,11 @@ class WordHandler(LoggableMixin):
             result["errors"].append(f"Word批量处理失败: {e!s}")
 
         finally:
-            if word_app is not None:
-                with contextlib.suppress(Exception):
-                    word_app.Quit()
-
+            # dispose_office_app(word_app, gc_pause=0.3) 等价于原:
+            # if word_app is not None: suppress(word_app.Quit()); gc.collect();
+            # time.sleep(0.3)。kill 与 CoUninitialize 仍在此处保留(业务/配对语义)。
+            dispose_office_app(word_app, gc_pause=0.3)
             word_app = None
-            gc.collect()
-            time.sleep(0.3)
 
             self._kill_office_processes("WINWORD.EXE", word_pids_before)
 
