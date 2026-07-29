@@ -1,21 +1,11 @@
 ################################################################################
-
-
-## Form generated from reading UI file 'content_replace_dialog.ui'
-
-
+## 手维护的 UI 构建代码(无 .ui 源文件)。
 ##
-
-
-## Created by: Qt User Interface Compiler version 6.10.1
-
-
+## 本文件由人工维护,PySide6 控件树在 Ui_ContentReplaceDialog.setupUi 里手写构建。
+## 仓库内目前没有对应的 content_replace_dialog.ui;日后若用 Qt Designer 产出
+## .ui 并接入 scripts/regen_ui.py 的再生链路,本文件会被 pyside6-uic 覆盖。
 ##
-
-
-## WARNING! All changes made in this file will be lost when recompiling UI file!
-
-
+## 详见 scripts/regen_ui.py(HANDMADE 清单)与 .superpowers/sdd/task-6-report.md。
 ################################################################################
 
 

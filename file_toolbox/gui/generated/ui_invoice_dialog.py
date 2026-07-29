@@ -6,6 +6,8 @@
 ## 业务逻辑(信号连接/解析/导出)留在 dialogs/invoice_tab.py 的 InvoiceTab。
 ##
 ## WARNING! 若日后用 Qt Designer 重新生成,本文件会被覆盖。
+##
+## 本文件在 scripts/regen_ui.py 的 HANDMADE 清单中(无 .ui、不走 pyside6-uic 再生)。
 ################################################################################
 
 from PySide6.QtWidgets import (
