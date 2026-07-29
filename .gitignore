@@ -22,6 +22,9 @@ logs/
 .idea/
 .vscode/
 
+# Git worktrees(本地隔离工作区,勿提交)
+.worktrees/
+
 # AI assistant folders
 .claude/
 .cursor/
