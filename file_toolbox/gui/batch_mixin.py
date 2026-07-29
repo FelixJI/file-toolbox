@@ -132,19 +132,11 @@ class BatchDialogMixin:
             )
             recursive = reply == QMessageBox.StandardButton.Yes
 
-        if recursive:
-            if self.SUPPORTED_FORMATS:
-                files: list[Path] = []
-                for ext in self.SUPPORTED_FORMATS:
-                    files.extend(
-                        f for f in folder_path.rglob(f"*{ext}") if not self._is_temp_file(f)
-                    )
-            else:
-                files = [
-                    f for f in folder_path.rglob("*") if f.is_file() and not self._is_temp_file(f)
-                ]
-        else:
-            files = [f for f in folder_path.iterdir() if f.is_file() and self._is_file_supported(f)]
+        # 统一谓词:`_is_file_supported` 已含临时文件过滤(_is_temp_file)与后缀校验
+        # (SUPPORTED_FORMATS 为空时放行所有非临时文件),故三分支合并为一。
+        # 此处显式 is_file() 兼具修复旧递归分支漏检——曾把名为 x.pdf 的目录误收入。
+        it = folder_path.rglob("*") if recursive else folder_path.iterdir()
+        files = [f for f in it if f.is_file() and self._is_file_supported(f)]
 
         added_count = 0
         for file_path in files:

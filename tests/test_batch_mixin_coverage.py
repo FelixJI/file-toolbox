@@ -302,6 +302,23 @@ def test_select_folder_recursive_no_formats(app, monkeypatch, tmp_path):
     assert any(p.name == "a.xyz" for p in dlg.selected_files)
 
 
+def test_select_folder_recursive_dir_named_as_format_not_collected(app, monkeypatch, tmp_path):
+    """递归 + SUPPORTED_FORMATS:名为 x.pdf 的目录不被误收入 selected_files。
+
+    回归测试:旧递归分支(rglob("*{ext}"))漏掉 is_file() 检查,会把名为 x.pdf 的目录
+    误收为文件。统一谓词修复后,目录被 is_file() 滤除。
+    """
+    dlg = _TestDialog()
+    (tmp_path / "x.pdf").mkdir()  # 目录,名为 x.pdf
+    (tmp_path / "real.txt").write_text("y")  # 正常文件
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    dlg._select_folder(None, ask_recursive=True, auto_preview=False)
+    names = [p.name for p in dlg.selected_files]
+    assert "real.txt" in names
+    assert "x.pdf" not in names  # 目录不被误收
+
+
 # ---------------------------------------------------------------------------
 # _clear_files
 # ---------------------------------------------------------------------------
