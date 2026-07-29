@@ -9,6 +9,7 @@
 - 472/475: _read_file_content 调用 word/excel handler
 - 497: close() 获取锁成功 → 执行 kill
 - 506-507: close() except 吞异常
+- close(_from_del=True):由 __del__ 调用时跳过进程清理
 
 策略:用 MagicMock 替换 svc 的 handler/converter/_get_office_pids,
 避免真实 COM/subprocess。文本路径用真文件。
@@ -465,22 +466,16 @@ def test_read_file_content_empty_content_returns_empty(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# close():锁获取成功分支 + except 吞异常(行 497, 506-507)
+# close():锁获取成功分支 + except 吞异常(行 497, 506-507)+ _from_del 分支
 # ---------------------------------------------------------------------------
 
 
 def test_close_acquires_lock_and_kills_processes(monkeypatch):
-    """close():sys.exitfunc 判定为否 + 锁获取成功 → 执行 kill(行 497-505)。
+    """close():_from_del=False(默认) + 锁获取成功 → 执行 kill(行 497-505)。
 
-    sys.exitfunc 在 CPython 通常存在 → 早返回;需 monkeypatch 删除它使条件为假,
-    进入锁获取分支。
+    普通调用(非 __del__)总是进入清理路径。
     """
-    import sys
-
     svc = _svc_with_mocks()
-    # 删除 exitfunc 让 hasattr 返回 False;sys.modules.get("sys") 返回真值
-    if hasattr(sys, "exitfunc"):
-        monkeypatch.delattr(sys, "exitfunc", raising=False)
     # 锁能获取(blocking=False 返回 True)
     svc._lock.acquire.return_value = True
     killed = []
@@ -491,16 +486,11 @@ def test_close_acquires_lock_and_kills_processes(monkeypatch):
     assert "WINWORD.EXE" in killed
     assert "EXCEL.EXE" in killed
     svc._lock.release.assert_called_once()
-    # 恢复不必要(monkeypatch 自动 tearDown)
 
 
 def test_close_lock_acquire_fails_silently(monkeypatch):
     """close():锁获取失败(acquire 返回 False)→ 不执行 kill,不抛(行 497 False 分支)。"""
-    import sys
-
     svc = _svc_with_mocks()
-    if hasattr(sys, "exitfunc"):
-        monkeypatch.delattr(sys, "exitfunc", raising=False)
     svc._lock.acquire.return_value = False  # 锁被占用
     killed = []
     monkeypatch.setattr(svc, "_kill_new_office_processes", lambda name, pids: killed.append(name))
@@ -511,11 +501,7 @@ def test_close_lock_acquire_fails_silently(monkeypatch):
 
 def test_close_swallows_exception_in_kill(monkeypatch):
     """close():kill 抛异常 → except 吞掉,不向上抛(行 506-507)。"""
-    import sys
-
     svc = _svc_with_mocks()
-    if hasattr(sys, "exitfunc"):
-        monkeypatch.delattr(sys, "exitfunc", raising=False)
     svc._lock.acquire.return_value = True
     monkeypatch.setattr(
         svc,
@@ -525,43 +511,27 @@ def test_close_swallows_exception_in_kill(monkeypatch):
     svc.close()  # 不应抛
 
 
-def test_del_calls_close():
-    """__del__ 调用 close(不抛异常)。"""
-    svc = _svc_with_mocks()
-    svc.__del__()  # close 被 suppress,不抛
+def test_close_from_del_skips_process_cleanup(monkeypatch):
+    """close(_from_del=True):跳过进程清理(由 __del__ 调用)。
 
-
-def test_close_early_return_when_sys_modules_missing(monkeypatch):
-    """close():sys.modules.get('sys') 为假值 → 条件为真 → 早 return(行 497)。
-
-    覆盖 `not sys.modules.get("sys")` 为真这条路径(与 exitfunc 存在互补)。
+    _from_del=True 时直接 return,不获取锁、不 kill——避免解释器关闭链中
+    调用 taskkill/子进程的不安全操作。
     """
-    import sys
-
     svc = _svc_with_mocks()
-    # 删除 exitfunc 让前半为假
-    if hasattr(sys, "exitfunc"):
-        monkeypatch.delattr(sys, "exitfunc", raising=False)
-    # sys.modules.get("sys") 返回 None → not None == True → 整条件真 → return
-    fake_modules = MagicMock()
-    fake_modules.get.return_value = None
-    monkeypatch.setattr(sys, "modules", fake_modules)
-
+    svc._lock.acquire.return_value = True
     killed = []
     monkeypatch.setattr(svc, "_kill_new_office_processes", lambda name, pids: killed.append(name))
 
-    svc.close()
-    assert killed == []  # 早返回,未 kill
+    svc.close(_from_del=True)
+
+    assert killed == []  # 跳过清理
+    svc._lock.acquire.assert_not_called()
 
 
-def test_close_early_return_when_exitfunc_present():
-    """close():hasattr(sys, 'exitfunc') 为真(CPython 默认)→ 早 return(行 497)。
-
-    不删 exitfunc,走默认早返回路径。
-    """
+def test_del_calls_close():
+    """__del__ 调用 close(_from_del=True)(不抛异常)。"""
     svc = _svc_with_mocks()
-    # CPython 通常有 sys.exitfunc 属性 → 直接早返回
-    svc.close()  # 不抛即通过
+    svc.__del__()  # close 被 suppress,不抛
 
 
 # ---------------------------------------------------------------------------

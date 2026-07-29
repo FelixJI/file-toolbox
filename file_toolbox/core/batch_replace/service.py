@@ -484,18 +484,16 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
             return None
 
-    def close(self) -> None:
-        """关闭服务，释放资源"""
+    def close(self, _from_del: bool = False) -> None:
+        """关闭服务,释放资源。
+
+        _from_del:由 __del__ 调用时为 True,此时跳过末尾的进程清理与潜在
+        gc 交互——在解释器关闭链中调用 taskkill/子进程不安全。
+        """
         with contextlib.suppress(Exception):
             self.converter.close()
-
-        # 检查Python是否正在关闭，避免在关闭时执行不安全操作
-        import sys
-
-        # 检查解释器是否正在关闭
-        if hasattr(sys, "exitfunc") or not sys.modules.get("sys"):
+        if _from_del:
             return
-
         try:
             if self._lock.acquire(blocking=False):
                 try:
@@ -526,4 +524,4 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
     def __del__(self) -> None:
         """析构函数"""
         with contextlib.suppress(Exception):
-            self.close()
+            self.close(_from_del=True)
