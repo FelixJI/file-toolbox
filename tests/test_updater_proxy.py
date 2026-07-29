@@ -53,6 +53,43 @@ class TestGetProxy:
         no_env.setenv(proxy.ENV_VAR, "")
         assert proxy.get_proxy() == ""
 
+    def test_settings_returns_empty_short_circuits(self, no_env, tmp_path, monkeypatch):
+        """settings["gh_proxy"] 显式返回空 → get_proxy() 返回 ""(覆盖 line 41 短路)。
+
+        raw 经 os.environ/settings 取得空串时 `if raw else ""` 直接返回 "",
+        不进入 _normalize(line 52 的短路)。显式 monkeypatch settings.get 返回 ""。
+        """
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        monkeypatch.setattr(settings, "get", lambda key, default="": "")
+        assert proxy.get_proxy() == ""
+
+    def test_whitespace_only_raw_returns_empty(self, no_env, tmp_path, monkeypatch):
+        """raw 为纯空白串(truthy 但 strip() 后为空)→ _normalize 返回 ""(覆盖 line 41)。
+
+        env var 设为 "   "(truthy,绕过 line 52 的 `if raw else ""` 短路,进入 _normalize;
+        _normalize 内 s=raw.strip() 为空 → line 41 `return ""`)。
+        """
+        monkeypatch.chdir(tmp_path)
+        no_env.setenv(proxy.ENV_VAR, "   ")
+        assert proxy.get_proxy() == ""
+        # _normalize 直接验证 line 41
+        assert proxy._normalize("   ") == ""
+
+
+class TestIsGithub:
+    """覆盖 _is_github 的异常/无 host 分支(missing 59-60)。"""
+
+    def test_urlparse_value_error_returns_false(self):
+        """让 urlparse 抛 ValueError(畸形 IPv6 括号)→ 返回 False(不向上抛)。"""
+        # "http://[::1" 触发 urlparse 的 "Invalid IPv6 URL" ValueError
+        assert proxy._is_github("http://[::1") is False
+
+    def test_host_none_returns_false(self):
+        """非 URL(无 host)→ hostname 为 None → False。"""
+        assert proxy._is_github("not-a-url") is False
+
 
 class TestApplyProxy:
     def test_no_proxy_returns_unchanged(self, no_env, tmp_path, monkeypatch):

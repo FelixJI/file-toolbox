@@ -204,3 +204,101 @@ class TestReplaceDir:
         assert not (tmp_path / "FileToolbox.new").exists()
         # 原程序完好
         assert exe.read_bytes() == b"OLD"
+
+    def test_cleans_residual_new_dir_before_extract(self, tmp_path, monkeypatch):
+        """残留的 FileToolbox.new 目录(上次更新中断遗留)→ 解压前被 shutil.rmtree 清掉
+        (missing 151)。
+
+        用 spy 记录 rmtree 调用,验证残留目录被清理,且后续正常解压。
+        """
+        old_dir = tmp_path / "FileToolbox"
+        old_dir.mkdir()
+        exe = old_dir / "FileToolbox.exe"
+        exe.write_bytes(b"OLD")
+
+        # 预先造一个残留 .new(含一个会被清掉的"垃圾"文件)
+        new_dir = tmp_path / "FileToolbox.new"
+        new_dir.mkdir()
+        (new_dir / "stale.txt").write_bytes(b"LEFTOVER")
+
+        zip_path = tmp_path / "update.zip"
+        _make_portable_zip(zip_path)
+
+        rmtree_calls: list[Path] = []
+        real_rmtree = rmod.shutil.rmtree
+
+        def spy_rmtree(path, ignore_errors=False):
+            rmtree_calls.append(Path(path))
+            return real_rmtree(path, ignore_errors=ignore_errors)
+
+        monkeypatch.setattr(rmod.shutil, "rmtree", spy_rmtree)
+        monkeypatch.setattr(rmod, "_startfile", lambda p: None)
+        monkeypatch.setattr(rmod.os, "getpid", lambda: 4242)
+
+        rmod.replace_dir(Path(zip_path), exe_path=exe)
+
+        # 残留 .new 在第一次 rmtree 调用中被清理
+        assert new_dir in rmtree_calls
+        # 残留的垃圾文件已不在,新内容已就位
+        assert not (new_dir / "stale.txt").exists()
+        assert (new_dir / "FileToolbox.exe").read_bytes() == b"FAKE EXE"
+
+    def test_raises_when_startfile_none(self, tmp_path, monkeypatch):
+        """_startfile 为 None(非 Windows)→ 抛 ReplaceError(missing 173)。
+
+        即便 zip 有效、解压成功,缺 os.startfile 也必须显式失败而非静默。
+        """
+        from file_toolbox.updater.errors import ReplaceError
+
+        old_dir = tmp_path / "FileToolbox"
+        old_dir.mkdir()
+        exe = old_dir / "FileToolbox.exe"
+        exe.write_bytes(b"OLD")
+
+        zip_path = tmp_path / "update.zip"
+        _make_portable_zip(zip_path)
+
+        monkeypatch.setattr(rmod, "_startfile", None)
+        monkeypatch.setattr(rmod.os, "getpid", lambda: 4242)
+
+        with pytest.raises(ReplaceError):
+            rmod.replace_dir(Path(zip_path), exe_path=exe)
+
+
+class TestExtractPortableZipEdgeCases:
+    """覆盖 _extract_portable_zip 的跳过/目录分支(missing 125, 128, 131)。
+
+    构造一个含四类成员的 zip,验证只解压合法的顶层 FileToolbox/<项>:
+      - FileToolbox/FileToolbox.exe(正常文件项)→ 解压
+      - other/x.txt(非 FileToolbox 顶层 → 跳过,missing 125)
+      - FileToolbox/sub/(目录项 → mkdir,missing 131)
+      - FileToolbox(顶层无 /,len(parts)<2 且 rel 空 → 跳过,missing 125/128)
+    """
+
+    def test_skips_non_top_level_subdir_and_empty_rel(self, tmp_path):
+        zip_path = tmp_path / "mixed.zip"
+        dest_dir = tmp_path / "out"
+
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            # 正常文件项(顶层 FileToolbox/<file>)
+            zf.writestr("FileToolbox/FileToolbox.exe", b"FAKE EXE")
+            # 非 FileToolbox 顶层 → 应跳过(line 125)
+            zf.writestr("other/x.txt", b"SHOULD NOT EXTRACT")
+            # 目录项(FileToolbox/sub/)→ mkdir,不写文件(line 131)
+            zf.writestr("FileToolbox/sub/", b"")
+            # "FileToolbox/"(仅顶层名带尾斜杠):parts=["FileToolbox",""],rel 空 → 跳过(line 128)
+            zf.writestr("FileToolbox/", b"")
+
+        rmod._extract_portable_zip(Path(zip_path), dest_dir)
+
+        # 正常文件项已解压
+        assert (dest_dir / "FileToolbox.exe").read_bytes() == b"FAKE EXE"
+        # 目录项创建了子目录(mkdir)
+        assert (dest_dir / "sub").is_dir()
+        # 非 FileToolbox 顶层的项被跳过
+        assert not (dest_dir / "x.txt").exists()
+        # 仅尾斜杠的 FileToolbox/ 不往 dest_dir 写任何文件(rel 为空,target=dest_dir 本身)
+        # 即 dest_dir 顶层除 sub/ 外不应有多余文件
+        top_entries = sorted(p.name for p in dest_dir.iterdir())
+        assert "FileToolbox.exe" in top_entries
+        assert "sub" in top_entries

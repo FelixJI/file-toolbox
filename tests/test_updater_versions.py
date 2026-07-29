@@ -228,3 +228,71 @@ class TestProxyApplied:
         monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
         vmod.fetch_latest()
         assert captured_urls[0].startswith("https://api.github.com/")
+
+
+class TestNormalizeSegments:
+    """覆盖 _normalize_segments 的截断/后缀分支(missing 62-64)。"""
+
+    def test_truncates_on_non_numeric_segment(self):
+        """遇非数字段(如 "3a1")→ ValueError 截断,后续段不解析。"""
+        assert vmod._normalize_segments("1.2.3a1") == [1, 2]
+
+    def test_local_suffix_segment_dropped(self):
+        """+local 后缀整段丢弃(base.split('+')[0] 已切掉)。"""
+        assert vmod._normalize_segments("1.0.0+local") == [1, 0, 0]
+
+    def test_two_segments(self):
+        assert vmod._normalize_segments("1.2") == [1, 2]
+
+
+class TestBuildReleaseUrl:
+    """覆盖 _build_release_url 未知 platform raise(missing 96)。"""
+
+    def test_github_url(self):
+        url = vmod._build_release_url("github")
+        assert url == "https://api.github.com/repos/FelixJI/file-toolbox/releases/latest"
+
+    def test_unknown_platform_raises(self):
+        with pytest.raises(ValueError):
+            vmod._build_release_url("unknown")
+
+
+class TestParseRelease:
+    """覆盖 _parse_release 各 None 分支(missing 103-104, 106, 110)。"""
+
+    def test_invalid_json_returns_none(self):
+        """非 JSON 字节(UnicodeDecode/ValueError)→ None(missing 103-104)。"""
+        assert vmod._parse_release(b"not json", "github") is None
+
+    def test_non_dict_payload_returns_none(self):
+        """JSON 解析出 list(非 dict)→ None(missing 106)。"""
+        assert vmod._parse_release(_json.dumps([1, 2]).encode(), "github") is None
+
+    def test_missing_tag_returns_none(self):
+        """dict 无 tag_name → None(missing 110)。"""
+        assert vmod._parse_release(_json.dumps({"assets": []}).encode(), "github") is None
+
+    def test_tag_without_checksum_asset_returns_none(self):
+        """有 tag 但无 checksum asset(或 zip)→ None。"""
+        payload = _json.dumps({"tag_name": "v1.0.0", "assets": []}).encode()
+        assert vmod._parse_release(payload, "github") is None
+
+    def test_full_valid_payload_returns_release(self):
+        """完整有效 payload → RemoteRelease。"""
+        payload = _json.dumps(
+            {
+                "tag_name": "v1.0.0",
+                "assets": [
+                    {
+                        "name": "FileToolbox-1.0.0-win64.zip",
+                        "browser_download_url": "http://x/a.zip",
+                    },
+                    {"name": "checksums.txt", "browser_download_url": "http://x/checksums.txt"},
+                ],
+            }
+        ).encode()
+        rel = vmod._parse_release(payload, "github")
+        assert isinstance(rel, RemoteRelease)
+        assert rel.version == "1.0.0"
+        assert rel.zip_url == "http://x/a.zip"
+        assert rel.checksum_url == "http://x/checksums.txt"

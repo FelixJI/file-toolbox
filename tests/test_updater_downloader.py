@@ -163,6 +163,44 @@ class TestDownloadAndVerify:
         with pytest.raises(NetworkError):
             dmod.download_and_verify(_make_release())
 
+    def test_streaming_download_fails_deletes_zip_and_raises_network_error(
+        self, monkeypatch, tmp_path
+    ):
+        """checksum 拿得到但流式下载抛错 → 删 dest + 抛 NetworkError(missing 133-136)。
+
+        构造一个有效的 checksums(含 zip 的 sha),monkeypatch _download_streaming 抛异常,
+        断言:抛 NetworkError 且 dest 文件被删(missing_ok=True,删不掉也不二次抛)。
+        """
+        import hashlib
+
+        zip_bytes = b"never-downloaded"
+        expected_sha = hashlib.sha256(zip_bytes).hexdigest()
+        cs_text = f"{expected_sha}  FileToolbox-1.2.0-win64.zip\n"
+
+        # _fetch_checksum 经 _download_bytes 拿 checksums(成功)
+        monkeypatch.setattr(
+            dmod,
+            "_download_bytes",
+            lambda url: cs_text.encode() if url.endswith("checksums.txt") else b"",
+        )
+
+        # 流式下载 zip 失败(模拟网络中断)
+        def boom_streaming(url, dest, on_progress=None):
+            # 先写半截文件,模拟下载中途断开(dest 已存在,验证 unlink 清理)
+            dest.write_bytes(b"partial")
+            raise urlerror.URLError("connection reset")
+
+        monkeypatch.setattr(dmod, "_download_streaming", boom_streaming)
+        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
+
+        rel = _make_release()
+        with pytest.raises(NetworkError):
+            dmod.download_and_verify(rel)
+
+        # dest(zip 文件名从 release.zip_url 取)应已被删除
+        dest = tmp_path / rel.zip_url.rsplit("/", 1)[-1]
+        assert not dest.exists()
+
 
 class TestProxyApplied:
     """下载请求经代理:GitHub URL 前缀拼接。"""
