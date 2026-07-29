@@ -444,3 +444,281 @@ def test_dialog_exposes_logger_for_mixin_contract(dlg):
     dlg._cleanup_batch_dialog()
 
     assert dlg.worker is None
+
+
+# ---------- 文件选择包装器(覆盖 244-245 / 249-250) ----------
+# _on_select_files / _on_select_folder 委托给 mixin 的 _select_files / _select_folder,
+# 然后调 _refresh_preview(防抖定时器)。这两组测试把 _select_* 替换为 spy,验证委托
+# 与预览触发(预览经防抖定时器,_refresh_preview 调用会被记录)。
+
+
+def test_on_select_files_calls_select_files_and_refresh(dlg, monkeypatch):
+    """_on_select_files 委托给 _select_files(list_widget=None)并触发 _refresh_preview。"""
+    calls = {"select": 0, "refresh": 0}
+
+    def fake_select_files(list_widget=None, auto_preview=True):
+        calls["select"] += 1
+        assert list_widget is None
+
+    monkeypatch.setattr(dlg, "_select_files", fake_select_files)
+    monkeypatch.setattr(
+        dlg, "_refresh_preview", lambda: calls.__setitem__("refresh", calls["refresh"] + 1)
+    )
+
+    dlg._on_select_files()
+
+    assert calls["select"] == 1
+    assert calls["refresh"] == 1
+
+
+def test_on_select_folder_calls_select_folder_and_refresh(dlg, monkeypatch):
+    """_on_select_folder 委托给 _select_folder(list_widget=None)并触发 _refresh_preview。"""
+    calls = {"select": 0, "refresh": 0}
+
+    def fake_select_folder(list_widget=None, ask_recursive=True, auto_preview=True):
+        calls["select"] += 1
+        assert list_widget is None
+
+    monkeypatch.setattr(dlg, "_select_folder", fake_select_folder)
+    monkeypatch.setattr(
+        dlg, "_refresh_preview", lambda: calls.__setitem__("refresh", calls["refresh"] + 1)
+    )
+
+    dlg._on_select_folder()
+
+    assert calls["select"] == 1
+    assert calls["refresh"] == 1
+
+
+# ---------- 输出目录浏览(覆盖 258-260) ----------
+
+
+def test_browse_output_dir_sets_edit_when_dir_chosen(dlg, monkeypatch):
+    """选到目录 → edit_output_dir 被设为该目录。"""
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QFileDialog.getExistingDirectory",
+        lambda *a, **k: "/some/out/dir",
+    )
+    dlg.ui.edit_output_dir.setText("")
+
+    dlg._browse_output_dir()
+
+    assert dlg.ui.edit_output_dir.text() == "/some/out/dir"
+
+
+def test_browse_output_dir_unchanged_when_cancelled(dlg, monkeypatch):
+    """用户取消(返回 "")→ edit_output_dir 不被改写。"""
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QFileDialog.getExistingDirectory",
+        lambda *a, **k: "",
+    )
+    dlg.ui.edit_output_dir.setText("/keep/this")
+
+    dlg._browse_output_dir()
+
+    assert dlg.ui.edit_output_dir.text() == "/keep/this"
+
+
+# ---------- 生成:worker 正在运行时短路(覆盖 268) ----------
+
+
+class _RunningWorkerStub:
+    """isRunning() 恒为 True 的 worker 桩,用于触发 _generate 的短路分支。"""
+
+    started = False
+
+    def isRunning(self):
+        return True
+
+
+def test_generate_short_circuits_when_worker_running(dlg, monkeypatch, tmp_path):
+    """worker 正在运行 → _generate 直接 return,不创建/启动新 worker。"""
+    from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"x")
+    dlg.selected_files = [f]
+
+    # 预置一个"运行中"的旧 worker
+    pre_existing = _RunningWorkerStub()
+    dlg.worker = pre_existing
+
+    started = []
+    monkeypatch.setattr(PdfGenerateWorker, "start", lambda self: started.append(True))
+    # _build_config 也走 controller;短路分支不应走到这里
+    built = []
+    monkeypatch.setattr(dlg, "_build_config", lambda: built.append(True) or {})
+
+    dlg._generate()
+
+    assert started == [], "worker 运行中时不应启动新 worker"
+    assert built == [], "短路分支不应构建 config"
+    assert dlg.worker is pre_existing, "不应替换已有 worker"
+
+
+# ---------- 生成完成:写历史失败时 UI 仍恢复(覆盖 300-301) ----------
+
+
+def test_on_generate_ok_restores_ui_when_history_write_fails(dlg, monkeypatch):
+    """_build_config 抛异常 → 写历史 except 分支(记 warning),UI 仍恢复 enabled、worker 清空。"""
+    from pathlib import Path
+
+    # 完成路径有 fail=0 时不弹 QMessageBox,这里强制全成功避免弹窗
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.warning",
+        lambda *a, **k: None,
+    )
+    # _render_results 在 _on_generate_ok 内首次调用一次(用真实结果);随后 try 内再次
+    # 调 _build_config 会抛 → 命中 except(300-301)。这里只让第二次(try 内)抛:
+    # 简化:直接 stub _build_config 总抛(首次 _render_results 不依赖它)。
+    monkeypatch.setattr(
+        dlg, "_build_config", lambda: (_ for _ in ()).throw(RuntimeError("cfg boom"))
+    )
+
+    results = [
+        {"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""},
+    ]
+    dlg.selected_files = [Path("a.docx")]
+    dlg._do_refresh_preview()
+    dlg.ui.btn_generate.setEnabled(False)
+    dlg.ui.btn_cancel.setVisible(True)
+    dlg.worker = _RunningWorkerStub()  # 任意非 None,验证会被清空
+
+    dlg._on_generate_ok(results)
+
+    # except 被命中但 UI 仍恢复
+    assert dlg.ui.btn_generate.isEnabled() is True
+    assert dlg.worker is None
+    # 表已被结果态填充(_render_results 先于 try 执行)
+    assert dlg.ui.table_files.item(0, 3).text() == "成功"
+
+
+# ---------- 取消(覆盖 314-316) ----------
+
+
+class _CancellableWorkerStub:
+    """带 cancel() 的 worker 桩,用于 _on_cancel。"""
+
+    def __init__(self):
+        self.cancel_called = False
+
+    def cancel(self):
+        self.cancel_called = True
+
+
+def test_on_cancel_calls_worker_cancel_and_sets_label(dlg):
+    """worker 非 None 且有 cancel → 调 cancel(),label 设为"正在取消..."。"""
+    worker = _CancellableWorkerStub()
+    dlg.worker = worker
+
+    dlg._on_cancel()
+
+    assert worker.cancel_called
+    assert dlg.ui.label_progress.text() == "正在取消..."
+
+
+def test_on_cancel_noop_when_no_worker(dlg):
+    """无 worker → 不抛,label 仍更新。"""
+    dlg.worker = None
+
+    dlg._on_cancel()  # 不应抛
+
+    assert dlg.ui.label_progress.text() == "正在取消..."
+
+
+# ---------- 结果渲染:results 行数超过表行数(覆盖 384 break) ----------
+
+
+def test_render_results_breaks_when_results_exceed_table_rows(dlg, tmp_path):
+    """表只有 1 行,results 有 2 条 → 第 2 条被 break 跳过,第 1 行仍正确更新。"""
+    from pathlib import Path
+
+    # 预置 1 行预览态
+    dlg.selected_files = [Path("a.docx")]
+    dlg._do_refresh_preview()
+    assert dlg.ui.table_files.rowCount() == 1
+
+    results = [
+        {"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""},
+        {"source": Path("b.docx"), "output": Path("b.pdf"), "success": True, "error": ""},
+    ]
+
+    dlg._render_results(results)  # 内部 row=1 时 break,不抛 IndexError
+
+    tbl = dlg.ui.table_files
+    assert tbl.item(0, 3).text() == "成功"  # 第 1 行已更新
+    assert tbl.rowCount() == 1  # 表行数未被扩
+
+
+# ---------- 引擎检测:非 NO_COM 路径(覆盖 180-189) ----------
+
+
+def test_detect_engines_async_path_records_callback(dlg, monkeypatch):
+    """非 NO_COM 形态:置"正在检测...",调 detect_engines_async(callback=...)。
+
+    conftest 的 autouse fixture 设了 FILE_TOOLBOX_NO_COM_DETECT=1,这里 delenv 让
+    _init_engine_info 走 180-189 的异步分支;并 spy detect_engines_async 捕获 callback。
+    """
+    monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
+
+    captured = {}
+
+    def fake_detect_engines_async(callback=None, **kwargs):
+        captured["callback"] = callback
+
+    monkeypatch.setattr(dlg._svc, "detect_engines_async", fake_detect_engines_async)
+
+    dlg._init_engine_info()
+
+    assert dlg.ui.label_engine_info.text() == "正在检测可用引擎..."
+    assert callable(captured.get("callback"))
+    # 回调内部走 QTimer.singleShot(0, ...) 设文本;调用后需 flush 事件循环才生效
+    captured["callback"]("检测到: Office")
+    QApplication.processEvents()
+    assert dlg.ui.label_engine_info.text() == "检测到: Office"
+
+
+def test_detect_engines_async_exception_falls_back_to_sync(dlg, monkeypatch):
+    """detect_engines_async 抛异常 → except 分支回退到 get_engine_info(use_cache=True)。"""
+    monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
+
+    def boom_async(callback=None, **kwargs):
+        raise RuntimeError("no pywin32")
+
+    monkeypatch.setattr(dlg._svc, "detect_engines_async", boom_async)
+    monkeypatch.setattr(dlg._svc, "get_engine_info", lambda use_cache=False: "fallback-info")
+
+    dlg._init_engine_info()
+
+    assert dlg.ui.label_engine_info.text() == "fallback-info"
+
+
+# ---------- closeEvent(覆盖 411-414) ----------
+
+
+def test_close_event_cleans_up_and_closes_service(dlg, monkeypatch):
+    """closeEvent 调 _cleanup_batch_dialog + svc.close() + super().closeEvent,不抛。"""
+    from PySide6.QtGui import QCloseEvent
+
+    closed = []
+    monkeypatch.setattr(dlg._svc, "close", lambda: closed.append(True))
+
+    event = QCloseEvent()
+    dlg.closeEvent(event)  # 不应抛
+
+    assert closed == [True], "svc.close() 应被调用"
+    assert dlg.worker is None  # _cleanup_batch_dialog → _stop_worker 清空
+
+
+# ---------- _set_ui_enabled 覆盖(顺带补强,验证取消按钮可见性翻转) ----------
+
+
+def test_set_ui_enabled_toggles_cancel_button_visibility(dlg):
+    """_set_ui_enabled(False) 显示取消按钮,True 隐藏。"""
+    dlg._set_ui_enabled(False)
+    assert dlg.ui.btn_generate.isEnabled() is False
+    assert dlg.ui.btn_cancel.isHidden() is False
+
+    dlg._set_ui_enabled(True)
+    assert dlg.ui.btn_generate.isEnabled() is True
+    assert dlg.ui.btn_cancel.isHidden() is True

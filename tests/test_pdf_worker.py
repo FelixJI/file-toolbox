@@ -228,3 +228,78 @@ def test_worker_start_delivers_failed_across_threads(app):
     assert "cross-thread boom" in captured.get("fail", "")
     assert ok == []
     assert svc.closed is True  # finally 仍 close
+
+
+# ---------- 兑现检测异常不致命(覆盖 83-85) ----------
+
+
+def test_worker_run_survives_engine_detection_exception(app, monkeypatch):
+    """EngineManager._detect_available_engines 抛异常 → worker 记 warning 后继续,
+    batch_generate 仍被调用,finished_ok 正常投递(覆盖 83-85 的 except 分支)。
+    """
+    from pathlib import Path
+
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    # 覆盖 autouse 的 _stub_engine_validation:这里强制抛异常
+    def _raise(self, force_refresh=False):
+        raise RuntimeError("dispatch failed")
+
+    monkeypatch.setattr(EngineManager, "_detect_available_engines", _raise)
+
+    results = [_make_result("a.docx")]
+    svc = _FakeService(results)
+    worker = PdfGenerateWorker(svc, [Path("a.docx")], {})
+
+    captured = {}
+    worker.finished_ok.connect(lambda r: captured.setdefault("ok", r))
+    worker.failed.connect(lambda m: captured.setdefault("fail", m))
+
+    worker.run()  # 不应抛
+
+    # 兑现异常非致命:batch_generate 仍调用,finished_ok 仍投递
+    assert captured.get("ok") == results
+    assert "fail" not in captured
+    assert len(svc.batch_calls) == 1, "兑现失败后仍应调 batch_generate"
+
+
+# ---------- pythoncom 不可用(com_inited=False,覆盖 73-74) ----------
+
+
+def test_worker_run_com_inited_false_when_pythoncom_import_fails(app, monkeypatch):
+    """import pythoncom 抛 ImportError → com_inited=False,worker 仍正常完成
+    (覆盖 73-74 的 except 分支)。
+
+    通过在 sys.modules 注入会抛的占位,让 `import pythoncom` 触发 ImportError。
+    """
+    import builtins
+    from pathlib import Path
+
+    real_import = builtins.__import__
+
+    def _import(name, *args, **kwargs):
+        if name == "pythoncom":
+            raise ImportError("simulated: no pywin32")
+        return real_import(name, *args, **kwargs)
+
+    # 防止已缓存的 pythoncom 模块被直接取用(import 会先查 sys.modules)
+    monkeypatch.setattr(builtins, "__import__", _import)
+    # 清掉可能存在的缓存,确保走 __import__ 抛错路径
+    import sys
+
+    monkeypatch.delitem(sys.modules, "pythoncom", raising=False)
+
+    results = [_make_result("a.docx")]
+    svc = _FakeService(results)
+    worker = PdfGenerateWorker(svc, [Path("a.docx")], {})
+
+    captured = {}
+    worker.finished_ok.connect(lambda r: captured.setdefault("ok", r))
+    worker.failed.connect(lambda m: captured.setdefault("fail", m))
+
+    worker.run()  # 不应抛
+
+    # pythoncom 不可用 → com_inited=False,跳过 CoUninitialize,但生成流程仍完成
+    assert captured.get("ok") == results
+    assert "fail" not in captured
+    assert svc.closed is True
