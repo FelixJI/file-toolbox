@@ -1,6 +1,8 @@
 """InvoiceController 测试:纯 Python,不 import PySide6。
 
-行为对齐 InvoiceTab 原 _dedupe_strategy / _format / _parse 状态串 / _export 历史 dict。
+行为对齐 InvoiceTab 原 _dedupe_strategy / _format / _parse 状态串。
+build_history_record 已下沉 InvoiceService.export(见 test_invoice_service_history.py),
+本控制器不再含该方法。
 """
 
 from file_toolbox.core.invoice.dedupe import DEDUPE, KEEP_ALL, MARK
@@ -33,34 +35,3 @@ def test_format_status():
     # 关键数字逐一可见
     for n in ("12", "3", "2", "1"):
         assert n in status
-
-
-def test_build_history_record():
-    """历史 dict 键齐全,outputs 转 str 列表(Path 也应被 str 化)。"""
-    from pathlib import Path
-
-    c = InvoiceController()
-    record = c.build_history_record(
-        file_count=5,
-        invoice_count=12,
-        dedupe_strategy=MARK,
-        fmt="excel",
-        outputs=[Path("/tmp/发票结果.xlsx"), Path("/tmp/发票结果.json")],
-    )
-    assert set(record.keys()) == {
-        "file_count",
-        "invoice_count",
-        "dedupe_strategy",
-        "fmt",
-        "outputs",
-    }
-    assert record["file_count"] == 5
-    assert record["invoice_count"] == 12
-    assert record["dedupe_strategy"] == MARK
-    assert record["fmt"] == "excel"
-    # outputs 全为 str(原行为:[str(w) for w in written])
-    assert record["outputs"] == [
-        str(Path("/tmp/发票结果.xlsx")),
-        str(Path("/tmp/发票结果.json")),
-    ]
-    assert all(isinstance(w, str) for w in record["outputs"])

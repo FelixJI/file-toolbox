@@ -45,8 +45,8 @@ def test_init_status(dlg):
 
 
 def test_op_labels_complete(dlg):
-    """所有操作类型有中文标签。"""
-    assert len(dlg._OP_LABELS) == 7
+    """所有操作类型有中文标签(标签已迁至 RenameController.OP_LABELS)。"""
+    assert len(dlg._controller.OP_LABELS) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -414,8 +414,8 @@ def test_op_label_unknown(dlg):
 
 
 def test_op_label_non_string_type(dlg):
-    """type 非 str → 返回空串(行 243-244)。"""
-    assert dlg._op_label({"type": 123, "params": {}}) == ""
+    """type 非 str → 经 RenameController.op_label 的 str() 强转后回退为字符串形式。"""
+    assert dlg._op_label({"type": 123, "params": {}}) == "123"
 
 
 def test_update_status(dlg):

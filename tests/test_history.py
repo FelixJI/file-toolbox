@@ -132,3 +132,34 @@ def test_last_id_returns_zero_when_file_only_blank_lines(tmp_path):
     f.write_text("   \n\n  \n", encoding="utf-8")  # 仅空白行
     rid = store.add_record("rename", {"v": 1})
     assert rid == 1
+
+
+def test_add_record_thread_safe_concurrent(tmp_path):
+    """多线程并发 add_record 不丢记录、id 单调无重复(子项 3.2 锁验证)。
+
+    PDF 历史在工作线程(PdfGenerateWorker)内写入;锁保证并发 append 不交错、
+    id 不竞态。N 个线程各写 M 条 → 文件应有 N*M 条,且 id 唯一连续。
+    """
+    import threading
+
+    store = JsonHistoryStore(tmp_path)
+    n_threads = 8
+    per_thread = 50
+    barrier = threading.Barrier(n_threads)
+
+    def worker(wid: int) -> None:
+        barrier.wait()  # 尽量同时开始,最大化竞态
+        for i in range(per_thread):
+            store.add_record("pdf", {"worker": wid, "i": i})
+
+    threads = [threading.Thread(target=worker, args=(w,)) for w in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    records = store.get_records("pdf", limit=0)
+    assert len(records) == n_threads * per_thread
+    ids = [r["id"] for r in records]
+    # id 从 1 开始连续无重复(锁保证 _last_id+1 的读-改-写原子)
+    assert ids == list(range(1, n_threads * per_thread + 1))

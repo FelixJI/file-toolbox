@@ -146,7 +146,7 @@ def test_mkdir_create_folders_failure_errors(tmp_path, monkeypatch):
     """create_folders 返回 success=False → 红字打印 error_message + Exit(1)(行 51-53)。"""
     from file_toolbox.core.batch_mkdir import CreateResult, FolderCreatorService
 
-    def fake_create(self, items, strategy, skip_callback=None):
+    def fake_create(self, items, strategy, skip_callback=None, root=None, structure_count=None):
         return CreateResult(
             created_count=0,
             skipped_count=0,

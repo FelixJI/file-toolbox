@@ -1,7 +1,9 @@
 """PDFController 测试:纯 Python(不 import PySide6)。
 
-校验 build_config/summarize_results/format_progress/build_history_record 与
+校验 build_config/summarize_results/format_progress 与
 pdf_tab._build_config / _on_generate_ok 内联逻辑完全等价。
+build_history_record 已下沉 PDFGeneratorService.batch_generate(见
+test_pdf_service_history.py),本控制器不再含该方法。
 """
 
 from pathlib import Path
@@ -150,36 +152,3 @@ def test_format_progress():
     """与 pdf_tab._on_progress 的 label 格式一致。"""
     assert _controller.format_progress(2, 5, "处理中") == "[2/5] 处理中"
     assert _controller.format_progress(0, 0, "") == "[0/0] "
-
-
-# ---------- build_history_record ----------
-
-
-def test_build_history_record_structure():
-    """files 转 str 列表,config 仅保留 pdf_type/output_mode/engine/dpi 子集。"""
-    files = [Path("a.docx"), Path("b/b.xlsx")]
-    config = {
-        "pdf_type": PDF_TYPE_IMAGE,
-        "output_mode": OUTPUT_MERGE,
-        "engine": "wps",
-        "dpi": 600,
-        "paper_size": "A4",  # 应被剔除
-        "orientation": "landscape",  # 应被剔除
-        "scale_mode": "fit_margin",  # 应被剔除
-        "same_as_source": False,  # 应被剔除
-        "print_mode": PRINT_MODE_DUPLEX,  # 应被剔除
-        "merge_filename": "x.pdf",  # 应被剔除
-    }
-    record = _controller.build_history_record(files, ok=2, fail=1, config=config)
-    assert record["files"] == [str(Path("a.docx")), str(Path("b/b.xlsx"))]
-    assert record["success"] == 2
-    assert record["failed"] == 1
-    assert record["config"] == {
-        "pdf_type": PDF_TYPE_IMAGE,
-        "output_mode": OUTPUT_MERGE,
-        "engine": "wps",
-        "dpi": 600,
-    }
-    # 不应包含被剔除的键
-    for excluded in ("paper_size", "orientation", "scale_mode", "print_mode", "merge_filename"):
-        assert excluded not in record["config"]
