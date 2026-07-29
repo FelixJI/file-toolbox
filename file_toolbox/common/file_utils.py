@@ -64,3 +64,21 @@ def get_file_info(file_path: Path) -> dict[str, Any]:
     except Exception as e:
         result["error"] = str(e)
     return result
+
+
+def expand_files(files: list[Path], directory: Path | None, recursive: bool) -> list[Path]:
+    """扩展文件列表:合并显式 files 与 directory(可选递归),去重并保持顺序。"""
+    result: list[Path] = list(files)
+    if directory:
+        if recursive:
+            result.extend(p for p in directory.rglob("*") if p.is_file())
+        else:
+            result.extend(p for p in directory.iterdir() if p.is_file())
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for p in result:
+        rp = p.resolve()
+        if rp not in seen:
+            seen.add(rp)
+            unique.append(p)
+    return unique

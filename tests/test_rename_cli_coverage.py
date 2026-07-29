@@ -1,7 +1,7 @@
 """rename_cmd 未覆盖分支补充测试。
 
 覆盖行:
-- 15-18: _expand 目录(recursive / 非递归)
+- file_utils.expand_files 目录(recursive / 非递归)
 - 44-46: 无文件错误
 - 50-52: validate_operations 失败(无效操作类型)
 - 69-73: --yes 执行 + 失败输出(execute_rename 返回 errors)
@@ -10,13 +10,13 @@
 from typer.testing import CliRunner
 
 from file_toolbox.cli.main import app
-from file_toolbox.cli.rename_cmd import _expand
+from file_toolbox.common.file_utils import expand_files
 
 runner = CliRunner()
 
 
 # ---------------------------------------------------------------------------
-# _expand:目录(行 15-18)
+# expand_files:目录
 # ---------------------------------------------------------------------------
 
 
@@ -26,7 +26,7 @@ def test_rename_expand_directory_non_recursive(tmp_path):
     sub = tmp_path / "sub"
     sub.mkdir()
     (sub / "b.txt").write_text("y")
-    result = _expand([], tmp_path, recursive=False)
+    result = expand_files([], tmp_path, recursive=False)
     names = [p.name for p in result]
     assert "a.txt" in names
     assert "b.txt" not in names
@@ -38,7 +38,7 @@ def test_rename_expand_directory_recursive(tmp_path):
     sub = tmp_path / "sub"
     sub.mkdir()
     (sub / "b.txt").write_text("y")
-    result = _expand([], tmp_path, recursive=True)
+    result = expand_files([], tmp_path, recursive=True)
     names = [p.name for p in result]
     assert "a.txt" in names
     assert "b.txt" in names

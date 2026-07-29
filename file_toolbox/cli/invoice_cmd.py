@@ -4,28 +4,11 @@ from pathlib import Path
 
 import typer
 
+from file_toolbox.common.file_utils import expand_files
 from file_toolbox.core.invoice.dedupe import KEEP_ALL
 from file_toolbox.core.invoice.service import InvoiceService
 
 _DEFAULT_OUTPUT = "发票结果.xlsx"
-
-
-def _expand(files: list[Path], directory: Path | None, recursive: bool) -> list[Path]:
-    """扩展文件列表(同 rename),去重保持顺序。"""
-    result: list[Path] = list(files)
-    if directory:
-        if recursive:
-            result.extend(p for p in directory.rglob("*") if p.is_file())
-        else:
-            result.extend(p for p in directory.iterdir() if p.is_file())
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for p in result:
-        rp = p.resolve()
-        if rp not in seen:
-            seen.add(rp)
-            unique.append(p)
-    return unique
 
 
 def invoice(
@@ -38,7 +21,7 @@ def invoice(
     yes: bool = typer.Option(False, "--yes", help="跳过预览直接导出(默认仅预览)"),
 ) -> None:
     """识别电子发票(PDF/OFD/XML),导出 Excel 或 JSON。"""
-    all_files = _expand(files or [], directory, recursive)
+    all_files = expand_files(files or [], directory, recursive)
     if not all_files:
         typer.secho("错误:未选择任何文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)

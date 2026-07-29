@@ -10,7 +10,12 @@
 
 from datetime import UTC, datetime
 
-from file_toolbox.common.file_utils import format_datetime, format_file_size, get_file_info
+from file_toolbox.common.file_utils import (
+    expand_files,
+    format_datetime,
+    format_file_size,
+    get_file_info,
+)
 
 # ---------------------------------------------------------------------------
 # format_file_size:PB(行 18)
@@ -120,3 +125,59 @@ def test_get_file_info_suffix(tmp_path):
     f.write_text("x")
     info = get_file_info(f)
     assert info["suffix"] == ".pdf"  # lower
+
+
+# ---------------------------------------------------------------------------
+# expand_files:显式 files + directory / 递归 / 去重保序
+# ---------------------------------------------------------------------------
+
+
+def test_expand_files_merges_files_and_directory_non_recursive(tmp_path):
+    """显式 files + directory(非递归):合并两者,只取目录直接子文件。"""
+    explicit = tmp_path / "explicit.txt"
+    explicit.write_text("x")
+    d = tmp_path / "d"
+    d.mkdir()
+    (d / "in_dir.txt").write_text("y")
+    sub = d / "sub"
+    sub.mkdir()
+    (sub / "nested.txt").write_text("z")  # 非递归不进子目录
+
+    result = expand_files([explicit], d, recursive=False)
+    names = [p.name for p in result]
+    assert names[0] == "explicit.txt"  # files 在前
+    assert "in_dir.txt" in names
+    assert "nested.txt" not in names  # 非递归
+
+
+def test_expand_files_recursive_descends(tmp_path):
+    """recursive=True:递归纳入所有子文件。"""
+    d = tmp_path / "d"
+    d.mkdir()
+    (d / "a.txt").write_text("a")
+    sub = d / "sub"
+    sub.mkdir()
+    (sub / "b.txt").write_text("b")
+
+    result = expand_files([], d, recursive=True)
+    names = [p.name for p in result]
+    assert "a.txt" in names
+    assert "b.txt" in names
+
+
+def test_expand_files_dedup_keeps_first_occurrence_order(tmp_path):
+    """重复(resolve 后相同)→ 仅保留首次出现,保持原顺序。"""
+    f1 = tmp_path / "a.txt"
+    f1.write_text("x")
+    f2 = tmp_path / "b.txt"
+    f2.write_text("y")
+    # f1 重复出现:一次绝对、一次相对(均 resolve 到同一路径)
+    result = expand_files([f1, f2, f1.resolve()], None, False)
+    assert result == [f1, f2]  # 第三项被去重,顺序不变
+
+
+def test_expand_files_no_directory_returns_explicit_only(tmp_path):
+    """directory=None → 仅返回 files(去重后)。"""
+    f1 = tmp_path / "a.txt"
+    result = expand_files([f1], None, False)
+    assert result == [f1]

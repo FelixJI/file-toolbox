@@ -1,7 +1,7 @@
 """invoice_cmd 未覆盖分支补充测试。
 
 覆盖行:
-- 17-20: _expand 目录(recursive / 非递归)
+- file_utils.expand_files 目录(recursive / 非递归)
 - 48-53: 无效 --dedupe
 - 57-62: 无效 --format
 - 76-78: 去重移除预览输出
@@ -15,8 +15,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from file_toolbox.cli.invoice_cmd import _expand
 from file_toolbox.cli.main import app
+from file_toolbox.common.file_utils import expand_files
 
 runner = CliRunner()
 
@@ -41,31 +41,31 @@ def _xml(path: Path, num: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# _expand:目录递归/非递归(行 17-20)
+# expand_files:目录递归/非递归
 # ---------------------------------------------------------------------------
 
 
 def test_expand_directory_non_recursive(tmp_path):
-    """--dir 非递归:加入目录直接子文件(行 19-20)。"""
+    """--dir 非递归:加入目录直接子文件。"""
     f1 = tmp_path / "a.xml"
     f1.write_text("x")
     sub = tmp_path / "sub"
     sub.mkdir()
     (sub / "b.xml").write_text("y")
-    result = _expand([], tmp_path, recursive=False)
+    result = expand_files([], tmp_path, recursive=False)
     names = [p.name for p in result]
     assert "a.xml" in names
     assert "b.xml" not in names  # 非递归不进子目录
 
 
 def test_expand_directory_recursive(tmp_path):
-    """--dir --recursive:递归加入所有文件(行 17-18)。"""
+    """--dir --recursive:递归加入所有文件。"""
     f1 = tmp_path / "a.xml"
     f1.write_text("x")
     sub = tmp_path / "sub"
     sub.mkdir()
     (sub / "b.xml").write_text("y")
-    result = _expand([], tmp_path, recursive=True)
+    result = expand_files([], tmp_path, recursive=True)
     names = [p.name for p in result]
     assert "a.xml" in names
     assert "b.xml" in names
@@ -75,14 +75,14 @@ def test_expand_dedup_keeps_order(tmp_path):
     """重复文件去重,保持顺序。"""
     f1 = tmp_path / "a.xml"
     f1.write_text("x")
-    result = _expand([f1, f1], None, False)
+    result = expand_files([f1, f1], None, False)
     assert len(result) == 1
 
 
 def test_expand_no_directory_returns_files(tmp_path):
     """无 directory → 只返回 files。"""
     f1 = tmp_path / "a.xml"
-    result = _expand([f1], None, False)
+    result = expand_files([f1], None, False)
     assert result == [f1]
 
 

@@ -5,26 +5,8 @@ from pathlib import Path
 import typer
 
 from file_toolbox.cli.op_parser import parse_ops
+from file_toolbox.common.file_utils import expand_files
 from file_toolbox.core.batch_rename import FileRenameService
-
-
-def _expand(files: list[Path], directory: Path | None, recursive: bool) -> list[Path]:
-    result: list[Path] = []
-    result.extend(files)
-    if directory:
-        if recursive:
-            result.extend(p for p in directory.rglob("*") if p.is_file())
-        else:
-            result.extend(p for p in directory.iterdir() if p.is_file())
-    # 去重,保持顺序
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for p in result:
-        rp = p.resolve()
-        if rp not in seen:
-            seen.add(rp)
-            unique.append(p)
-    return unique
 
 
 def rename(
@@ -40,7 +22,7 @@ def rename(
         typer.secho("错误:至少需要一个 --op 操作", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    all_files = _expand(files or [], directory, recursive)
+    all_files = expand_files(files or [], directory, recursive)
     if not all_files:
         typer.secho("错误:未选择任何文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
