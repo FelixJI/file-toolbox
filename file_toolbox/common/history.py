@@ -1,6 +1,7 @@
 """JSON Lines 历史存储，支持撤销标记。"""
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,11 @@ class JsonHistoryStore:
 
             history_dir = get_history_dir()
         self._dir = Path(history_dir)
+        # 写互斥锁:PDF 历史在 PdfGenerateWorker 工作线程内写入(batch_generate 末尾
+        # add_record),CLI 单线程亦调用。锁保护文件 append/全量重写,避免并发写
+        # 交错导致 JSONL 行损坏或 id 竞态。读方法(get_records/get_record)为
+        # append-only 容错读取,不加锁。
+        self._lock = threading.Lock()
 
     def _file(self, tool: str) -> Path:
         return self._dir / f"{tool}.jsonl"
@@ -35,11 +41,12 @@ class JsonHistoryStore:
         return records
 
     def _write_all(self, tool: str, records: list[dict[str, Any]]) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        f = self._file(tool)
-        with open(f, "w", encoding="utf-8") as fh:
-            for rec in records:
-                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        with self._lock:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            f = self._file(tool)
+            with open(f, "w", encoding="utf-8") as fh:
+                for rec in records:
+                    fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     def _last_id(self, tool: str) -> int:
         """仅读取最后一行得到当前最大 id(O(1) append 路径使用)。
@@ -63,18 +70,19 @@ class JsonHistoryStore:
 
     def add_record(self, tool: str, data: dict[str, Any]) -> int:
         """追加一条记录(O(1) append,不全量重写),返回自增 id。"""
-        self._dir.mkdir(parents=True, exist_ok=True)
-        rid = self._last_id(tool) + 1
-        rec = {
-            "id": rid,
-            "timestamp": datetime.now().isoformat(),
-            "data": data,
-            "undone": False,
-        }
-        f = self._file(tool)
-        with open(f, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        return rid
+        with self._lock:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            rid = self._last_id(tool) + 1
+            rec = {
+                "id": rid,
+                "timestamp": datetime.now().isoformat(),
+                "data": data,
+                "undone": False,
+            }
+            f = self._file(tool)
+            with open(f, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            return rid
 
     def get_records(self, tool: str, limit: int = 100) -> list[dict[str, Any]]:
         """获取最近 limit 条记录（limit<=0 表示全部）。"""
