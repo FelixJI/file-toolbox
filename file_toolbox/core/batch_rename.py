@@ -351,9 +351,10 @@ class FileRenameService(BaseOperationService):
             except Exception as e:
                 errors.append(f"{old_path.name}: {e!s}")
 
-        # 记录历史(执行后):记录实际尝试执行的全部映射项(传入的 rename_map),
-        # 形状 {"rename_map": {str: str}} 与原 GUI 内联写入一致。history_dialog
-        # 仅读 len(rename_map),数量即尝试重命名的项数(最诚实的审计记录)。
+        # 记录历史(执行后):记录传入的 rename_map(调用方已过滤为就绪项——
+        # CLI rename_cmd 与 GUI rename_tab._execute 在调用前均剔除冲突/未就绪项,
+        # 故此处仅含实际尝试执行的映射)。形状 {"rename_map": {str: str}} 与原 GUI
+        # 内联写入一致。history_dialog 仅读 len(rename_map),数量即本次实际执行项数。
         if self._history_store is not None:
             self._history_store.add_record(
                 "rename", {"rename_map": {str(k): str(v) for k, v in rename_map.items()}}

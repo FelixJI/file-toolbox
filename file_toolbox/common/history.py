@@ -96,6 +96,13 @@ class JsonHistoryStore:
                 return rec
         return None
 
+    # ---- mark_undone / clear:非原子读-改-写(RMW)-----------------------------
+    # _read_all 不持锁、_write_all 持锁,故两者之间存在 TOCTOU 窗口:理论上
+    # 期间若有 worker 线程 add_record 会丢失该记录。此处可接受——mark_undone/clear
+    # 仅由 GUI 主线程在用户点击"撤销/清空"时调用,撤销动作执行期间没有并发的
+    # worker 写入(批处理已完成或已取消);add_record 的并发只发生在处理进行中。
+    # 依设计,读路径保持无锁(append-only 容错读取),此处不为撤销路径加锁。
+
     def mark_undone(self, tool: str, record_id: int) -> None:
         """标记某条记录为已撤销。"""
         records = self._read_all(tool)

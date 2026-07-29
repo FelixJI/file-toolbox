@@ -452,11 +452,8 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
         # 记录历史(执行后):无论是否有 errors 都记录,与原 GUI replace_tab 内联
         # 写入一致。形状 {"files": [str], "operations": operations}。
-        # 用 getattr 容错:部分单元测试以 ContentReplaceService.__new__ 绕过 __init__
-        # 来注入 mock handler(避免真实 COM),此时 _history_store 未设置。
-        history_store = getattr(self, "_history_store", None)
-        if history_store is not None:
-            history_store.add_record(
+        if self._history_store is not None:
+            self._history_store.add_record(
                 "replace",
                 {"files": [str(f) for f in files], "operations": operations},
             )

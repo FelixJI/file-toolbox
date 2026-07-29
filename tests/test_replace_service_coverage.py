@@ -27,6 +27,7 @@ SIMPLE = {"type": "simple_replace", "params": {"find": "old", "replace": "new"}}
 def _svc_with_mocks() -> ContentReplaceService:
     """构造 svc,替换所有 handler/converter/pids 为 mock(避免真实 COM/tasklist)。"""
     svc = ContentReplaceService.__new__(ContentReplaceService)
+    svc._history_store = None  # __init__ 被绕过,显式置 None 让 execute_replace 的历史记录块正常跳过
     svc.converter = MagicMock()
     svc._lock = MagicMock()
     svc._initial_word_pids = []
