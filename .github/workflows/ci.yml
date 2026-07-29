@@ -39,5 +39,5 @@ jobs:
       - name: pytest + core 覆盖率(≥88%)
         run: uv run pytest --cov=file_toolbox.core --cov-fail-under=88 -q
 
-      - name: pytest + 总盘覆盖率(≥75%)
-        run: uv run pytest --cov=file_toolbox --cov-fail-under=75 -q
+      - name: pytest + 总盘覆盖率(≥90%)
+        run: uv run pytest --cov=file_toolbox --cov-fail-under=90 -q
