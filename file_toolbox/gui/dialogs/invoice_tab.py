@@ -143,6 +143,8 @@ class InvoiceTab(QWidget):
     def _on_parse_failed(self, msg: str) -> None:
         self._parse_worker = None
         self.ui.btn_parse.setEnabled(True)
+        # 解析失败:按已有结果重置 btn_export(若曾解析成功则保留可导出状态)
+        self.ui.btn_export.setEnabled(self._result is not None and bool(self._result.invoices))
         self.ui.lbl_status.setText("解析失败")
         QMessageBox.warning(self, "解析失败", msg)
 
