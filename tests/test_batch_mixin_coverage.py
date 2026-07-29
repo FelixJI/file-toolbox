@@ -303,20 +303,24 @@ def test_select_folder_recursive_no_formats(app, monkeypatch, tmp_path):
 
 
 def test_select_folder_recursive_dir_named_as_format_not_collected(app, monkeypatch, tmp_path):
-    """递归 + SUPPORTED_FORMATS:名为 x.pdf 的目录不被误收入 selected_files。
+    """递归 + SUPPORTED_FORMATS:名为支持后缀(如 notes.txt)的目录不被误收入 selected_files。
 
-    回归测试:旧递归分支(rglob("*{ext}"))漏掉 is_file() 检查,会把名为 x.pdf 的目录
-    误收为文件。统一谓词修复后,目录被 is_file() 滤除。
+    回归测试:旧递归分支对每个 ext 跑 rglob(f"*{{ext}}") 且漏掉 is_file() 检查。
+    rglob 会同时匹配目录——因此名为 notes.txt 的目录会被旧代码的 rglob("*.txt")
+    命中并误收为文件。统一谓词修复后,目录被 is_file() 滤除。
+
+    注:目录名必须用 *支持* 的后缀(.txt),否则旧 glob 根本不会命中它,测试即失去
+    回归意义(同名 .pdf 在 SUPPORTED_FORMATS={.txt,.md} 下从未被匹配)。
     """
     dlg = _TestDialog()
-    (tmp_path / "x.pdf").mkdir()  # 目录,名为 x.pdf
+    (tmp_path / "notes.txt").mkdir()  # 目录,名为 notes.txt(用支持后缀)
     (tmp_path / "real.txt").write_text("y")  # 正常文件
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     dlg._select_folder(None, ask_recursive=True, auto_preview=False)
     names = [p.name for p in dlg.selected_files]
     assert "real.txt" in names
-    assert "x.pdf" not in names  # 目录不被误收
+    assert "notes.txt" not in names  # 目录不被误收
 
 
 # ---------------------------------------------------------------------------
