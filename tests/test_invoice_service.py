@@ -61,3 +61,65 @@ def test_service_export_excel_and_json(tmp_path):
     svc.export(result, xlsx, fmt="both", json_path=jsn)
     assert xlsx.exists()
     assert jsn.exists()
+
+
+# --- 新增可选 progress_callback / cancel_check(子项 4.1)---
+
+
+def test_service_parse_progress_callback_invoked(tmp_path):
+    """progress_callback 每文件后调用一次,(idx+1, total) 形状正确。"""
+    f1 = _xml_file(tmp_path, "101")
+    f2 = _xml_file(tmp_path, "102")
+    f3 = _xml_file(tmp_path, "103")
+    svc = InvoiceService()
+    seen = []
+    result = svc.parse_files([f1, f2, f3], progress_callback=lambda c, t: seen.append((c, t)))
+    assert len(result.invoices) == 3
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_service_parse_progress_callback_skips_when_none(tmp_path):
+    """progress_callback=None(默认)行为不变,不报错。"""
+    f1 = _xml_file(tmp_path, "111")
+    svc = InvoiceService()
+    result = svc.parse_files([f1])  # 默认 progress_callback=None
+    assert len(result.invoices) == 1
+
+
+def test_service_parse_cancel_returns_partial(tmp_path):
+    """cancel_check 返回 True 时在下一文件前中断,返回已解析的部分结果。"""
+    f1 = _xml_file(tmp_path, "201")
+    f2 = _xml_file(tmp_path, "202")
+    f3 = _xml_file(tmp_path, "203")
+
+    calls = {"n": 0}
+
+    def cancel_check() -> bool:
+        calls["n"] += 1
+        # 第 2 次检查(即准备处理第 2 个文件前)取消
+        return calls["n"] >= 2
+
+    svc = InvoiceService()
+    result = svc.parse_files([f1, f2, f3], cancel_check=cancel_check)
+    # 仅解析了第 1 个文件
+    assert len(result.invoices) == 1
+    assert result.invoices[0].invoice_number == "201"
+
+
+def test_service_parse_cancel_with_progress(tmp_path):
+    """取消与进度回调可共存:进度只到取消点。"""
+    files = [_xml_file(tmp_path, str(n)) for n in range(301, 306)]  # 5 个
+
+    progress = []
+
+    def cancel_check() -> bool:
+        return len(progress) >= 3  # 收到 3 次进度后取消
+
+    svc = InvoiceService()
+    result = svc.parse_files(
+        files,
+        progress_callback=lambda c, t: progress.append((c, t)),
+        cancel_check=cancel_check,
+    )
+    assert len(result.invoices) == 3
+    assert progress == [(1, 5), (2, 5), (3, 5)]

@@ -1,5 +1,6 @@
 """InvoiceService:编排 解析 -> 去重 -> 导出。"""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from file_toolbox.common.history import JsonHistoryStore
@@ -29,14 +30,27 @@ class InvoiceService:
         self,
         files: list[Path],
         dedupe_strategy: str = KEEP_ALL,
+        progress_callback: Callable[[int, int], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> ParseResult:
         """解析文件列表,应用去重,返回 ParseResult。
 
         单个文件解析失败进 failed,不中断整体。
+
+        Args:
+            files: 待解析文件列表。
+            dedupe_strategy: 去重策略(KEEP_ALL/DEDUPE/MARK)。
+            progress_callback: 可选进度回调 (current, total),每处理完一个文件后调用。
+                None(默认)表示不回调,保持旧调用行为不变。
+            cancel_check: 可选取消检查,返回 True 时在下一个文件前中断(已解析的保留,
+                返回部分结果)。None(默认)表示不可取消,行为不变。
         """
         invoices: list[Invoice] = []
         failed: list[FailedFile] = []
-        for fp in files:
+        total = len(files)
+        for idx, fp in enumerate(files):
+            if cancel_check is not None and cancel_check():
+                break
             try:
                 inv = parse_invoice(Path(fp), source_file=Path(fp).name)
                 invoices.append(inv)
@@ -44,6 +58,8 @@ class InvoiceService:
                 failed.append(FailedFile(file=Path(fp).name, reason=str(e)))
             except Exception as e:  # noqa: BLE001 - 解析意外错误也记为失败
                 failed.append(FailedFile(file=Path(fp).name, reason=f"{type(e).__name__}: {e}"))
+            if progress_callback is not None:
+                progress_callback(idx + 1, total)
 
         kept, dups = dedupe_invoices(invoices, dedupe_strategy)
         return ParseResult(invoices=kept, duplicates=dups, failed=failed)
