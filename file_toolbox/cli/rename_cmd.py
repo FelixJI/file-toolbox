@@ -6,6 +6,7 @@ import typer
 
 from file_toolbox.cli.op_parser import parse_ops
 from file_toolbox.common.file_utils import expand_files
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService
 
 
@@ -27,7 +28,7 @@ def rename(
         typer.secho("错误:未选择任何文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    svc = FileRenameService()
+    svc = FileRenameService(history_store=JsonHistoryStore())
     valid, msg = svc.validate_operations(operations)
     if not valid:
         typer.secho(f"错误:{msg}", fg=typer.colors.RED, err=True)

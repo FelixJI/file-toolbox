@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_pdf import PDFGeneratorService
 from file_toolbox.core.batch_pdf.constants import (
     DPI_DEFAULT,
@@ -28,7 +29,7 @@ def pdf(
         typer.secho("错误:未提供文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    svc = PDFGeneratorService()
+    svc = PDFGeneratorService(history_store=JsonHistoryStore())
     config = {
         "pdf_type": pdf_type,
         "dpi": dpi,

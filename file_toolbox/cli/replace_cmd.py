@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from file_toolbox.cli.op_parser import parse_ops
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_replace import ContentReplaceService
 
 
@@ -23,7 +24,7 @@ def replace(
         typer.secho("错误:未提供文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    svc = ContentReplaceService()
+    svc = ContentReplaceService(history_store=JsonHistoryStore())
     valid, msg = svc.validate_operations(operations)
     if not valid:
         typer.secho(f"错误:{msg}", fg=typer.colors.RED, err=True)

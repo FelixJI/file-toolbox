@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from file_toolbox.common.file_utils import expand_files
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.invoice.dedupe import KEEP_ALL
 from file_toolbox.core.invoice.service import InvoiceService
 
@@ -44,7 +45,7 @@ def invoice(
         )
         raise typer.Exit(1)
 
-    svc = InvoiceService()
+    svc = InvoiceService(history_store=JsonHistoryStore())
     result = svc.parse_files(all_files, dedupe_strategy=dedupe)
 
     # 预览输出
@@ -81,7 +82,15 @@ def invoice(
     elif fmt == "excel" and output.suffix.lower() == ".json":
         output = output.with_suffix(".xlsx")
 
-    written = svc.export(result, output, fmt=fmt, json_path=json_path, dedupe_strategy=dedupe)
+    written = svc.export(
+        result,
+        output,
+        fmt=fmt,
+        json_path=json_path,
+        dedupe_strategy=dedupe,
+        file_count=len(all_files),
+        invoice_count=len(result.invoices),
+    )
     typer.secho(f"\n已导出 {len(written)} 个文件:", fg=typer.colors.GREEN)
     for w in written:
         typer.echo(f"  {w}")

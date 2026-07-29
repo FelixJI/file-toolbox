@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_mkdir import ConflictStrategy, FolderCreatorService
 
 _STRATEGY_MAP = {"skip": ConflictStrategy.SKIP, "merge": ConflictStrategy.MERGE}
@@ -17,7 +18,7 @@ def mkdir(
 ) -> None:
     """批量创建文件夹。"""
     strategy = _STRATEGY_MAP.get(on_conflict, ConflictStrategy.MERGE)
-    svc = FolderCreatorService()
+    svc = FolderCreatorService(history_store=JsonHistoryStore())
     structures: list[tuple[str, ...]] = []
 
     if from_table:
@@ -43,7 +44,7 @@ def mkdir(
         mark = "[已存在]" if it.exists else "[新建]"
         typer.echo(f"  {mark} {it.path}")
 
-    result = svc.create_folders(items, strategy)
+    result = svc.create_folders(items, strategy, root=str(root), structure_count=len(structures))
     typer.secho(
         f"\n完成: 新建 {result.created_count}, 跳过 {result.skipped_count}, 共 {result.total_count}",
         fg=typer.colors.GREEN if result.success else typer.colors.RED,
