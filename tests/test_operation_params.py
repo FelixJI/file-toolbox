@@ -6,6 +6,7 @@
 from file_toolbox.gui.controllers.operation_params import (
     OperationParamCollector,
     PromptCancelled,
+    Prompter,
 )
 
 
@@ -72,6 +73,18 @@ def test_collect_add_suffix():
     assert c.collect("add_suffix") == {"text": "_后"}
 
 
+def test_collect_add_suffix_empty_returns_none():
+    """空后缀视为取消(与 add_prefix 一致:ok and text)。"""
+    c = _collector(text=[""])
+    assert c.collect("add_suffix") is None
+
+
+def test_collect_add_suffix_cancelled_returns_none():
+    """后缀阶段直接取消(队列空 → PromptCancelled)→ collect 返回 None。"""
+    c = _collector(text=None)
+    assert c.collect("add_suffix") is None
+
+
 def test_collect_add_prefix_existing_prefill():
     """编辑预填:existing.text 透传给 prompter 的默认值。"""
     c = _collector(text=["新前缀"])
@@ -119,6 +132,19 @@ def test_collect_regex_replace_preserves_ignore_case():
     c = _collector(text=[r"\d+", "X"])
     result = c.collect("regex_replace", existing={"ignore_case": True})
     assert result == {"pattern": r"\d+", "replace": "X", "ignore_case": True}
+
+
+def test_collect_regex_replace_cancel_replace_keeps_empty():
+    """pattern 有值但 replace 阶段取消 → replace 为空串(不返回 None)。"""
+    c = _collector(text=[r"\d+"])  # 第二次 get_text 队列空 → PromptCancelled
+    result = c.collect("regex_replace")
+    assert result == {"pattern": r"\d+", "replace": "", "ignore_case": False}
+
+
+def test_collect_regex_replace_replace_empty_allowed():
+    """replace 显式输入空串(删除语义)→ 保留空。"""
+    c = _collector(text=[r"\d+", ""])
+    assert c.collect("regex_replace") == {"pattern": r"\d+", "replace": "", "ignore_case": False}
 
 
 # ---------- rename: add_number / delete_chars / add_date ----------
@@ -183,9 +209,44 @@ def test_collect_simple_replace_preserves_case_sensitive():
     assert result == {"find": "旧", "replace": "新", "case_sensitive": True}
 
 
+def test_collect_simple_replace_cancel_replace_keeps_empty():
+    """find 有值但 replace 阶段取消 → replace 为空串(不返回 None)。"""
+    c = _collector(text=["旧"])  # 第二次 get_text 队列空 → PromptCancelled
+    result = c.collect("simple_replace")
+    assert result == {"find": "旧", "replace": "", "case_sensitive": False}
+
+
+def test_collect_simple_replace_replace_empty_allowed():
+    """replace 显式输入空串(删除语义)→ 保留空。"""
+    c = _collector(text=["旧", ""])
+    assert c.collect("simple_replace") == {"find": "旧", "replace": "", "case_sensitive": False}
+
+
 # ---------- 未知类型 ----------
 
 
 def test_collect_unknown_type_returns_none():
     c = _collector(text=["x"])
     assert c.collect("nonexistent_op") is None
+
+
+# ---------- Prompter Protocol 声明体(`...` 方法体)----------
+
+# Protocol 方法体的 `...` 是 Ellipsis 表达式语句,本身可执行:用一个继承 Protocol
+# 的具体子类调用其继承得到的方法体即可让覆盖计入(StubPrompter 定义了自己的方法,
+# 不会命中 Protocol 体内的 `...`)。此处验证 Protocol 声明的方法体可被调用且返回 None。
+
+
+def test_prompter_protocol_body_methods_return_none():
+    """Prompter Protocol 的三个 `...` 方法体经具体子类调用,均返回 None。
+
+    覆盖 operation_params.py 第 21/27/33 行(Protocol 方法体的 `...` 表达式语句)。
+    """
+
+    class _ConcretePrompter(Prompter):
+        pass
+
+    p = _ConcretePrompter()
+    assert p.get_text("t", "l") is None
+    assert p.get_int("t", "l") is None
+    assert p.get_item("t", "l", []) is None
