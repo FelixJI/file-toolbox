@@ -110,6 +110,51 @@ def test_edit_operation_cancelled(dlg, monkeypatch):
     assert dlg.operations[0]["params"] == {"text": "X"}
 
 
+def test_edit_operation_cancelled_with_valid_row(dlg, monkeypatch):
+    """_edit_operation:prompt 返回 None 且行选中有效 → 提前 return 不改操作(行 107-108)。
+
+    注:test_edit_operation_cancelled 未调 _refresh_operation_list,list 为空导致
+    setCurrentRow(0) 实际为 -1,命中行 103-104 的早退。本用例先填充列表使行有效,
+    专门覆盖行 107-108 的取消分支。
+    """
+    monkeypatch.setattr(dlg, "_prompt_operation_params", lambda t, e=None: None)
+    dlg.operations = [{"type": "add_prefix", "params": {"text": "X"}}]
+    dlg._refresh_operation_list()  # 先填充,使 setCurrentRow(0) 选中有效行
+    dlg.ui.list_operations.setCurrentRow(0)
+    assert dlg.ui.list_operations.currentRow() == 0  # 确认选中
+    prompted_types: list = []
+    monkeypatch.setattr(
+        dlg,
+        "_prompt_operation_params",
+        lambda t, e=None: prompted_types.append(t) or None,
+    )
+    dlg._edit_operation()
+    assert dlg.operations[0]["params"] == {"text": "X"}  # 未改
+    assert prompted_types == ["add_prefix"]  # prompt 被调用且 type 正确
+
+
+# ---------------------------------------------------------------------------
+# _prompt_operation_params(行 135-136):委托给 OperationParamCollector
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_operation_params_delegates_to_collector(dlg, monkeypatch):
+    """_prompt_operation_params:构造 collector 并委托 collect(行 135-136)。
+
+    monkeypatch QInputDialog.getText 使 prompter 返回确定值,验证返回结构。
+    """
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("PREFIX_", True))
+    result = dlg._prompt_operation_params("add_prefix")
+    assert result == {"text": "PREFIX_"}
+
+
+def test_prompt_operation_params_passes_existing(dlg, monkeypatch):
+    """编辑预填:existing 透传给 collector(行 135-136 的 existing 参数链路)。"""
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("EDITED", True))
+    result = dlg._prompt_operation_params("add_prefix", existing={"text": "old"})
+    assert result == {"text": "EDITED"}
+
+
 # ---------------------------------------------------------------------------
 # _do_refresh_preview
 # ---------------------------------------------------------------------------
@@ -209,6 +254,31 @@ def test_execute_no_ready_files(dlg, monkeypatch, tmp_path):
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._execute()
     assert warned
+
+
+def test_execute_invalid_operations_warns(dlg, monkeypatch, tmp_path):
+    """有文件+操作但操作非法 → 弹'操作无效'警告并不执行(行 164-167)。"""
+    f1 = tmp_path / "a.txt"
+    f1.write_text("x")
+    dlg.selected_files = [f1]
+    dlg.operations = [{"type": "bogus_op", "params": {}}]  # 未知 op_type → 校验失败
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *a, **k: warned.append(str(a)) or QMessageBox.StandardButton.Ok,
+    )
+    # question/information 不应被调用(校验失败提前 return)
+    questioned = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *a, **k: questioned.append(1) or QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    dlg._execute()
+    assert warned and any("无效" in w for w in warned)
+    assert questioned == []  # 未进入确认分支
 
 
 # ---------------------------------------------------------------------------

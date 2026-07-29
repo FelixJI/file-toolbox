@@ -101,6 +101,43 @@ def test_refresh_op_list_simple_label(dlg):
 
 
 # ---------------------------------------------------------------------------
+# _prompt_params(行 101-102):委托给 OperationParamCollector
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_params_delegates_to_collector(dlg, monkeypatch):
+    """_prompt_params:构造 collector 并委托 collect,返回 simple_replace 参数(行 101-102)。
+
+    monkeypatch QInputDialog.getText 以顺序返回 find/replace。
+    """
+    from PySide6.QtWidgets import QInputDialog
+
+    answers = iter([("foo", True), ("bar", True)])
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: next(answers))
+    result = dlg._prompt_params(SIMPLE)
+    assert result == {"find": "foo", "replace": "bar", "case_sensitive": False}
+
+
+def test_prompt_params_passes_existing(dlg, monkeypatch):
+    """编辑预填:existing 透传给 collector(行 101-102 的 existing 参数链路)。"""
+    from PySide6.QtWidgets import QInputDialog
+
+    answers = iter([("newfind", True), ("newreplace", True)])
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: next(answers))
+    result = dlg._prompt_params(SIMPLE, existing={"find": "old", "replace": "oldr"})
+    assert result["find"] == "newfind"
+    assert result["replace"] == "newreplace"
+
+
+def test_prompt_params_cancelled_returns_none(dlg, monkeypatch):
+    """_prompt_params:用户取消 → collector 返回 None(行 101-102 的取消路径)。"""
+    from PySide6.QtWidgets import QInputDialog
+
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("", False))
+    assert dlg._prompt_params(SIMPLE) is None
+
+
+# ---------------------------------------------------------------------------
 # _do_refresh_preview
 # ---------------------------------------------------------------------------
 

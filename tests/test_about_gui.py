@@ -161,3 +161,80 @@ def test_about_tab_clear_proxy_empties_settings(app, monkeypatch, tmp_path):
     tab = AboutTab()
     tab.btn_proxy_clear.click()
     assert settings.get("gh_proxy") == ""
+
+
+# ---------------------------------------------------------------------------
+# 快捷方式 / 复制 handler(行 162-179):monkeypatch shortcuts.* / clipboard
+# ---------------------------------------------------------------------------
+
+
+class _StubResult:
+    """模拟 ShortcutResult(只需 .message 即可)。"""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+
+
+def test_about_tab_copy_repo_url_sets_clipboard_and_status(app, monkeypatch):
+    """_copy_repo_url:把 REPO_URL 写入剪贴板 + 状态文本(行 162-163)。"""
+    from PySide6.QtGui import QGuiApplication
+
+    from file_toolbox.common import metadata
+
+    captured: list[str] = []
+    clip = QGuiApplication.clipboard()
+    monkeypatch.setattr(clip, "setText", lambda text: captured.append(text))
+
+    tab = AboutTab()
+    tab._copy_repo_url()
+
+    assert captured == [metadata.REPO_URL]
+    assert tab._status_lbl.text() == "已复制开源地址到剪贴板"
+
+
+def test_about_tab_add_desktop_shows_shortcut_result(app, monkeypatch):
+    """_add_desktop:把 create_desktop_shortcut().message 写状态(行 166-167)。"""
+    from file_toolbox.common import shortcuts
+
+    monkeypatch.setattr(
+        shortcuts, "create_desktop_shortcut", lambda: _StubResult("已创建桌面快捷方式")
+    )
+    tab = AboutTab()
+    tab._add_desktop()
+    assert tab._status_lbl.text() == "已创建桌面快捷方式"
+
+
+def test_about_tab_remove_desktop_shows_shortcut_result(app, monkeypatch):
+    """_remove_desktop:把 remove_desktop_shortcut().message 写状态(行 170-171)。"""
+    from file_toolbox.common import shortcuts
+
+    monkeypatch.setattr(
+        shortcuts, "remove_desktop_shortcut", lambda: _StubResult("未找到桌面快捷方式")
+    )
+    tab = AboutTab()
+    tab._remove_desktop()
+    assert tab._status_lbl.text() == "未找到桌面快捷方式"
+
+
+def test_about_tab_add_start_menu_shows_shortcut_result(app, monkeypatch):
+    """_add_start_menu:把 create_start_menu_shortcut().message 写状态(行 174-175)。"""
+    from file_toolbox.common import shortcuts
+
+    monkeypatch.setattr(
+        shortcuts, "create_start_menu_shortcut", lambda: _StubResult("已创建开始菜单快捷方式")
+    )
+    tab = AboutTab()
+    tab._add_start_menu()
+    assert tab._status_lbl.text() == "已创建开始菜单快捷方式"
+
+
+def test_about_tab_remove_start_menu_shows_shortcut_result(app, monkeypatch):
+    """_remove_start_menu:把 remove_start_menu_shortcut().message 写状态(行 178-179)。"""
+    from file_toolbox.common import shortcuts
+
+    monkeypatch.setattr(
+        shortcuts, "remove_start_menu_shortcut", lambda: _StubResult("已删除开始菜单快捷方式")
+    )
+    tab = AboutTab()
+    tab._remove_start_menu()
+    assert tab._status_lbl.text() == "已删除开始菜单快捷方式"
