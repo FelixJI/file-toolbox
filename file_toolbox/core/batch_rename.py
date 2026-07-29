@@ -8,6 +8,7 @@ from typing import Any
 
 from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import get_file_info
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.op_schema import ParamRule, validate_params
 
 
@@ -71,6 +72,16 @@ RENAME_PARAM_RULES: dict[str, ParamRule] = {
 
 class FileRenameService(BaseOperationService):
     """文件重命名服务"""
+
+    def __init__(self, history_store: JsonHistoryStore | None = None) -> None:
+        """初始化。
+
+        Args:
+            history_store: 历史存储;传入则在 execute_rename 成功后记录一条 rename
+                历史(形状与原 GUI 内联写入完全一致)。None 表示不记录(默认,
+                保证无历史依赖的旧调用零副作用)。
+        """
+        self._history_store = history_store
 
     def get_operation_types(self) -> list[str]:
         """获取支持的操作类型列表"""
@@ -340,6 +351,13 @@ class FileRenameService(BaseOperationService):
             except Exception as e:
                 errors.append(f"{old_path.name}: {e!s}")
 
+        # 记录历史(执行后):记录实际尝试执行的全部映射项(传入的 rename_map),
+        # 形状 {"rename_map": {str: str}} 与原 GUI 内联写入一致。history_dialog
+        # 仅读 len(rename_map),数量即尝试重命名的项数(最诚实的审计记录)。
+        if self._history_store is not None:
+            self._history_store.add_record(
+                "rename", {"rename_map": {str(k): str(v) for k, v in rename_map.items()}}
+            )
         return success_count, errors
 
     def get_file_info(self, file_path: Path) -> dict[str, Any]:

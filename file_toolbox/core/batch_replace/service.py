@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 
 from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import format_file_size
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.paths import get_backup_dir
 from file_toolbox.core.batch_replace.file_converter import FileConverterService
@@ -53,7 +54,8 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
     CONVERT_FORMATS: ClassVar[set[str]] = {".doc", ".xls"}
 
-    def __init__(self) -> None:
+    def __init__(self, history_store: JsonHistoryStore | None = None) -> None:
+        self._history_store = history_store
         self.converter = FileConverterService()
         self._lock = threading.Lock()
         self._initial_word_pids = self._get_office_pids("WINWORD.EXE")
@@ -448,6 +450,16 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
         self.converter.cleanup_temp_files()
 
+        # 记录历史(执行后):无论是否有 errors 都记录,与原 GUI replace_tab 内联
+        # 写入一致。形状 {"files": [str], "operations": operations}。
+        # 用 getattr 容错:部分单元测试以 ContentReplaceService.__new__ 绕过 __init__
+        # 来注入 mock handler(避免真实 COM),此时 _history_store 未设置。
+        history_store = getattr(self, "_history_store", None)
+        if history_store is not None:
+            history_store.add_record(
+                "replace",
+                {"files": [str(f) for f in files], "operations": operations},
+            )
         return success_count, total_replacements, errors
 
     def _count_matches(self, file_path: Path, operations: list[dict[str, Any]]) -> int:

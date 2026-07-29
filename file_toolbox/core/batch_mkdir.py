@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
+from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
 
 
@@ -53,8 +54,14 @@ class FolderCreatorService(LoggableMixin):
     # Windows不允许的文件名字符
     INVALID_CHARS: ClassVar[set[str]] = set('\\/:*?"<>|')
 
-    def __init__(self) -> None:
-        """初始化服务"""
+    def __init__(self, history_store: JsonHistoryStore | None = None) -> None:
+        """初始化服务。
+
+        Args:
+            history_store: 历史存储;传入则在 create_folders 完成后记录一条 mkdir
+                历史(形状与原 GUI 内联写入一致)。None 表示不记录(默认)。
+        """
+        self._history_store = history_store
         self.logger.info("FolderCreatorService 初始化完成")
 
     # ==================== 数据解析 ====================
@@ -261,6 +268,8 @@ class FolderCreatorService(LoggableMixin):
         items: list[FolderStructureItem],
         strategy: ConflictStrategy = ConflictStrategy.MERGE,
         skip_callback: Callable[[FolderStructureItem], bool] | None = None,
+        root: str | None = None,
+        structure_count: int | None = None,
     ) -> CreateResult:
         """
         批量创建文件夹
@@ -269,6 +278,8 @@ class FolderCreatorService(LoggableMixin):
             items: 文件夹结构项列表
             strategy: 冲突处理策略
             skip_callback: 跳过回调函数(用于逐个确认), 返回True表示跳过
+            root: 根目录(仅历史记录用;None 时记空串,保持旧调用兼容)
+            structure_count: 结构数量(仅历史记录用;None 时记 0,保持旧调用兼容)
 
         Returns:
             创建结果
@@ -298,27 +309,57 @@ class FolderCreatorService(LoggableMixin):
                         self.logger.info(f"创建文件夹: {item.path}")
                     except Exception as e:
                         self.logger.error(f"创建文件夹失败: {item.path}, {e}")
-                        return CreateResult(
+                        result = CreateResult(
                             created_count=created_count,
                             skipped_count=skipped_count,
                             total_count=total_count,
                             success=False,
                             error_message=f"创建文件夹失败: {item.path}\n{e!s}",
                         )
+                        self._record_history(root, structure_count, strategy, result)
+                        return result
 
-            return CreateResult(
+            result = CreateResult(
                 created_count=created_count,
                 skipped_count=skipped_count,
                 total_count=total_count,
                 success=True,
             )
+            self._record_history(root, structure_count, strategy, result)
+            return result
 
         except Exception as e:
             self.logger.error(f"批量创建文件夹失败: {e}")
-            return CreateResult(
+            result = CreateResult(
                 created_count=created_count,
                 skipped_count=skipped_count,
                 total_count=total_count,
                 success=False,
                 error_message=f"批量创建文件夹时出错: {e!s}",
             )
+            self._record_history(root, structure_count, strategy, result)
+            return result
+
+    def _record_history(
+        self,
+        root: str | None,
+        structure_count: int | None,
+        strategy: ConflictStrategy,
+        result: CreateResult,
+    ) -> None:
+        """记录 mkdir 历史(若注入了 history_store)。形状与原 GUI 内联写入 /
+        MkdirController.build_history_record 完全一致(strategy 以 enum 名存储)。
+        """
+        if self._history_store is None:
+            return
+        self._history_store.add_record(
+            "mkdir",
+            {
+                "root": str(root) if root is not None else "",
+                "structure_count": structure_count if structure_count is not None else 0,
+                "strategy": strategy.name,
+                "created": result.created_count,
+                "skipped": result.skipped_count,
+                "success": result.success,
+            },
+        )

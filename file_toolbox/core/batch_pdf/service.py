@@ -7,6 +7,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from file_toolbox.common.history import JsonHistoryStore
+
 from .constants import (
     DPI_DEFAULT,
     OUTPUT_MERGE,
@@ -28,7 +30,8 @@ from .pdf_utils import convert_pdf_to_image_pdf, get_file_info, merge_pdfs
 class PDFGeneratorService:
     """PDF生成服务"""
 
-    def __init__(self) -> None:
+    def __init__(self, history_store: JsonHistoryStore | None = None) -> None:
+        self._history_store = history_store
         self._engine_manager = EngineManager()
         self._word_converter = WordConverter(self._engine_manager)
         self._excel_converter = ExcelConverter(self._engine_manager)
@@ -352,6 +355,27 @@ class PDFGeneratorService:
         if progress_callback:
             progress_callback(total, total, "完成")
 
+        # 记录历史(执行后):从 results 汇总 ok/fail(逻辑同 PDFController.summarize_results),
+        # config 取审计子集。形状与原 GUI pdf_tab 内联写入 / PDFController.build_history_record
+        # 完全一致。此处可能在工作线程(PdfGenerateWorker)内执行,add_record 由
+        # JsonHistoryStore 的 threading.Lock 保护。
+        if self._history_store is not None:
+            ok = sum(1 for r in results if r.get("success"))
+            fail = len(results) - ok
+            self._history_store.add_record(
+                "pdf",
+                {
+                    "files": [str(f) for f in files],
+                    "success": ok,
+                    "failed": fail,
+                    "config": {
+                        "pdf_type": config.get("pdf_type"),
+                        "output_mode": config.get("output_mode"),
+                        "engine": config.get("engine"),
+                        "dpi": config.get("dpi"),
+                    },
+                },
+            )
         return results
 
     def get_file_info(self, file_path: Path) -> dict[str, Any]:
