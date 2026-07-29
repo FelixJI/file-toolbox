@@ -117,16 +117,22 @@ def test_init_office_app_dispatches_and_sets_properties(monkeypatch):
 
 
 def test_init_office_app_does_not_set_screen_updating(monkeypatch):
-    """init_office_app 不设 ScreenUpdating(那是调用方业务)——验证 ScreenUpdating 未被触碰。"""
+    """init_office_app 不设 ScreenUpdating(那是调用方业务)——验证 ScreenUpdating 未被赋值。"""
     import win32com.client
 
     app = MagicMock()
     monkeypatch.setattr(win32com.client, "Dispatch", MagicMock(return_value=app))
 
+    # 在调用前捕获 ScreenUpdating 自动子 mock 的身份。若 init_office_app 执行了
+    # ``app.ScreenUpdating = False``,该属性会被重绑定为布尔 False(不再指向原子 mock),
+    # 身份比较即失败。注意:对 MagicMock 直接赋值不会经过 mock_calls,故必须用身份比较。
+    screen_updating_before = app.ScreenUpdating
+
     init_office_app("Excel.Application")
 
-    # ScreenUpdating 不应被赋值(MagicMock 记录所有属性 set;断言它不在被设置的属性中)
-    app.ScreenUpdating.assert_not_called()
+    assert app.ScreenUpdating is screen_updating_before, (
+        "init_office_app 必须不赋值 ScreenUpdating(那是调用方业务)"
+    )
 
 
 # ===========================================================================
