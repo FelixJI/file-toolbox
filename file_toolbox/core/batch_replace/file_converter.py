@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from file_toolbox.common.office_session import init_office_app
+
 
 @dataclass(frozen=True)
 class _LegacySpec:
@@ -57,9 +59,12 @@ class FileConverterService:
         if sys.platform != "win32":
             return False, src_path, "此功能仅支持 Windows 系统"
 
+        # 显式 ImportError 早返回:pywin32 未装时返回专用提示。ComSession 在无 pywin32
+        # 时是 no-op(吞掉 ImportError),随后 init_office_app 内的 Dispatch 才抛——那样
+        # 错误会落到下方通用 except 返回「转换失败」而非专用提示,属行为变更。故保留
+        # 此显式检查,仅用 init_office_app 替换最内层 Dispatch+属性设置。
         try:
             import pythoncom
-            import win32com.client
         except ImportError:
             return False, src_path, "未安装 pywin32 库，请运行: pip install pywin32"
 
@@ -80,10 +85,9 @@ class FileConverterService:
                                 f"{src_path.stem}_{timestamp}{spec.new_suffix}"
                             )
 
-                # 每次创建新的应用实例,避免 COM 对象失效问题
-                app = win32com.client.Dispatch(spec.prog_id)
-                app.Visible = False
-                app.DisplayAlerts = False
+                # 每次创建新的应用实例,避免 COM 对象失效问题。
+                # init_office_app 等价于原 Dispatch(prog_id)+Visible/DisplayAlerts=False。
+                app = init_office_app(spec.prog_id)
 
                 doc = spec.open_doc(app, str(src_path.absolute()))
                 spec.save_doc(doc, str(output_path.absolute()), spec.file_format)
@@ -95,6 +99,10 @@ class FileConverterService:
                 if app is not None:
                     with contextlib.suppress(Exception):
                         app.Quit()
+                # 注意:此处 CoUninitialize 是**无条件、未 suppress**的(与 handlers 不同)。
+                # 若改用 ComSession,其 __exit__ 会 suppress CoUninit 异常——在极少见情况下
+                # 会把「成功转换」变成不失败(原行为是 CoUninit 抛错会冒泡到外层 except 返回
+                # 失败)。为保持这一边界语义逐字不变,保留手写裸 CoUninitialize。
                 pythoncom.CoUninitialize()
         except Exception as e:
             return False, src_path, f"{spec.error_label}转换失败: {e!s}"
