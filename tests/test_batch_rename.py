@@ -398,3 +398,61 @@ def test_get_file_info_delegates(tmp_path):
     info = _svc().get_file_info(f)
     assert info["is_file"] is True
     assert info["size"] == 5
+
+
+# ---------------------------------------------------------------------------
+# _add_date:source=file 文件存在但 stat 抛异常(行 271-272)
+# ---------------------------------------------------------------------------
+
+
+def test_add_date_file_source_stat_exception_falls_back_to_now(tmp_path, monkeypatch):
+    """文件存在但 stat() 抛异常 → except → 用 datetime.now()(行 271-272)。"""
+    f = tmp_path / "x.txt"
+    f.write_text("y")
+    monkeypatch.setattr(
+        Path,
+        "stat",
+        # 真实 Path.stat 接受 *, follow_symlinks 等关键字参数(Python 3.12+ exists() 会传
+        # follow_symlinks)。用 **kwargs 兼容,避免 pytest 内部 cleanup 调 .exists() 时
+        # 因签名不符 INTERNALERROR。
+        lambda self, **kw: (_ for _ in ()).throw(PermissionError("stat boom")),
+    )
+    out = _svc()._add_date("f", {"format": "%Y", "source": "file"}, f)
+    # 走 except,用 now() 的年份(4 位数字)
+    assert out.startswith("f")
+    assert out[1:].isdigit()
+
+
+# ---------------------------------------------------------------------------
+# _delete_chars:suffix value 非数字(行 299-300)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_chars_suffix_non_numeric_returns_name():
+    """suffix value 非数字 → ValueError → 返回原名(行 299-300)。"""
+    svc = _svc()
+    assert svc._delete_chars("abcdef", {"delete_type": "suffix", "value": "abc"}) == "abcdef"
+
+
+def test_delete_chars_prefix_non_numeric_value_returns_original():
+    """prefix value 非数字 → ValueError → 返回原名(行 291-292 已覆盖,补确认)。"""
+    svc = _svc()
+    assert svc._delete_chars("abcdef", {"delete_type": "prefix", "value": "xyz"}) == "abcdef"
+
+
+# ---------------------------------------------------------------------------
+# execute_rename:PermissionError(行 337)
+# ---------------------------------------------------------------------------
+
+
+def test_execute_rename_permission_error_recorded(tmp_path, monkeypatch):
+    """rename 抛 PermissionError → 记入 errors '权限不足'(行 336-337)。"""
+    src = tmp_path / "a.txt"
+    src.write_text("x")
+    dst = tmp_path / "b.txt"
+    monkeypatch.setattr(
+        Path, "rename", lambda self, other: (_ for _ in ()).throw(PermissionError("denied"))
+    )
+    success, errors = _svc().execute_rename({src: dst})
+    assert success == 0
+    assert any("权限不足" in e for e in errors)
