@@ -145,6 +145,18 @@ def test_summarize_results_all_success():
     assert fail == 0
 
 
+def test_summarize_results_missing_success_key_counts_as_failure():
+    """结果 dict 缺 'success' 键(如 worker 异常返回 {'error': ...})→ 计为失败,不抛 KeyError。
+
+    回归:旧实现 sum(1 for r in results if r['success']) 对缺键 dict 抛 KeyError,
+    导致一条异常结果会中断整个汇总、让 UI 崩溃而非显示「失败 N」。
+    """
+    results = [{"success": True}, {"error": "boom"}, {"success": False}]
+    ok, fail = _controller.summarize_results(results)
+    assert ok == 1
+    assert fail == 2  # 缺 success 的 + success=False 的
+
+
 # ---------- format_progress ----------
 
 
