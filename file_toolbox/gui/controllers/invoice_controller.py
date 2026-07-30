@@ -22,7 +22,13 @@ class InvoiceController:
     _DEDUPE_BY_INDEX = [KEEP_ALL, DEDUPE, MARK]
 
     def dedupe_strategy(self, index: int) -> str:
-        """下拉框索引映射为去重策略常量。索引越界时按列表语义抛 IndexError。"""
+        """下拉框索引映射为去重策略常量。索引越界(含负数)时抛 IndexError。
+
+        显式拒绝负数:Python 列表负索引会让 -1/-2 静默返回末位策略,与「越界抛错」
+        契约相悖(真实下拉框不会给负数,但锁死契约防回归)。
+        """
+        if index < 0 or index >= len(self._DEDUPE_BY_INDEX):
+            raise IndexError(f"去重策略索引越界: {index}")
         return self._DEDUPE_BY_INDEX[index]
 
     def format(self, json_checked: bool, both_checked: bool) -> str:
