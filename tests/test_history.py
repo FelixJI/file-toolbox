@@ -134,6 +134,21 @@ def test_last_id_returns_zero_when_file_only_blank_lines(tmp_path):
     assert rid == 1
 
 
+def test_get_records_negative_limit_returns_all(tmp_path):
+    """limit<=0 一律表示「全部」(docstring 承诺)。
+
+    回归:旧实现 `records[-limit:] if limit else records` 中,`limit=0` 因 falsy
+    返回全部(正确),但 `limit<0` 是 truthy → `records[-limit:]` 反向切片,
+    丢掉首条记录(3 条 `limit=-1` 误返回 2 条)。负数应与 0 同等处理。
+    """
+    store = JsonHistoryStore(tmp_path)
+    for i in range(3):
+        store.add_record("rename", {"i": i})
+    assert len(store.get_records("rename", limit=-1)) == 3
+    assert len(store.get_records("rename", limit=-5)) == 3
+    assert len(store.get_records("rename", limit=0)) == 3
+
+
 def test_add_record_thread_safe_concurrent(tmp_path):
     """多线程并发 add_record 不丢记录、id 单调无重复(子项 3.2 锁验证)。
 

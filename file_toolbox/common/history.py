@@ -87,7 +87,12 @@ class JsonHistoryStore:
     def get_records(self, tool: str, limit: int = 100) -> list[dict[str, Any]]:
         """获取最近 limit 条记录（limit<=0 表示全部）。"""
         records = self._read_all(tool)
-        return records[-limit:] if limit else records
+        # limit<=0 一律返回全部:旧实现 `records[-limit:] if limit else records` 对
+        # limit<0(非 0 即 truthy)会执行反向切片 `records[-limit:]`,丢掉首条记录。
+        # 0 与负数语义一致(「全部」),统一用 `limit > 0` 判定。
+        if limit > 0:
+            return records[-limit:]
+        return records
 
     def get_record(self, tool: str, record_id: int) -> dict[str, Any] | None:
         """获取单条记录。"""
