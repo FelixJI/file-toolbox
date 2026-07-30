@@ -15,9 +15,22 @@
   精度仅到秒,两个不同目录的同名文件同秒备份生成相同文件名。冲突时追加 `_1`/`_2` 后缀。
 - 内容替换 `read_content` 读 UTF-8 BOM 文件时 `\ufeff` 残留内容,破坏后续 simple_replace
   匹配。编码列表首选改 `utf-8-sig`(自动剥离 BOM,对无 BOM 文件与 utf-8 一致)。
+- GUI `PDFController.summarize_results` 对缺 `success` 键的结果 dict(worker 异常返回
+  `{'error': ...}`)抛 `KeyError`,一条异常结果中断整个汇总让 UI 崩溃。改用 `.get('success')`。
+- GUI `InvoiceController.dedupe_strategy` 负索引静默返回错误策略:`(-1)` 返回 `'mark'`、
+  `(-2)` 返回 `'dedupe'`(Python 负索引),与 docstring「越界抛 IndexError」相悖。显式拒绝。
+- GUI `InvoiceTab` 无 `closeEvent`,解析中关闭窗口泄漏 `_parse_worker`(无事件循环 QThread,
+  `quit` 无效),进程退出可能崩溃。补 `closeEvent` 协作式 `cancel`+`wait`。
+- GUI `RenameController.format_history_line` 对 `data: None`(worker 写入 null)抛
+  `AttributeError` 让历史列表整体崩溃。改 `record.get('data') or {}` 兜底。
 
 ### Changed
-- 测试加固:行覆盖率已达 100% 但不证明边界行为被正确断言。补 48 个「写错断言就变红」
+- 测试加固(GUI/CLI 层):补 22 个边界行为断言(用例 1441→1463)。op_parser._coerce
+  类型强转边界(前导零/float/bool 大小写/负数/空串/重复键);qt_prompter 参数透传
+  (minValue/maxValue/current/editable 实际转发给 QInputDialog,旧测试丢弃参数);
+  pdf_cmd 全失败 exit 0(锁定已知风险);replace 预览=执行计数一致;CLI 非法 regex 前置
+  拦截;history_dialog 部分撤销仍标记已撤销(锁定已知风险)。
+- 测试加固(core/common 层):行覆盖率已达 100% 但不证明边界行为被正确断言。补 48 个「写错断言就变红」
   的强边界断言(format_file_size 精确边界与浮点累积、format_datetime tz 后缀、
   expand_files 顺序/去重、op_schema string_keys 零值/identity、batch_rename 批内冲突/
   digits 溢出、mkdir 校验、invoice 税率/去重/多 DocBody 等)。用例数 1393→1441。

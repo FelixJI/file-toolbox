@@ -15,7 +15,7 @@
 ## 运行
 
 ```bash
-uv run pytest -q                # 全量(基线 1441)
+uv run pytest -q                # 全量(基线 1463)
 uv run pytest tests/test_X.py   # 单文件
 uv run pytest --co -q           # 仅收集,核对用例数
 ```
