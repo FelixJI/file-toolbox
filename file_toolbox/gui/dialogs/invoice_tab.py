@@ -8,7 +8,7 @@ UI 布局由 generated/ui_invoice_dialog.py 的 Ui_InvoiceDialog(setupUi) 构建
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtGui import QBrush, QColor, QCloseEvent
+from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
 
 from file_toolbox.common.history import JsonHistoryStore
