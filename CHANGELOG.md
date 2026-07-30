@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Fixed
+- `JsonHistoryStore.get_records(limit<0)` 反向切片丢首条:`limit=-1` 误返回 N-1 条
+  (docstring 承诺 ≤0 表示全部)。统一用 `limit>0` 判定。
+- 批量重命名 `_delete_chars` 前缀删除 value 为负数时语义反转:`name[count:]` 对负数
+  取到尾部(`"ABCDE"` 删 -2 误返回 `"DE"`)。负数视为无效返回原名。
+- 内容替换 simple_replace 不区分大小写时,replace 文本含反斜杠(`\d`/`\1`)抛
+  `re.error('bad escape')` 或误当反向引用;区分大小写分支(`str.replace`)正常。
+  改用 lambda 使 replacement 作为字面文本,两分支行为一致(`batch_rename` 与
+  `text_handler` 两处同款写法一并修复;regex_replace 仍保留反向引用语义)。
+- 内容替换 `_create_backup` 同名 stem + 同一秒备份静默覆盖导致备份数据丢失:时间戳
+  精度仅到秒,两个不同目录的同名文件同秒备份生成相同文件名。冲突时追加 `_1`/`_2` 后缀。
+- 内容替换 `read_content` 读 UTF-8 BOM 文件时 `\ufeff` 残留内容,破坏后续 simple_replace
+  匹配。编码列表首选改 `utf-8-sig`(自动剥离 BOM,对无 BOM 文件与 utf-8 一致)。
+
+### Changed
+- 测试加固:行覆盖率已达 100% 但不证明边界行为被正确断言。补 48 个「写错断言就变红」
+  的强边界断言(format_file_size 精确边界与浮点累积、format_datetime tz 后缀、
+  expand_files 顺序/去重、op_schema string_keys 零值/identity、batch_rename 批内冲突/
+  digits 溢出、mkdir 校验、invoice 税率/去重/多 DocBody 等)。用例数 1393→1441。
+- CI 门禁加强:启用分支覆盖率(`--cov-branch`,core 阈值 88→90);新增严格告警
+  (`-W error::ResourceWarning`/`DeprecationWarning`);新增用例数不回退门禁
+  (`scripts/check_test_count.py`,基线 1441)。
+
 ## 0.1.13 - 2026-07-30
 
 ## 0.1.12 - 2026-07-30
