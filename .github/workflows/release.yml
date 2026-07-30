@@ -186,7 +186,7 @@ jobs:
         run: uv run --extra dev python scripts/build_exe.py --ci
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: FileToolbox-win64
           path: |
@@ -204,7 +204,7 @@ jobs:
           ref: ${{ needs.build.outputs.resolved_tag }}
 
       - name: 下载构建产物
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: FileToolbox-win64
           path: artifacts
