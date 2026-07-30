@@ -69,3 +69,36 @@ def test_mark_flags_second_onward():
     dup_flags = [i.is_duplicate for i in a_invs]
     assert dup_flags.count(True) == 2  # ofd 和 pdf 标
     assert dup_flags.count(False) == 1  # xml 不标
+
+
+# ---------------------------------------------------------------------------
+# 边界:同优先级并列 / 空号误并 / 未知策略兜底 —— 锁定当前行为
+# ---------------------------------------------------------------------------
+
+
+def test_dedupe_same_priority_tie_keeps_first():
+    """同优先级(同为 xml)的同号发票 → 保留索引最小(首个)。min 在并列时取首个。"""
+    invs = [_make("A", "xml"), _make("A", "xml")]
+    kept, dups = dedupe_invoices(invs, DEDUPE)
+    assert len(kept) == 1
+    assert kept[0] is invs[0]  # 首个
+
+
+def test_dedupe_empty_invoice_numbers_currently_collapse():
+    """两张**不同**发票但 invoice_number 都为空(提取失败)→ 当前被误并为同组去重。
+
+    锁定当前行为(已知风险):空号分组键相同,dedupe 会丢弃其一 → 不同发票被静默合并。
+    未来若修复(如空号不去重),该测试应变红提醒有意更新。
+    """
+    invs = [_make("", "pdf"), _make("", "pdf")]
+    kept, dups = dedupe_invoices(invs, DEDUPE)
+    assert len(kept) == 1  # 当前:误并,只剩 1 张
+    assert len(dups) == 1
+
+
+def test_dedupe_unknown_strategy_falls_back_to_keep_all():
+    """未知策略 → 回退 keep_all 语义(全部保留,无 duplicates)。"""
+    invs = [_make("A"), _make("A")]
+    kept, dups = dedupe_invoices(invs, "bogus")
+    assert len(kept) == 2
+    assert len(dups) == 0

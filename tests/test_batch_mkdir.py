@@ -87,6 +87,35 @@ def test_validate_folder_name():
 
 
 # ---------------------------------------------------------------------------
+# validate_folder_name:锁定当前行为(仅拦截 ASCII \/:*?"<>|)
+# ---------------------------------------------------------------------------
+# 注:当前策略只拦 ASCII 非法字符。下列输入(./../全角／：/尾点尾空格)目前**通过**校验。
+# 锁定该行为:未来若收紧策略(如禁止 .. 路径逃逸、禁止 Windows 尾点撞名),这些测试会
+# 变红,提醒有意更新。改安全策略属单独决策,不在本次范围。
+
+
+def test_validate_folder_name_dot_and_dotdot_currently_pass():
+    """'.' 与 '..' 不含 ASCII 非法字符 → 当前通过(已知:信任 Excel 数据时的弱点)。"""
+    svc = _svc()
+    assert svc.validate_folder_name(".") is True
+    assert svc.validate_folder_name("..") is True
+
+
+def test_validate_folder_name_fullwidth_chars_currently_pass():
+    """全角 ／(U+FF0F)与 ：(U+FF1C)非 ASCII 非法字符 → 当前通过。CJK 用户常从 Excel 粘贴。"""
+    svc = _svc()
+    assert svc.validate_folder_name("a／b") is True
+    assert svc.validate_folder_name("a：b") is True
+
+
+def test_validate_folder_name_trailing_dot_space_currently_pass():
+    """尾随点/空格:Windows 会去尾点导致 'folder.' 与 'folder' 撞名,但校验当前通过。"""
+    svc = _svc()
+    assert svc.validate_folder_name("folder.") is True
+    assert svc.validate_folder_name("folder ") is True
+
+
+# ---------------------------------------------------------------------------
 # parse_excel_table_data:空行 continue(行 98)
 # ---------------------------------------------------------------------------
 
