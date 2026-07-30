@@ -429,6 +429,46 @@ def test_create_backup_returns_path(tmp_path, monkeypatch):
     assert backup_path.read_text(encoding="utf-8") == "data"
 
 
+def test_create_backup_same_stem_same_second_no_collision(tmp_path, monkeypatch):
+    """同名 stem 在同一秒备份不应互相覆盖(B4 回归:备份数据丢失)。
+
+    回归:旧实现时间戳精度仅到秒(%Y%m%d_%H%M%S),两个同名 report.txt 在同一秒备份
+    生成相同 backup_name,shutil.copy2 静默覆盖第一个 → 第一个备份数据丢失。
+    固定 datetime.now 返回同一时刻模拟同秒,断言两个备份路径不同且内容各自保留。
+    """
+    from datetime import datetime
+
+    sub1 = tmp_path / "d1"
+    sub2 = tmp_path / "d2"
+    sub1.mkdir()
+    sub2.mkdir()
+    f1 = _write_text(sub1 / "report.txt", "first")
+    f2 = _write_text(sub2 / "report.txt", "second")
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    svc = ContentReplaceService()
+    monkeypatch.setattr(svc, "_backup_dir", backup_dir)
+    # 冻结时间到同一秒,强制触发冲突(service 调 datetime.now())
+    frozen = datetime(2026, 7, 30, 12, 0, 0)
+
+    class _FrozenDateTime:
+        @staticmethod
+        def now(*a, **k):
+            return frozen
+
+    monkeypatch.setattr(
+        "file_toolbox.core.batch_replace.service.datetime", _FrozenDateTime
+    )
+
+    bp1 = svc._create_backup(f1)
+    bp2 = svc._create_backup(f2)
+
+    assert bp1 != bp2  # 不应覆盖
+    assert bp1.exists() and bp2.exists()
+    assert bp1.read_text(encoding="utf-8") == "first"  # 第一个备份内容保留
+    assert bp2.read_text(encoding="utf-8") == "second"
+
+
 def test_preview_replace_cancel_check(tmp_path):
     """cancel_check 返回 True 时预览立即中断。"""
     f = _write_text(tmp_path / "a.txt", "hello")
