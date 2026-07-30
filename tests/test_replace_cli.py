@@ -147,6 +147,23 @@ def test_replace_regex_execute(tmp_path, monkeypatch):
     assert f.read_text(encoding="utf-8") == "2026 和 2026"
 
 
+def test_replace_cli_malformed_regex_rejected_before_execute(tmp_path):
+    """非法 regex(pattern 未闭合括号)→ CLI 执行前 validate_operations 拦截,exit 1 + 友好提示。
+
+    锁定 CLI 行为:replace_cmd 在 execute_replace 前调用 validate_operations 校验正则可编译,
+    非法则 exit 1,不进入执行。注:GUI replace_tab._execute 不做此前置校验(已知不一致,
+    依赖 service 静默跳过);CLI 更严格,锁定之防回归。
+    """
+    f = tmp_path / "a.txt"
+    f.write_text("hello", encoding="utf-8")
+    r = runner.invoke(
+        app, ["replace", str(f), "--op", "regex_replace:pattern=(,replace=x", "--yes"]
+    )
+    assert r.exit_code == 1
+    assert "正则表达式错误" in r.output
+    assert f.read_text(encoding="utf-8") == "hello"  # 未改
+
+
 def test_replace_case_sensitive(tmp_path, monkeypatch):
     """case_sensitive=true:大小写敏感替换(只换匹配大小写的)。"""
     backup_dir = tmp_path / "backups"

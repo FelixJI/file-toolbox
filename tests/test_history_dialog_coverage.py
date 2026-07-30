@@ -230,6 +230,30 @@ def test_history_dialog_undo_with_errors(app, tmp_path, monkeypatch):
     assert info_calls
 
 
+def test_history_dialog_undo_partial_failure_still_marks_undone(app, tmp_path, monkeypatch):
+    """部分失败(count < len)时,mark_undone 仍被调用(锁定当前行为)。
+
+    回归风险:execute_rename 返回 count=0(全失败)时,当前实现仍调用 mark_undone,
+    把这条历史标记为「已撤销」——即使没真正撤销任何文件。这可能误导用户认为撤销成功。
+    锁定该行为:未来若改为「部分失败不标记已撤销」,该测试应变红提醒有意更新。
+    """
+    store = _store_with_records(
+        tmp_path,
+        "rename",
+        [{"rename_map": {str(tmp_path / "ghost_a.txt"): str(tmp_path / "ghost_b.txt")}}],
+    )
+    rid = store.get_records("rename")[0]["id"]
+    dlg = HistoryDialog(store, tool="rename")
+    dlg.list_widget.setCurrentRow(0)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    dlg._undo_selected()
+    # 当前:部分/全失败仍 mark_undone
+    rec = store.get_record("rename", rid)
+    assert rec is not None
+    assert rec["undone"] is True
+
+
 def test_history_dialog_undo_rid_none_returns(app, tmp_path, monkeypatch):
     """选中项的 data(0x0100) 为 None → 直接 return(行 106-108)。
 
