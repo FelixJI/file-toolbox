@@ -53,6 +53,17 @@ def test_collect_structures_strips_cells():
     assert result == [("项目A", "文档")]
 
 
+def test_collect_structures_empty_rows_returns_empty():
+    """rows=[] → 空结构(边界)。"""
+    assert _controller().collect_structures([]) == []
+
+
+def test_collect_structures_all_empty_cells_row_skipped():
+    """整行全空单元格 → 该行被跳过(不产生空 tuple)。"""
+    rows = [["  ", ""], ["a", "b"]]
+    assert _controller().collect_structures(rows) == [("a", "b")]
+
+
 # ---------- find_invalid_names ----------
 
 
