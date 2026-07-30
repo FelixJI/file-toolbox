@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## 0.1.14 - 2026-07-30
+
 ### Fixed
 - `JsonHistoryStore.get_records(limit<0)` 反向切片丢首条:`limit=-1` 误返回 N-1 条
   (docstring 承诺 ≤0 表示全部)。统一用 `limit>0` 判定。
