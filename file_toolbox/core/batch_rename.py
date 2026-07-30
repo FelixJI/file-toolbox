@@ -300,6 +300,10 @@ class FileRenameService(BaseOperationService):
             # 删除前N个字符
             try:
                 count = int(value)
+                # 负数对「删除前 N 个字符」无意义:name[count:] 对负数会反向取尾部,
+                # 语义反转("ABCDE" 删 -2 误返回 "DE")。与 suffix 分支一致,负数视为无效。
+                if count < 0:
+                    return name
                 return name[count:]
             except (ValueError, IndexError):
                 return name

@@ -441,6 +441,27 @@ def test_delete_chars_prefix_non_numeric_value_returns_original():
 
 
 # ---------------------------------------------------------------------------
+# _delete_chars:prefix value 负数 / 超长(语义反转/清空,B2 回归)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_chars_prefix_negative_value_returns_name():
+    """prefix value 为负数 → 应视为无效返回原名,而非反向取尾部。
+
+    回归:旧实现 name[count:] 对 count=-2 取到尾部("ABCDE"→"DE"),语义反转。
+    负数对「删除前 N 个字符」无意义,应与非法值同等处理。
+    """
+    svc = _svc()
+    assert svc._delete_chars("ABCDE", {"delete_type": "prefix", "value": "-2"}) == "ABCDE"
+
+
+def test_delete_chars_suffix_negative_value_returns_name():
+    """suffix value 为负数 → 同样应返回原名(与 prefix 一致)。"""
+    svc = _svc()
+    assert svc._delete_chars("abcdef", {"delete_type": "suffix", "value": "-3"}) == "abcdef"
+
+
+# ---------------------------------------------------------------------------
 # execute_rename:PermissionError(行 337)
 # ---------------------------------------------------------------------------
 
