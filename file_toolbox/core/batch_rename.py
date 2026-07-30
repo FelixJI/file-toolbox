@@ -205,9 +205,13 @@ class FileRenameService(BaseOperationService):
         if case_sensitive:
             return name.replace(find_text, replace_text)
         else:
-            # 不区分大小写的替换
+            # 不区分大小写的替换。
+            # 注意:不能用 pattern.sub(replace_text, name) —— re 会把 replacement 当
+            # 模板解释,replace 含 \d / \1 等会抛 re.error('bad escape') 或误当反向引用,
+            # 与区分大小写分支(str.replace 视为字面量)语义不一致。用 lambda 包裹使
+            # replacement 作为字面文本返回,与 str.replace 行为对齐。
             pattern = re.compile(re.escape(find_text), re.IGNORECASE)
-            return pattern.sub(replace_text, name)
+            return pattern.sub(lambda _m: replace_text, name)
 
     def _regex_replace(self, name: str, params: dict[str, Any]) -> str:
         """正则表达式替换"""

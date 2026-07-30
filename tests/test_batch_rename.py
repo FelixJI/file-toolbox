@@ -230,6 +230,30 @@ def test_regex_replace_case_sensitive_default():
 
 
 # ---------------------------------------------------------------------------
+# _replace_text:不区分大小写分支对 replacement 含反斜杠的处理(B3 回归)
+# ---------------------------------------------------------------------------
+
+
+def test_replace_text_case_insensitive_backslash_replace_matches_sensitive():
+    r"""不区分大小写时,replacement 含字面反斜杠应与区分大小写分支行为一致。
+
+    回归:旧实现 case-insensitive 分支用 pattern.sub(replace_text, name),
+    re 把 replacement 当模板解释 —— replace 含 \d / \1 等会抛 re.error('bad escape'),
+    或把 \1 当反向引用。而 case-sensitive 分支用 str.replace 视为字面量。
+    两分支语义必须一致:replacement 在 simple_replace 中是字面文本。
+    """
+    svc = _svc()
+    sensitive = svc._replace_text(
+        "abc", {"find": "a", "replace": r"x\d", "case_sensitive": True}
+    )
+    insensitive = svc._replace_text(
+        "abc", {"find": "a", "replace": r"x\d", "case_sensitive": False}
+    )
+    assert sensitive == "x\\dbc"
+    assert insensitive == sensitive  # 两分支字面一致,不抛 re.error
+
+
+# ---------------------------------------------------------------------------
 # _add_number 各格式与位置分支
 # ---------------------------------------------------------------------------
 

@@ -52,6 +52,27 @@ def test_text_normalize_strips_zero_width():
     assert TextHandler.normalize_text("a\u200bb") == "ab"
 
 
+def test_text_apply_case_insensitive_backslash_replace_matches_sensitive():
+    r"""simple_replace 不区分大小写时,replacement 含反斜杠应与区分大小写一致(字面量)。
+
+    回归:旧实现 case-insensitive 分支 pattern.sub(replace_text, text) 把 replacement
+    当模板解释,replace 含 \d / \1 抛 re.error('bad escape') 或误当反向引用;
+    case-sensitive 分支(text.replace)视为字面量。两分支语义须一致。
+    """
+    h = TextHandler()
+    sensitive, cs_count = h._apply_operation(
+        "abc", {"type": "simple_replace", "params": {"find": "a", "replace": r"x\d",
+                                                       "case_sensitive": True}}
+    )
+    insensitive, ci_count = h._apply_operation(
+        "abc", {"type": "simple_replace", "params": {"find": "a", "replace": r"x\d",
+                                                      "case_sensitive": False}}
+    )
+    assert sensitive == "x\\dbc"
+    assert insensitive == sensitive
+    assert cs_count == ci_count == 1
+
+
 def test_text_read_multiple_encodings(tmp_path):
     f = tmp_path / "gbk.txt"
     f.write_bytes("你好".encode("gbk"))
