@@ -22,6 +22,10 @@
 - CI/Release actions 升级到 Node 24 runtime(消除 Node 20 弃用警告):
   checkout v4→v5、setup-uv v3→v7、upload/download-artifact v4→v5、action-gh-release v2→v3。
   Node 20 将于 2026-09-16 从 runner 移除。
+- 修复 Release 在 CI 内 bump 版本时 `git commit` 报 exit 128:GitHub runner 默认无全局
+  git 提交身份,release.yml build job 现配置 `github-actions[bot]` 身份。
+- `bump_version.py` 的 git commit 失败现透出 git 真实 stderr(原先被 `capture_output` 吞掉,
+  日志只剩 `exit status 128` 无法诊断根因)。
 
 ## 0.1.11 - 2026-07-24
 

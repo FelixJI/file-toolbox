@@ -140,6 +140,14 @@ jobs:
       - name: 安装依赖（GUI + invoice + dev）
         run: uv sync --extra gui --extra invoice --extra dev
 
+      # 配置 git 提交身份:release.py --ci 内部会执行 git commit(打 chore(release) 提交),
+      # GitHub runner 默认无全局 user.name/user.email → commit 报 exit 128。
+      # 用 github-actions[bot] 身份(GitHub 官方推荐),配合上方 checkout 注入的 GITHUB_TOKEN 即可 push。
+      - name: 配置 git 提交身份
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       # 新版本:跑 release.py --ci(内部 bump_version --push 会 commit+tag+push),再抓出新 tag。
       # 补发:跳过 bump,直接用 target_tag。
       - name: 计算最终发布 tag

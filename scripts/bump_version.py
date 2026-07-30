@@ -169,14 +169,19 @@ def tag_exists(root: Path, tag: str) -> bool:
 def git_commit_and_tag(
     root: Path, files: list[str], version: str, *, commit: bool, tag: bool
 ) -> None:
-    """add → commit → tag。tag 失败时回滚 commit。"""
+    """add → commit → tag。commit/tag 失败时回滚并把 git 真实 stderr 透出。"""
     tag_name = f"v{version}"
     if tag and tag_exists(root, tag_name):
         raise GitError(f"tag {tag_name} 已存在")
     if not commit:
         return
     _git("add", *files, cwd=root)
-    _git("commit", "-m", f"chore(release): {tag_name}", cwd=root)
+    try:
+        _git("commit", "-m", f"chore(release): {tag_name}", cwd=root)
+    except subprocess.CalledProcessError as e:
+        # _git 用 capture_output=True,stderr 被吞。这里透出 git 真实原因
+        # (如 runner 未配 user.identity → "Please tell me who you are"),便于诊断。
+        raise GitError(f"git commit 失败: {e.stderr}") from e
     if tag:
         try:
             _git("tag", tag_name, cwd=root)
