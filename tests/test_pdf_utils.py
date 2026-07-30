@@ -157,6 +157,18 @@ def test_merge_pdfs_missing_file_skipped(tmp_path):
         doc.close()
 
 
+def test_merge_pdfs_empty_list_fails_cleanly(tmp_path):
+    """空列表 → fitz 保存 0 页文档抛异常,merge_pdfs 捕获返回 (False, 提示)。
+
+    锁定当前行为:不产生空 PDF 文件,返回失败与中文提示(PyMuPDF 不允许 0 页保存)。
+    """
+    out = tmp_path / "empty.pdf"
+    ok, msg = merge_pdfs([], out)
+    assert ok is False
+    assert "合并PDF失败" in msg
+    assert not out.exists()
+
+
 # --- get_file_info -------------------------------------------------------------
 
 

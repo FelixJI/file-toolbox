@@ -98,6 +98,25 @@ def test_read_all_skips_corrupt_line(tmp_path):
     assert [r["id"] for r in records] == [1, 2]
 
 
+def test_get_record_line_missing_id_key_does_not_crash(tmp_path):
+    """合法 JSON 但缺 'id' 键的行 → get_record 查找时 rec["id"] 会 KeyError。
+
+    锁定当前行为:_read_all 把它当普通记录读入,get_record 遍历时对该行 rec["id"]
+    抛 KeyError(非静默跳过)。此为已知弱点(部分写入/损坏),记录行为使未来若改为
+    「跳过无 id 行」该测试变红。
+    """
+    store = JsonHistoryStore(tmp_path)
+    f = tmp_path / "rename.jsonl"
+    f.write_text(
+        '{"no_id": true}\n',  # 合法 JSON,无 id 键
+        encoding="utf-8",
+    )
+    import pytest
+
+    with pytest.raises(KeyError):
+        store.get_record("rename", 1)
+
+
 def test_last_id_falls_back_to_full_scan_when_last_line_corrupt(tmp_path):
     """末行损坏:_last_id 回退全量扫描 max id → add_record 返回 max+1(覆盖 60-62)。"""
     store = JsonHistoryStore(tmp_path)

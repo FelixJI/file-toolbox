@@ -61,3 +61,13 @@ class TestCorruptionTolerance:
         _settings_path().write_text("garbage", encoding="utf-8")
         settings.set("k", "v")
         assert settings.get("k") == "v"
+
+    @pytest.mark.parametrize("payload", ["[1, 2, 3]", '"a string"', "42", "true", "null"])
+    def test_non_dict_valid_json_returns_default(self, isolated_cwd, payload):
+        """合法但非 dict 的 JSON(列表/字符串/数字/布尔/null)→ _load 回退 {},get 返回 default。
+
+        回归保护:isinstance(data, dict) 守卫若被移除,后续 .get 会 AttributeError。
+        """
+        _settings_path().parent.mkdir(parents=True, exist_ok=True)
+        _settings_path().write_text(payload, encoding="utf-8")
+        assert settings.get("anything", "d") == "d"
