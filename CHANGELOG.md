@@ -14,6 +14,15 @@
   发票识别),不再二次选择工具。
 - UpdateWorker 新增 `checked` 信号,反馈检查结果(最新/可用/失败),供手动检查 UI 使用。
 
+### Fixed
+- 修复 Release 流水线手动触发必然失败:补发逻辑默认开启且按 creatordate 倒序找未发布 tag,
+  总是命中 Nuitka 时代的 v0.1.2(代码无法用当前 PyInstaller 工具链构建 → `No module named nuitka`)。
+  现补发默认关闭(手动触发即发最新版),且即便开启也只在最近 3 个 tag 范围内查找,
+  不再回头处理远古不可构建的历史 tag。
+- CI/Release actions 升级到 Node 24 runtime(消除 Node 20 弃用警告):
+  checkout v4→v5、setup-uv v3→v7、upload/download-artifact v4→v5、action-gh-release v2→v3。
+  Node 20 将于 2026-09-16 从 runner 移除。
+
 ## 0.1.11 - 2026-07-24
 
 ### Fixed
