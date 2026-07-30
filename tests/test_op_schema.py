@@ -90,3 +90,61 @@ def test_string_keys_missing_key_no_error():
     op = {"type": "op", "params": {"find": "x"}}
     ok, _ = validate_params(op, 0, rules)
     assert ok
+
+
+# ---------------------------------------------------------------------------
+# string_keys:零值 / 浮点 / 就地修改 identity(防回归把 `if params[key]` 改 falsy 判定)
+# ---------------------------------------------------------------------------
+
+
+def test_string_keys_coerces_int_zero_to_str():
+    """int 0(falsy)必须被强转为 \"0\"。
+
+    回归风险:若实现误把 `if params[key] is not None` 改成 `if params[key]`(truthy),
+    0 会被跳过,下游收到 int 0 报 TypeError。锁定 None 判定。
+    """
+    rules = {"op": ParamRule(string_keys=("replace",))}
+    op = {"type": "op", "params": {"replace": 0}}
+    validate_params(op, 0, rules)
+    assert op["params"]["replace"] == "0"
+    assert isinstance(op["params"]["replace"], str)
+
+
+def test_string_keys_coerces_float_to_str():
+    """float 值强转为 str(\"1.5\")。"""
+    rules = {"op": ParamRule(string_keys=("replace",))}
+    op = {"type": "op", "params": {"replace": 1.5}}
+    validate_params(op, 0, rules)
+    assert op["params"]["replace"] == "1.5"
+
+
+def test_string_keys_mutates_same_dict_object():
+    """string_keys 强转是就地修改调用方传入的 params(同一对象 identity)。
+
+    契约要求:op_parser 下游 re.subn 使用的是同一 params 引用,若实现改成返回 copy
+    则调用方拿不到强转结果。保留原引用断言其被改。
+    """
+    rules = {"op": ParamRule(string_keys=("find",))}
+    op = {"type": "op", "params": {"find": 2024}}
+    params_ref = op["params"]
+    validate_params(op, 0, rules)
+    assert params_ref["find"] == "2024"  # 同一对象被就地修改
+
+
+# ---------------------------------------------------------------------------
+# regex_key:空串 vs 缺失键(均放行,锁定 if pattern: 短路)
+# ---------------------------------------------------------------------------
+
+
+def test_regex_key_empty_string_passes():
+    """regex_key 值为空串 → 放行(必填性由 required 负责,空模式不编译)。"""
+    rules = {"op": ParamRule(regex_key="pattern")}
+    ok, msg = validate_params({"type": "op", "params": {"pattern": ""}}, 0, rules)
+    assert ok and msg == ""
+
+
+def test_regex_key_missing_passes():
+    """regex_key 键缺失 → 放行(同空串语义)。"""
+    rules = {"op": ParamRule(regex_key="pattern")}
+    ok, msg = validate_params({"type": "op", "params": {}}, 0, rules)
+    assert ok and msg == ""
