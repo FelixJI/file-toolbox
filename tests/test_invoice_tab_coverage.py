@@ -360,3 +360,43 @@ def test_export_default_outdir(tab, monkeypatch, tmp_path):
     )
     tab._export()
     assert (tmp_path / "发票结果.xlsx").exists()
+
+
+# ---------------------------------------------------------------------------
+# closeEvent:解析中关闭窗口应停止 worker(防泄漏)
+# ---------------------------------------------------------------------------
+
+
+def test_close_event_stops_running_parse_worker(tab):
+    """解析中触发 closeEvent 应 cancel + wait 停止 _parse_worker,不泄漏。
+
+    回归:InvoiceTab 曾无 closeEvent,关闭窗口(main_window.closeEvent 仅对
+    hasattr(tab,'closeEvent') 的 tab 调用)时 _parse_worker 仍在后台跑,
+    持有 self 为 parent,进程退出可能崩溃/泄漏。补 closeEvent 协作式停止 worker。
+    """
+    from PySide6.QtGui import QCloseEvent
+
+    cancelled = []
+    waited = []
+
+    class _FakeRunningWorker:
+        """模拟正在运行的 worker:isRunning True,cancel/wait 可记录调用。"""
+
+        def isRunning(self) -> bool:
+            return True
+
+        def cancel(self) -> None:
+            cancelled.append(1)
+
+        def quit(self) -> None:  # 与 _stop_worker 一致:无事件循环 worker 仍调用
+            pass
+
+        def wait(self, timeout_ms: int = 0) -> bool:
+            waited.append(timeout_ms)
+            return True  # 模拟 promptly 停止
+
+    tab._parse_worker = _FakeRunningWorker()  # type: ignore[assignment]
+    tab.closeEvent(QCloseEvent())
+    assert cancelled, "closeEvent 应调用 worker.cancel() 停止解析"
+    assert waited, "closeEvent 应 wait() 等待 worker 退出"
+    assert tab._parse_worker is None
