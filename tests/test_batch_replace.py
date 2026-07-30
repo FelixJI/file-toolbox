@@ -80,6 +80,31 @@ def test_text_read_multiple_encodings(tmp_path):
     assert "你好" in h.read_content(f)
 
 
+def test_text_read_strips_utf8_bom(tmp_path):
+    """UTF-8 BOM 文件读取后内容不应残留 \\ufeff(B5 回归)。
+
+    回归:旧实现 read_content 用 encoding=\"utf-8\" 读,BOM(\\ufeff)残留在内容开头,
+    破坏后续 simple_replace 匹配(查找 \"hello\" 在 \"\\ufeffhello\" 中 count=0)。
+    改用 utf-8-sig 自动剥离 BOM(对无 BOM 的 UTF-8 行为与 utf-8 完全一致)。
+    """
+    f = tmp_path / "bom.txt"
+    f.write_bytes("hello world".encode("utf-8-sig"))  # utf-8-sig 写入会加一个 BOM
+    h = TextHandler()
+    content = h.read_content(f)
+    assert "\ufeff" not in content
+    assert content == "hello world"
+    # BOM 剥离后,simple_replace 能正常匹配
+    assert h.count_matches(content, [{"type": "simple_replace", "params": {"find": "hello"}}]) == 1
+
+
+def test_text_read_plain_utf8_unaffected_by_sig(tmp_path):
+    """无 BOM 的 UTF-8 文件用 utf-8-sig 读取结果与 utf-8 一致(不引入回归)。"""
+    f = tmp_path / "plain.txt"
+    f.write_text("café résumé", encoding="utf-8")
+    h = TextHandler()
+    assert h.read_content(f) == "café résumé"
+
+
 def test_replace_operation_type_enum():
     assert ReplaceOperationType.SIMPLE_REPLACE.value == "simple_replace"
     assert ReplaceOperationType.REGEX_REPLACE.value == "regex_replace"

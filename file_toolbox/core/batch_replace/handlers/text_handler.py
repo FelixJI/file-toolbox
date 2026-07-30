@@ -26,7 +26,9 @@ class TextHandler:
             文件文本内容
         """
         # 尝试多种编码
-        encodings = ["utf-8", "gbk", "gb2312", "utf-16", "latin-1"]
+        # utf-8-sig 优先:对带 BOM 的 UTF-8 文件自动剥离 \ufeff(否则 BOM 残留在内容开头,
+        # 破坏后续 simple_replace 匹配);对无 BOM 的 UTF-8 行为与 utf-8 完全一致。
+        encodings = ["utf-8-sig", "utf-8", "gbk", "gb2312", "utf-16", "latin-1"]
 
         for encoding in encodings:
             try:
