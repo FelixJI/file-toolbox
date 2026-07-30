@@ -524,8 +524,19 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         """
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"{file_path.stem}_{timestamp}{file_path.suffix}"
-        backup_path = self._backup_dir / backup_name
+        backup_path = self._backup_dir / f"{file_path.stem}_{timestamp}{file_path.suffix}"
+        # 同名 stem + 同一秒(或同一备份已存在)时,追加 _1/_2/... 保证唯一,避免
+        # shutil.copy2 静默覆盖前一个备份导致备份数据丢失。
+        if backup_path.exists():
+            counter = 1
+            while True:
+                candidate = (
+                    self._backup_dir / f"{file_path.stem}_{timestamp}_{counter}{file_path.suffix}"
+                )
+                if not candidate.exists():
+                    backup_path = candidate
+                    break
+                counter += 1
         shutil.copy2(file_path, backup_path)
         self.logger.info(f"创建备份: {file_path} -> {backup_path}")
         return backup_path

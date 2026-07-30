@@ -42,7 +42,9 @@ class RenameController:
         """
         rid = record.get("id", "?")
         ts = str(record.get("timestamp", ""))[:19]
-        data = record.get("data", {})
+        # data 可能缺失或显式为 None(worker 写入 null):用 `or {}` 同时兜底两者,
+        # 避免 None.get('rename_map') 抛 AttributeError 让历史列表整体崩溃。
+        data = record.get("data") or {}
         n = len(data.get("rename_map", {}))
         return f"#{rid} {ts}  {n} 个文件"
 

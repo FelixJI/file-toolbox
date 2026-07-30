@@ -84,3 +84,51 @@ def test_get_item_cancelled_raises(app, monkeypatch):
     p = QInputDialogPrompter()
     with pytest.raises(PromptCancelled):
         p.get_item("T", "L", ["a"])
+
+
+# ---------------------------------------------------------------------------
+# 参数透传:get_int 的 minValue/maxValue、get_item 的 current/editable 必须转发给
+# QInputDialog(回归保护:旧测试用 lambda *a,**k 丢弃参数,删除这些 kw 静默通过)
+# ---------------------------------------------------------------------------
+
+
+def test_get_int_forwards_min_max_value_to_qinputdialog(app, monkeypatch):
+    """get_int 的 value/minimum/maximum 必须以 minValue/maxValue/value 转发。"""
+    captured = {}
+
+    def fake_get_int(*a, **k):
+        captured.update(k)
+        return (k.get("value", 0), True)
+
+    monkeypatch.setattr(QInputDialog, "getInt", fake_get_int)
+    p = QInputDialogPrompter()
+    p.get_int("T", "L", value=7, minimum=1, maximum=50)
+    assert captured["value"] == 7
+    assert captured["minValue"] == 1
+    assert captured["maxValue"] == 50
+
+
+def test_get_item_forwards_current_editable_to_qinputdialog(app, monkeypatch):
+    """get_item 的 current(位置参数)/editable 必须转发。"""
+    captured = {}
+
+    def fake_get_item(*a, **k):
+        captured.update(k)
+        captured["_args"] = a
+        return ("x", True)
+
+    monkeypatch.setattr(QInputDialog, "getItem", fake_get_item)
+    p = QInputDialogPrompter()
+    p.get_item("T", "L", ["a", "b"], current=1, editable=True)
+    # QInputDialog.getItem(parent, title, label, items, current, editable=...)
+    # args: a[0]=parent, a[1]=title, a[2]=label, a[3]=items, a[4]=current
+    assert captured["_args"][3] == ["a", "b"]
+    assert captured["_args"][4] == 1  # current 透传
+    assert captured["editable"] is True
+
+
+def test_get_text_empty_string_ok_returns_empty(app, monkeypatch):
+    """get_text 返回 ('', True)(用户对空输入点 OK)→ 返回 ''(与取消区分:取消抛异常)。"""
+    _patch(monkeypatch, "getText", ("", True))
+    p = QInputDialogPrompter()
+    assert p.get_text("T", "L") == ""

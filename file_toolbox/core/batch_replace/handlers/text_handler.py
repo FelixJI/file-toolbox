@@ -26,7 +26,9 @@ class TextHandler:
             文件文本内容
         """
         # 尝试多种编码
-        encodings = ["utf-8", "gbk", "gb2312", "utf-16", "latin-1"]
+        # utf-8-sig 优先:对带 BOM 的 UTF-8 文件自动剥离 \ufeff(否则 BOM 残留在内容开头,
+        # 破坏后续 simple_replace 匹配);对无 BOM 的 UTF-8 行为与 utf-8 完全一致。
+        encodings = ["utf-8-sig", "utf-8", "gbk", "gb2312", "utf-16", "latin-1"]
 
         for encoding in encodings:
             try:
@@ -112,10 +114,13 @@ class TextHandler:
                 count = text.count(find_text)
                 new_text = text.replace(find_text, replace_text)
             else:
+                # replacement 用 lambda 包裹作为字面量返回:re 会把裸 replacement 当模板
+                # 解释,含 \d / \1 抛 re.error 或误当反向引用,与 case-sensitive(text.replace
+                # 字面量)分支语义不一致。lambda 使两分支行为对齐。
                 pattern = re.compile(re.escape(find_text), re.IGNORECASE)
                 matches = pattern.findall(text)
                 count = len(matches)
-                new_text = pattern.sub(replace_text, text)
+                new_text = pattern.sub(lambda _m: replace_text, text)
 
             return new_text, count
 

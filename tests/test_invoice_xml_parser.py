@@ -126,6 +126,36 @@ def test_normalize_tax_rate_decimal_rate():
 
 
 # ---------------------------------------------------------------------------
+# _normalize_tax_rate:边界值(0 / 负数 / 掩码 / 全角)——锁定当前行为
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_tax_rate_zero():
+    """0 → 0%(红字/零税率发票)。"""
+    assert _normalize_tax_rate("0") == "0%"
+
+
+def test_normalize_tax_rate_negative():
+    """负数税率(红字冲销发票)-0.13 → -13%。"""
+    assert _normalize_tax_rate("-0.13") == "-13%"
+
+
+def test_normalize_tax_rate_masked_passthrough():
+    """掩码税率 ***% / 「不征税」原样透传(float 失败回退 raw)。"""
+    assert _normalize_tax_rate("***%") == "***%"
+    assert _normalize_tax_rate("不征税") == "不征税"
+
+
+def test_normalize_tax_rate_fullwidth_percent_currently_raw():
+    """全角 ％(U+FF05)当前**原样透传**(未归一为半角 %)。
+
+    锁定当前行为:全角 ％ 出现在真实电子发票上,float('13％') 失败回退 raw。
+    未来若新增全角归一逻辑,该测试应变红提醒有意更新。
+    """
+    assert _normalize_tax_rate("13％") == "13％"
+
+
+# ---------------------------------------------------------------------------
 # parse_xml:文件不存在 / 解析失败
 # ---------------------------------------------------------------------------
 

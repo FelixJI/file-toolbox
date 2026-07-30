@@ -56,3 +56,19 @@ def test_format_history_line_shape():
 def test_format_history_line_empty_map():
     record = {"id": 1, "timestamp": "t", "data": {"rename_map": {}}}
     assert _c().format_history_line(record) == "#1 t  0 个文件"
+
+
+def test_format_history_line_missing_id_defaults_question():
+    """缺 id 键 → '#?' 占位(锁定默认值,防回归改空串)。"""
+    line = _c().format_history_line({"timestamp": "t"})
+    assert line == "#? t  0 个文件"
+
+
+def test_format_history_line_data_none_does_not_crash():
+    """data 显式为 None(worker 写入 null)→ 不应 AttributeError 崩溃,计 0 个文件。
+
+    回归:旧实现 record.get('data', {}) 仅在**缺键**时回退 {},data=None 时返回 None,
+    随后 None.get('rename_map') 抛 AttributeError。
+    """
+    line = _c().format_history_line({"id": 1, "timestamp": "t", "data": None})
+    assert line == "#1 t  0 个文件"

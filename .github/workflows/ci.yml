@@ -44,8 +44,21 @@ jobs:
         # 标记为 HANDMADE 的(无 .ui)跳过。新增/迁移 .ui 后此步自动生效防漂移。
         run: uv run --extra dev python scripts/regen_ui.py --check
 
-      - name: pytest + core 覆盖率(≥88%)
-        run: uv run pytest --cov=file_toolbox.core --cov-fail-under=88 -q
+      - name: pytest + core 覆盖率(行+分支 ≥90%)
+        # --cov-branch:启用分支覆盖。仅行覆盖率无法发现「分支未覆盖」(如异常分支、
+        # 条件取反),本次加固已把 core 分支覆盖提升至 99%,门禁阈值 88→90 防回归。
+        # -W error::*:把被吞的 ResourceWarning(未关句柄)/DeprecationWarning 变红,
+        # 提前暴露资源泄漏与弃用 API。
+        run: >
+          uv run pytest --cov=file_toolbox.core --cov-branch --cov-fail-under=90
+          -W error::ResourceWarning -W error::DeprecationWarning -q
 
-      - name: pytest + 总盘覆盖率(≥90%)
-        run: uv run pytest --cov=file_toolbox --cov-fail-under=90 -q
+      - name: pytest + 总盘覆盖率(行+分支 ≥90%)
+        run: >
+          uv run pytest --cov=file_toolbox --cov-branch --cov-fail-under=90
+          -W error::ResourceWarning -W error::DeprecationWarning -q
+
+      - name: 测试用例数不回退(G3)
+        # 防止误删测试导致用例数悄悄下降(line coverage 发现不了「整类边界用例被删」)。
+        # 基线随新增用例上调,见 scripts/check_test_count.py。
+        run: uv run --extra dev python scripts/check_test_count.py

@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Fixed
+- `JsonHistoryStore.get_records(limit<0)` 反向切片丢首条:`limit=-1` 误返回 N-1 条
+  (docstring 承诺 ≤0 表示全部)。统一用 `limit>0` 判定。
+- 批量重命名 `_delete_chars` 前缀删除 value 为负数时语义反转:`name[count:]` 对负数
+  取到尾部(`"ABCDE"` 删 -2 误返回 `"DE"`)。负数视为无效返回原名。
+- 内容替换 simple_replace 不区分大小写时,replace 文本含反斜杠(`\d`/`\1`)抛
+  `re.error('bad escape')` 或误当反向引用;区分大小写分支(`str.replace`)正常。
+  改用 lambda 使 replacement 作为字面文本,两分支行为一致(`batch_rename` 与
+  `text_handler` 两处同款写法一并修复;regex_replace 仍保留反向引用语义)。
+- 内容替换 `_create_backup` 同名 stem + 同一秒备份静默覆盖导致备份数据丢失:时间戳
+  精度仅到秒,两个不同目录的同名文件同秒备份生成相同文件名。冲突时追加 `_1`/`_2` 后缀。
+- 内容替换 `read_content` 读 UTF-8 BOM 文件时 `\ufeff` 残留内容,破坏后续 simple_replace
+  匹配。编码列表首选改 `utf-8-sig`(自动剥离 BOM,对无 BOM 文件与 utf-8 一致)。
+- GUI `PDFController.summarize_results` 对缺 `success` 键的结果 dict(worker 异常返回
+  `{'error': ...}`)抛 `KeyError`,一条异常结果中断整个汇总让 UI 崩溃。改用 `.get('success')`。
+- GUI `InvoiceController.dedupe_strategy` 负索引静默返回错误策略:`(-1)` 返回 `'mark'`、
+  `(-2)` 返回 `'dedupe'`(Python 负索引),与 docstring「越界抛 IndexError」相悖。显式拒绝。
+- GUI `InvoiceTab` 无 `closeEvent`,解析中关闭窗口泄漏 `_parse_worker`(无事件循环 QThread,
+  `quit` 无效),进程退出可能崩溃。补 `closeEvent` 协作式 `cancel`+`wait`。
+- GUI `RenameController.format_history_line` 对 `data: None`(worker 写入 null)抛
+  `AttributeError` 让历史列表整体崩溃。改 `record.get('data') or {}` 兜底。
+
+### Changed
+- 测试加固(GUI/CLI 层):补 22 个边界行为断言(用例 1441→1463)。op_parser._coerce
+  类型强转边界(前导零/float/bool 大小写/负数/空串/重复键);qt_prompter 参数透传
+  (minValue/maxValue/current/editable 实际转发给 QInputDialog,旧测试丢弃参数);
+  pdf_cmd 全失败 exit 0(锁定已知风险);replace 预览=执行计数一致;CLI 非法 regex 前置
+  拦截;history_dialog 部分撤销仍标记已撤销(锁定已知风险)。
+- 测试加固(core/common 层):行覆盖率已达 100% 但不证明边界行为被正确断言。补 48 个「写错断言就变红」
+  的强边界断言(format_file_size 精确边界与浮点累积、format_datetime tz 后缀、
+  expand_files 顺序/去重、op_schema string_keys 零值/identity、batch_rename 批内冲突/
+  digits 溢出、mkdir 校验、invoice 税率/去重/多 DocBody 等)。用例数 1393→1441。
+- CI 门禁加强:启用分支覆盖率(`--cov-branch`,core 阈值 88→90);新增严格告警
+  (`-W error::ResourceWarning`/`DeprecationWarning`);新增用例数不回退门禁
+  (`scripts/check_test_count.py`,基线 1441)。
+
 ## 0.1.13 - 2026-07-30
 
 ## 0.1.12 - 2026-07-30

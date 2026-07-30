@@ -170,6 +170,30 @@ def test_collect_delete_chars_cancel_item_returns_none():
     assert c.collect("delete_chars") is None
 
 
+def test_collect_delete_chars_cancel_value_returns_none():
+    """delete_chars:选了类型但 value 提示被取消 → **整体取消返回 None**(锁定当前行为)。
+
+    注:这与 _collect_replace_text 不同(replace 对 value 取消 try/except 保留空串)。
+    delete_chars 的 value get_text 未包 try,故取消直接抛 PromptCancelled → collect 返回 None。
+    锁定该不一致:未来若统一为「value 取消保留空串」,该测试应变红提醒有意更新。
+    """
+    c = _collector(items=["suffix"], text=None)  # value 取消(队列空)
+    assert c.collect("delete_chars") is None
+
+
+def test_collect_add_number_int_coerces_existing_str_prefill():
+    """add_number:existing 的 start/digits 为字符串时,int() 强转后作为 prefill 透传。
+
+    回归保护:int(ex.get('start',1)) 的强转若被移除,字符串 prefill 会 TypeError。
+    断言 get_int 收到的 value 是 int(强转后)且来自 existing。
+    """
+    c = _collector(ints=[9, 2])
+    c.collect("add_number", existing={"start": "9", "digits": "2"})
+    # 第一次 get_int(start) 的 prefill value 应为 int 9(字符串被 int() 转过)
+    assert c._p.int_calls[0][2] == 9
+    assert c._p.int_calls[1][2] == 2
+
+
 def test_collect_add_date():
     c = _collector(text=["%Y%m%d"])
     assert c.collect("add_date") == {"format": "%Y%m%d"}

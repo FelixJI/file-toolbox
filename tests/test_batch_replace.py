@@ -52,11 +52,63 @@ def test_text_normalize_strips_zero_width():
     assert TextHandler.normalize_text("a\u200bb") == "ab"
 
 
+def test_text_apply_case_insensitive_backslash_replace_matches_sensitive():
+    r"""simple_replace 不区分大小写时,replacement 含反斜杠应与区分大小写一致(字面量)。
+
+    回归:旧实现 case-insensitive 分支 pattern.sub(replace_text, text) 把 replacement
+    当模板解释,replace 含 \d / \1 抛 re.error('bad escape') 或误当反向引用;
+    case-sensitive 分支(text.replace)视为字面量。两分支语义须一致。
+    """
+    h = TextHandler()
+    sensitive, cs_count = h._apply_operation(
+        "abc",
+        {
+            "type": "simple_replace",
+            "params": {"find": "a", "replace": r"x\d", "case_sensitive": True},
+        },
+    )
+    insensitive, ci_count = h._apply_operation(
+        "abc",
+        {
+            "type": "simple_replace",
+            "params": {"find": "a", "replace": r"x\d", "case_sensitive": False},
+        },
+    )
+    assert sensitive == "x\\dbc"
+    assert insensitive == sensitive
+    assert cs_count == ci_count == 1
+
+
 def test_text_read_multiple_encodings(tmp_path):
     f = tmp_path / "gbk.txt"
     f.write_bytes("你好".encode("gbk"))
     h = TextHandler()
     assert "你好" in h.read_content(f)
+
+
+def test_text_read_strips_utf8_bom(tmp_path):
+    """UTF-8 BOM 文件读取后内容不应残留 \\ufeff(B5 回归)。
+
+    回归:旧实现 read_content 用 encoding=\"utf-8\" 读,BOM(\\ufeff)残留在内容开头,
+    破坏后续 simple_replace 匹配(查找 \"hello\" 在 \"\\ufeffhello\" 中 count=0)。
+    改用 utf-8-sig 自动剥离 BOM(对无 BOM 的 UTF-8 行为与 utf-8 完全一致)。
+    """
+    f = tmp_path / "bom.txt"
+    f.write_bytes("hello world".encode("utf-8-sig"))  # utf-8-sig 写入会加一个 BOM
+    h = TextHandler()
+    content = h.read_content(f)
+    assert "\ufeff" not in content
+    assert content == "hello world"
+    # BOM 剥离后,simple_replace 能正常匹配
+    assert h.count_matches(content, [{"type": "simple_replace", "params": {"find": "hello"}}]) == 1
+
+
+def test_text_read_plain_utf8_unaffected_by_sig(tmp_path):
+    """无 BOM 的 UTF-8 文件用 utf-8-sig 读取结果与 utf-8 一致(不引入回归)。"""
+    f = tmp_path / "plain.txt"
+    f.write_text("café résumé", encoding="utf-8")
+    h = TextHandler()
+    assert h.read_content(f) == "café résumé"
 
 
 def test_replace_operation_type_enum():
@@ -406,6 +458,44 @@ def test_create_backup_returns_path(tmp_path, monkeypatch):
     assert backup_path.exists()
     assert backup_path.parent == backup_dir
     assert backup_path.read_text(encoding="utf-8") == "data"
+
+
+def test_create_backup_same_stem_same_second_no_collision(tmp_path, monkeypatch):
+    """同名 stem 在同一秒备份不应互相覆盖(B4 回归:备份数据丢失)。
+
+    回归:旧实现时间戳精度仅到秒(%Y%m%d_%H%M%S),两个同名 report.txt 在同一秒备份
+    生成相同 backup_name,shutil.copy2 静默覆盖第一个 → 第一个备份数据丢失。
+    固定 datetime.now 返回同一时刻模拟同秒,断言两个备份路径不同且内容各自保留。
+    """
+    from datetime import datetime
+
+    sub1 = tmp_path / "d1"
+    sub2 = tmp_path / "d2"
+    sub1.mkdir()
+    sub2.mkdir()
+    f1 = _write_text(sub1 / "report.txt", "first")
+    f2 = _write_text(sub2 / "report.txt", "second")
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    svc = ContentReplaceService()
+    monkeypatch.setattr(svc, "_backup_dir", backup_dir)
+    # 冻结时间到同一秒,强制触发冲突(service 调 datetime.now())
+    frozen = datetime(2026, 7, 30, 12, 0, 0)
+
+    class _FrozenDateTime:
+        @staticmethod
+        def now(*a, **k):
+            return frozen
+
+    monkeypatch.setattr("file_toolbox.core.batch_replace.service.datetime", _FrozenDateTime)
+
+    bp1 = svc._create_backup(f1)
+    bp2 = svc._create_backup(f2)
+
+    assert bp1 != bp2  # 不应覆盖
+    assert bp1.exists() and bp2.exists()
+    assert bp1.read_text(encoding="utf-8") == "first"  # 第一个备份内容保留
+    assert bp2.read_text(encoding="utf-8") == "second"
 
 
 def test_preview_replace_cancel_check(tmp_path):

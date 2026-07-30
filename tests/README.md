@@ -15,7 +15,18 @@
 ## 运行
 
 ```bash
-uv run pytest -q                # 全量(基线 1393)
+uv run pytest -q                # 全量(基线 1463)
 uv run pytest tests/test_X.py   # 单文件
 uv run pytest --co -q           # 仅收集,核对用例数
 ```
+
+## 边界用例约定(Phase A-C 加固)
+
+- **不只是行覆盖**:100% 行覆盖只证明某行被执行过,不证明其边界行为被正确断言。
+  新增用例须是「写错断言就变红」的强断言(精确边界值、精确输出文本、行为一致性)。
+- **锁定当前行为**:对「代码当前行为正确但语义有争议」的点(如 `validate_folder_name`
+  允许 `.`/`..`、invoice 全角 `％` 未归一),用测试**锁定当前行为**并在注释标注「未来
+  若收紧策略/改语义,该测试应变红提醒有意更新」,而非擅自改语义。
+- **真实缺陷先复现再修**:发现的真实 bug 须先写红测试复现、再改代码转绿(见 git log
+  中 `fix(...)` 系列:history 负数 limit、delete_chars 负数、case-insensitive 反斜杠、
+  backup 同秒覆盖、BOM 残留)。

@@ -79,8 +79,12 @@ class PDFController:
         return config
 
     def summarize_results(self, results: list[dict[str, Any]]) -> tuple[int, int]:
-        """返回 (ok_count, fail_count):ok = r["success"] 为真的数量。"""
-        ok = sum(1 for r in results if r["success"])
+        """返回 (ok_count, fail_count):ok = r["success"] 为真的数量。
+
+        缺 'success' 键的结果(如 worker 异常返回 {'error': ...})计为失败而非抛
+        KeyError —— 一条异常结果不应中断整个汇总、让 UI 崩溃。
+        """
+        ok = sum(1 for r in results if r.get("success"))
         return ok, len(results) - ok
 
     def format_progress(self, cur: int, total: int, msg: str) -> str:

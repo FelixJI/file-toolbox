@@ -98,6 +98,25 @@ def test_read_all_skips_corrupt_line(tmp_path):
     assert [r["id"] for r in records] == [1, 2]
 
 
+def test_get_record_line_missing_id_key_does_not_crash(tmp_path):
+    """合法 JSON 但缺 'id' 键的行 → get_record 查找时 rec["id"] 会 KeyError。
+
+    锁定当前行为:_read_all 把它当普通记录读入,get_record 遍历时对该行 rec["id"]
+    抛 KeyError(非静默跳过)。此为已知弱点(部分写入/损坏),记录行为使未来若改为
+    「跳过无 id 行」该测试变红。
+    """
+    store = JsonHistoryStore(tmp_path)
+    f = tmp_path / "rename.jsonl"
+    f.write_text(
+        '{"no_id": true}\n',  # 合法 JSON,无 id 键
+        encoding="utf-8",
+    )
+    import pytest
+
+    with pytest.raises(KeyError):
+        store.get_record("rename", 1)
+
+
 def test_last_id_falls_back_to_full_scan_when_last_line_corrupt(tmp_path):
     """末行损坏:_last_id 回退全量扫描 max id → add_record 返回 max+1(覆盖 60-62)。"""
     store = JsonHistoryStore(tmp_path)
@@ -132,6 +151,21 @@ def test_last_id_returns_zero_when_file_only_blank_lines(tmp_path):
     f.write_text("   \n\n  \n", encoding="utf-8")  # 仅空白行
     rid = store.add_record("rename", {"v": 1})
     assert rid == 1
+
+
+def test_get_records_negative_limit_returns_all(tmp_path):
+    """limit<=0 一律表示「全部」(docstring 承诺)。
+
+    回归:旧实现 `records[-limit:] if limit else records` 中,`limit=0` 因 falsy
+    返回全部(正确),但 `limit<0` 是 truthy → `records[-limit:]` 反向切片,
+    丢掉首条记录(3 条 `limit=-1` 误返回 2 条)。负数应与 0 同等处理。
+    """
+    store = JsonHistoryStore(tmp_path)
+    for i in range(3):
+        store.add_record("rename", {"i": i})
+    assert len(store.get_records("rename", limit=-1)) == 3
+    assert len(store.get_records("rename", limit=-5)) == 3
+    assert len(store.get_records("rename", limit=0)) == 3
 
 
 def test_add_record_thread_safe_concurrent(tmp_path):

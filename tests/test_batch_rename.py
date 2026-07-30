@@ -102,6 +102,30 @@ def test_apply_conflict_detection(tmp_path):
     assert "冲突" in result[f][1]
 
 
+def test_apply_intra_batch_collision_both_target_same_path(tmp_path):
+    """批内两个文件映射到同一目标:当前实现仅检测与**已存在**文件冲突,不检测批内互撞,
+    故两者都报「就绪」(execute 时第二个会撞已存在)。**锁定当前行为**:两目标路径相同。
+
+    此为已知限制(检测批内冲突需额外逻辑)。锁定它,使未来若新增批内冲突检测,
+    该测试会变红提醒有意更新预期。
+    """
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    a.write_text("x")
+    b.write_text("y")
+    result = _svc().apply_operations(
+        [a, b],
+        [
+            {"type": "replace_text", "params": {"find": "a", "replace": "x"}},
+            {"type": "replace_text", "params": {"find": "b", "replace": "x"}},
+        ],
+    )
+    assert result[a][0] == result[b][0]  # 同一目标路径 x.txt
+    # 两者当前都报就绪(批内冲突未检测)
+    assert "准备" in result[a][1]
+    assert "准备" in result[b][1]
+
+
 def test_execute_rename(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("x")
@@ -227,6 +251,28 @@ def test_regex_replace_ignore_case_flag():
 def test_regex_replace_case_sensitive_default():
     svc = _svc()
     assert svc._regex_replace("AbC", {"pattern": "abc", "replace": "X"}) == "AbC"
+
+
+# ---------------------------------------------------------------------------
+# _replace_text:不区分大小写分支对 replacement 含反斜杠的处理(B3 回归)
+# ---------------------------------------------------------------------------
+
+
+def test_replace_text_case_insensitive_backslash_replace_matches_sensitive():
+    r"""不区分大小写时,replacement 含字面反斜杠应与区分大小写分支行为一致。
+
+    回归:旧实现 case-insensitive 分支用 pattern.sub(replace_text, name),
+    re 把 replacement 当模板解释 —— replace 含 \d / \1 等会抛 re.error('bad escape'),
+    或把 \1 当反向引用。而 case-sensitive 分支用 str.replace 视为字面量。
+    两分支语义必须一致:replacement 在 simple_replace 中是字面文本。
+    """
+    svc = _svc()
+    sensitive = svc._replace_text("abc", {"find": "a", "replace": r"x\d", "case_sensitive": True})
+    insensitive = svc._replace_text(
+        "abc", {"find": "a", "replace": r"x\d", "case_sensitive": False}
+    )
+    assert sensitive == "x\\dbc"
+    assert insensitive == sensitive  # 两分支字面一致,不抛 re.error
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +484,74 @@ def test_delete_chars_prefix_non_numeric_value_returns_original():
     """prefix value 非数字 → ValueError → 返回原名(行 291-292 已覆盖,补确认)。"""
     svc = _svc()
     assert svc._delete_chars("abcdef", {"delete_type": "prefix", "value": "xyz"}) == "abcdef"
+
+
+# ---------------------------------------------------------------------------
+# _delete_chars:prefix value 负数 / 超长(语义反转/清空,B2 回归)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_chars_prefix_negative_value_returns_name():
+    """prefix value 为负数 → 应视为无效返回原名,而非反向取尾部。
+
+    回归:旧实现 name[count:] 对 count=-2 取到尾部("ABCDE"→"DE"),语义反转。
+    负数对「删除前 N 个字符」无意义,应与非法值同等处理。
+    """
+    svc = _svc()
+    assert svc._delete_chars("ABCDE", {"delete_type": "prefix", "value": "-2"}) == "ABCDE"
+
+
+def test_delete_chars_suffix_negative_value_returns_name():
+    """suffix value 为负数 → 同样应返回原名(与 prefix 一致)。"""
+    svc = _svc()
+    assert svc._delete_chars("abcdef", {"delete_type": "suffix", "value": "-3"}) == "abcdef"
+
+
+# ---------------------------------------------------------------------------
+# add_number:digits 溢出(序号超过定宽,zfill 不截断)——锁定当前行为
+# ---------------------------------------------------------------------------
+
+
+def test_add_number_digits_overflow_breaks_fixed_width():
+    """start=998 digits=3,第 3 个文件序号=1000 超过 3 位,zfill 不截断 → [1000](4 位)。
+
+    锁定当前行为:zfill 只补不截,故溢出产生非定宽标签(破坏字典序/可能撞名)。
+    未来若新增「溢出报错」逻辑,该测试应变红提醒有意更新。
+    """
+    svc = _svc()
+    # index 2 → number = 998 + 2 = 1000
+    assert svc._add_number("f", {"start": 998, "digits": 3}, 2) == "f[1000]"
+
+
+# ---------------------------------------------------------------------------
+# apply_operations:多点扩展名 stem 切分 + 空输入(锁定 Path.stem 行为)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_prefix_on_multidot_extension(tmp_path):
+    """archive.tar.gz:Path.stem 切分为 "archive.tar"(非 "archive"),操作只作用于 stem。
+
+    锁定 Path 语义:多点扩展名只把最后一段当 suffix,前缀加在 "archive.tar" 前。
+    """
+    f = tmp_path / "archive.tar.gz"
+    f.write_text("x")
+    result = _svc().apply_operations([f], [{"type": "add_prefix", "params": {"text": "P_"}}])
+    assert result[f][0].name == "P_archive.tar.gz"
+
+
+def test_apply_operations_empty_files_returns_empty(tmp_path):
+    """空文件列表 → 返回空 dict(边界)。"""
+    assert _svc().apply_operations([], [{"type": "add_prefix", "params": {"text": "P_"}}]) == {}
+
+
+def test_apply_operations_empty_operations_marks_ready_unchanged(tmp_path):
+    """空操作列表 → 文件名不变,标记就绪(new_path == 原路径)。锁定当前行为。"""
+    f = tmp_path / "a.txt"
+    f.write_text("x")
+    result = _svc().apply_operations([f], [])
+    new_path, status = result[f]
+    assert new_path == f
+    assert "准备" in status
 
 
 # ---------------------------------------------------------------------------

@@ -228,3 +228,31 @@ def test_pdf_batch_generate_failure_echoes_error(tmp_path, monkeypatch):
     # 失败结果被标记 FAIL + error 被 echo(行 54)
     assert "FAIL" in r.output
     assert "模拟转换失败:引擎不可用" in r.output
+
+
+def test_pdf_all_failure_exit_code_zero_currently(tmp_path, monkeypatch):
+    """**全部**转换失败时,当前 pdf_cmd 仍 exit 0(锁定已知风险行为)。
+
+    pdf_cmd 在 fail!=0 时仅用黄色打印汇总,不 raise typer.Exit(1)。这意味着 CI 脚本
+    无法凭 exit code 判定失败。锁定当前行为:未来若改为「有失败即 exit 1」,
+    该测试应变红提醒有意更新。
+    """
+    from file_toolbox.core.batch_pdf.service import PDFGeneratorService
+
+    src = tmp_path / "a.png"
+    src.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    def fake_batch(self, files, config, progress_callback=None, cancel_check=None):
+        return [
+            {
+                "source": src,
+                "output": tmp_path / "a.pdf",
+                "success": False,
+                "error": "全失败",
+            }
+        ]
+
+    monkeypatch.setattr(PDFGeneratorService, "batch_generate", fake_batch)
+    r = runner.invoke(app, ["pdf", str(src)])
+    assert r.exit_code == 0  # 当前:全失败也 exit 0
+    assert "成功 0, 失败 1" in r.output  # 汇总行精确文本

@@ -70,6 +70,38 @@ def test_format_file_size_zero():
 
 
 # ---------------------------------------------------------------------------
+# format_file_size:精确边界 + 多次除法浮点累积(锁定正确舍入,防 off-by-one / 漂移)
+# ---------------------------------------------------------------------------
+
+
+def test_format_file_size_exact_1023_bytes_boundary():
+    """1023 应落在 B 档(未越 1024),不被提前进位到 KB。循环条件 size < 1024.0 的边界。"""
+    assert format_file_size(1023) == "1023 B"
+
+
+def test_format_file_size_exact_1024_promotes_to_kb():
+    """1024 恰好越界 → 进位为 1.00 KB(< 严格小于,1024 不满足则除以 1024)。"""
+    assert format_file_size(1024) == "1.00 KB"
+
+
+def test_format_file_size_multi_division_accumulation_5mb():
+    """5 MiB 需两次 /1024,验证多次除法后浮点累积不破坏精确舍入(5.00 而非 4.99/5.01)。"""
+    assert format_file_size(1024 * 1024 * 5) == "5.00 MB"
+
+
+def test_format_file_size_multi_division_accumulation_1_5gb():
+    """1.5 GiB 需三次 /1024,小数 .50 不因累积漂移成 .49/.51。"""
+    assert format_file_size(int(1.5 * 1024**3)) == "1.50 GB"
+
+
+def test_format_file_size_pb_overflow_keeps_pb_unit():
+    """远超 1024 PB 仍格式化为 PB 档(循环走完所有单位后落到 return PB 分支)。"""
+    out = format_file_size(1024**5 * 3)
+    assert out.endswith(" PB")
+    assert out.startswith("3.0")
+
+
+# ---------------------------------------------------------------------------
 # format_datetime:str 分支(行 26-31)
 # ---------------------------------------------------------------------------
 
@@ -112,6 +144,37 @@ def test_format_datetime_custom_format():
     """自定义 fmt。"""
     s = format_datetime("2026-05-19T10:00:00", fmt="%Y/%m/%d")
     assert "2026/05/19" in s
+
+
+# ---------------------------------------------------------------------------
+# format_datetime:tz 后缀精确文本(锁定 offset_str 拼接与 Z 解析为 +00:00)
+# ---------------------------------------------------------------------------
+
+
+def test_format_datetime_aware_utc_exact_bracket():
+    """带 tz 的 UTC datetime → 后缀精确为 [UTC+0000](%z 输出无冒号 +0000)。"""
+    dt = datetime(2026, 5, 19, 10, 0, 0, tzinfo=UTC)
+    assert format_datetime(dt) == "2026-05-19 10:00:00 [UTC+0000]"
+
+
+def test_format_datetime_aware_offset_exact_bracket():
+    """带非零 offset(+08:00)→ 后缀 [UTC+0800]。"""
+    from datetime import timedelta, timezone
+
+    dt = datetime(2026, 5, 19, 10, 0, 0, tzinfo=timezone(timedelta(hours=8)))
+    assert format_datetime(dt) == "2026-05-19 10:00:00 [UTC+0800]"
+
+
+def test_format_datetime_z_suffix_parsed_as_utc():
+    """ISO 串带 'Z' → 解析为 +00:00,后缀 [UTC+0000](证明 Z 被解析,而非走 fallback)。"""
+    assert format_datetime("2026-05-19T10:00:00Z") == "2026-05-19 10:00:00 [UTC+0000]"
+
+
+def test_format_datetime_invalid_string_has_no_bracket():
+    """非法字符串 fallback 返回原串,且**无** [UTC] 括号(区分「解析成功」与「原样返回」)。"""
+    out = format_datetime("not a date")
+    assert out == "not a date"
+    assert "[" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -212,3 +275,38 @@ def test_expand_files_no_directory_returns_explicit_only(tmp_path):
     f1 = tmp_path / "a.txt"
     result = expand_files([f1], None, False)
     assert result == [f1]
+
+
+# ---------------------------------------------------------------------------
+# expand_files:空输入 / 空目录 / 完整顺序(显式全部先于目录文件)
+# ---------------------------------------------------------------------------
+
+
+def test_expand_files_all_empty_returns_empty(tmp_path):
+    """files=[] + directory=None → [](边界)。"""
+    assert expand_files([], None, False) == []
+
+
+def test_expand_files_empty_directory_returns_explicit_only(tmp_path):
+    """目录存在但无文件 → 仅返回显式 files。"""
+    d = tmp_path / "empty"
+    d.mkdir()
+    explicit = tmp_path / "e.txt"
+    explicit.write_text("x")
+    assert expand_files([explicit], d, False) == [explicit]
+
+
+def test_expand_files_explicit_all_precede_directory_files(tmp_path):
+    """多个显式 files 全部排在目录文件之前(锁定「先 files 后 directory」顺序)。"""
+    e1 = tmp_path / "e1.txt"
+    e2 = tmp_path / "e2.txt"
+    e1.write_text("1")
+    e2.write_text("2")
+    d = tmp_path / "d"
+    d.mkdir()
+    (d / "d1.txt").write_text("d")
+    (d / "d2.txt").write_text("d")
+    result = expand_files([e1, e2], d, False)
+    names = [p.name for p in result]
+    assert names[:2] == ["e1.txt", "e2.txt"]
+    assert set(names[2:]) == {"d1.txt", "d2.txt"}

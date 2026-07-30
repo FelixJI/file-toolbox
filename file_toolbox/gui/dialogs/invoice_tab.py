@@ -8,7 +8,7 @@ UI 布局由 generated/ui_invoice_dialog.py 的 Ui_InvoiceDialog(setupUi) 构建
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
 
 from file_toolbox.common.history import JsonHistoryStore
@@ -147,6 +147,22 @@ class InvoiceTab(QWidget):
         self.ui.btn_export.setEnabled(self._result is not None and bool(self._result.invoices))
         self.ui.lbl_status.setText("解析失败")
         QMessageBox.warning(self, "解析失败", msg)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """关闭窗口时停止仍在运行的解析 worker,防泄漏。
+
+        InvoiceParseWorker 是无事件循环的 QThread(quit() 无效),仅靠协作式 cancel()
+        在文件间停止。closeEvent 不存在时,解析中关闭窗口会让 worker 继续在后台跑
+        (持有 self 为 parent),进程退出可能崩溃/泄漏。这里显式 cancel + wait。
+        与 pdf_tab._stop_worker 同款,但不强制 terminate(解析无 COM,wait 足够)。
+        """
+        worker = self._parse_worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            worker.quit()
+            worker.wait(3000)
+        self._parse_worker = None
+        super().closeEvent(event)
 
     def _populate_table(self) -> None:
         assert self._result is not None

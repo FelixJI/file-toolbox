@@ -147,7 +147,51 @@ def test_parse_ofd_multipage(ofd_sample_multipage):
 
 
 # --------------------------------------------------------------------------- #
-# #8 已知限制:多 DocBody 仅取首张(此处仅验证不崩)
+# #8 已知限制:多 DocBody 仅取首张 —— 锁定「取首张」行为
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_ofd_multi_docbody_uses_first_body(tmp_path):
+    """OFD 含两个 DocBody 时,docstring 承诺「仅处理首张」。
+
+    **实际行为(锁定)**:`_parse_first_doc_root` + `_collect_content_xmls` 用首个 DocBody
+    的 Document/Content;但 `_parse_custom_data` 用 root.iter 遍历**全部** DocBody 的
+    CustomData 且后写覆盖 → invoice_number 实际取自**最后一个** DocBody。
+    即「结构化字段取末张,版式字段取首张」,二者不一致(已知限制,多 DocBody 罕见)。
+    锁定当前行为,使未来若统一为「严格首张」该测试变红提醒有意更新。
+    """
+    ofd_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<ofd:OFD xmlns:ofd="http://www.ofdspec.org/2016" Version="1.2" DocType="OFD">
+<ofd:DocBody><ofd:DocRoot>Doc_0/Document.xml</ofd:DocRoot>
+<ofd:DocInfo><ofd:CustomDatas>
+<ofd:CustomData Name="发票号码">99990000000000000991</ofd:CustomData>
+</ofd:CustomDatas></ofd:DocInfo></ofd:DocBody>
+<ofd:DocBody><ofd:DocRoot>Doc_1/Document.xml</ofd:DocRoot>
+<ofd:DocInfo><ofd:CustomDatas>
+<ofd:CustomData Name="发票号码">99990000000000000992</ofd:CustomData>
+</ofd:CustomDatas></ofd:DocInfo></ofd:DocBody>
+</ofd:OFD>
+"""
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<ofd:Document xmlns:ofd="http://www.ofdspec.org/2016">
+<ofd:CommonData><ofd:PageArea><ofd:PhysicalBox>0 0 210 297</ofd:PhysicalBox></ofd:PageArea></ofd:CommonData>
+<ofd:Pages><ofd:Page ID="1" BaseLoc="Pages/Page_0/Content.xml"/></ofd:Pages></ofd:Document>
+"""
+    content_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<ofd:Page xmlns:ofd="http://www.ofdspec.org/2016"><ofd:Content><ofd:Layer Type="Body">
+</ofd:Layer></ofd:Content></ofd:Page>
+"""
+    p = tmp_path / "twobodies.ofd"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("OFD.xml", ofd_xml)
+        zf.writestr("Doc_0/Document.xml", document_xml)
+        zf.writestr("Doc_0/Pages/Page_0/Content.xml", content_xml)
+    p.write_bytes(buf.getvalue())
+
+    inv = parse_ofd(p)
+    # 当前:CustomData 后写覆盖 → 取末张号 992(版式字段取首张 Doc_0)
+    assert inv.invoice_number == "99990000000000000992"
 
 
 # --------------------------------------------------------------------------- #

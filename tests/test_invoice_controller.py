@@ -17,6 +17,22 @@ def test_dedupe_strategy_from_index():
     assert c.dedupe_strategy(2) == MARK == "mark"
 
 
+def test_dedupe_strategy_out_of_range_raises():
+    """索引越界(含负数)应抛 IndexError。
+
+    回归:旧实现 `self._DEDUPE_BY_INDEX[index]` 对负数走 Python 负索引,
+    dedupe_strategy(-1) 静默返回 'mark'、(-2) 返回 'dedupe',与 docstring
+    「越界抛 IndexError」承诺相悖(真实下拉框不会给负数,但契约应被锁定)。
+    """
+    import pytest
+
+    c = InvoiceController()
+    with pytest.raises(IndexError):
+        c.dedupe_strategy(3)
+    with pytest.raises(IndexError):
+        c.dedupe_strategy(-1)  # 负数不应静默返回末位策略
+
+
 def test_format_from_radios():
     """单选按钮状态映射:json 优先于 both,均未选时默认 excel。"""
     c = InvoiceController()

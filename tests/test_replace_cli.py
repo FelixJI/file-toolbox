@@ -69,6 +69,35 @@ def test_replace_preview_does_not_modify(tmp_path):
     assert f.read_text(encoding="utf-8") == "旧公司 旧公司"
 
 
+def test_replace_preview_count_equals_execute_count(tmp_path, monkeypatch):
+    """同一操作:预览「总匹配 N 处」应等于执行「替换 N 处」(preview/execute 口径一致)。
+
+    回归保护:preview_replace 与 execute_replace 是两条独立代码路径,计数口径若分叉
+    (如一处归一化、另一处不归一化)会让用户看到「3 处匹配」却「0 处替换」。
+    用精确行断言而非裸子串 "N"。
+    """
+    backup_dir = tmp_path / "backups"
+    monkeypatch.setattr(
+        "file_toolbox.core.batch_replace.service.get_backup_dir", lambda: _ensure(backup_dir)
+    )
+
+    # 预览
+    f1 = tmp_path / "preview.txt"
+    f1.write_text("foo foo bar", encoding="utf-8")
+    r_prev = runner.invoke(app, ["replace", str(f1), "--op", "simple_replace:find=foo,replace=baz"])
+    assert r_prev.exit_code == 0
+    assert "总匹配 2 处" in r_prev.output
+
+    # 执行(独立文件,同内容同操作)
+    f2 = tmp_path / "exec.txt"
+    f2.write_text("foo foo bar", encoding="utf-8")
+    r_exec = runner.invoke(
+        app, ["replace", str(f2), "--op", "simple_replace:find=foo,replace=baz", "--yes"]
+    )
+    assert r_exec.exit_code == 0, r_exec.output
+    assert "替换 2 处" in r_exec.output
+
+
 def test_replace_execute_modifies_and_backs_up(tmp_path, monkeypatch):
     """--yes 执行:txt 内容被替换 + 生成备份。"""
     # 把备份目录重定向到临时目录(并创建),避免污染真实 .file_toolbox/backups
@@ -116,6 +145,23 @@ def test_replace_regex_execute(tmp_path, monkeypatch):
     )
     assert r.exit_code == 0, r.output
     assert f.read_text(encoding="utf-8") == "2026 和 2026"
+
+
+def test_replace_cli_malformed_regex_rejected_before_execute(tmp_path):
+    """非法 regex(pattern 未闭合括号)→ CLI 执行前 validate_operations 拦截,exit 1 + 友好提示。
+
+    锁定 CLI 行为:replace_cmd 在 execute_replace 前调用 validate_operations 校验正则可编译,
+    非法则 exit 1,不进入执行。注:GUI replace_tab._execute 不做此前置校验(已知不一致,
+    依赖 service 静默跳过);CLI 更严格,锁定之防回归。
+    """
+    f = tmp_path / "a.txt"
+    f.write_text("hello", encoding="utf-8")
+    r = runner.invoke(
+        app, ["replace", str(f), "--op", "regex_replace:pattern=(,replace=x", "--yes"]
+    )
+    assert r.exit_code == 1
+    assert "正则表达式错误" in r.output
+    assert f.read_text(encoding="utf-8") == "hello"  # 未改
 
 
 def test_replace_case_sensitive(tmp_path, monkeypatch):
