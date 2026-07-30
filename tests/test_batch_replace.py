@@ -61,12 +61,18 @@ def test_text_apply_case_insensitive_backslash_replace_matches_sensitive():
     """
     h = TextHandler()
     sensitive, cs_count = h._apply_operation(
-        "abc", {"type": "simple_replace", "params": {"find": "a", "replace": r"x\d",
-                                                       "case_sensitive": True}}
+        "abc",
+        {
+            "type": "simple_replace",
+            "params": {"find": "a", "replace": r"x\d", "case_sensitive": True},
+        },
     )
     insensitive, ci_count = h._apply_operation(
-        "abc", {"type": "simple_replace", "params": {"find": "a", "replace": r"x\d",
-                                                      "case_sensitive": False}}
+        "abc",
+        {
+            "type": "simple_replace",
+            "params": {"find": "a", "replace": r"x\d", "case_sensitive": False},
+        },
     )
     assert sensitive == "x\\dbc"
     assert insensitive == sensitive
@@ -481,9 +487,7 @@ def test_create_backup_same_stem_same_second_no_collision(tmp_path, monkeypatch)
         def now(*a, **k):
             return frozen
 
-    monkeypatch.setattr(
-        "file_toolbox.core.batch_replace.service.datetime", _FrozenDateTime
-    )
+    monkeypatch.setattr("file_toolbox.core.batch_replace.service.datetime", _FrozenDateTime)
 
     bp1 = svc._create_backup(f1)
     bp2 = svc._create_backup(f2)

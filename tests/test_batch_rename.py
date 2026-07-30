@@ -267,9 +267,7 @@ def test_replace_text_case_insensitive_backslash_replace_matches_sensitive():
     两分支语义必须一致:replacement 在 simple_replace 中是字面文本。
     """
     svc = _svc()
-    sensitive = svc._replace_text(
-        "abc", {"find": "a", "replace": r"x\d", "case_sensitive": True}
-    )
+    sensitive = svc._replace_text("abc", {"find": "a", "replace": r"x\d", "case_sensitive": True})
     insensitive = svc._replace_text(
         "abc", {"find": "a", "replace": r"x\d", "case_sensitive": False}
     )

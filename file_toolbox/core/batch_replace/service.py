@@ -531,8 +531,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
             counter = 1
             while True:
                 candidate = (
-                    self._backup_dir
-                    / f"{file_path.stem}_{timestamp}_{counter}{file_path.suffix}"
+                    self._backup_dir / f"{file_path.stem}_{timestamp}_{counter}{file_path.suffix}"
                 )
                 if not candidate.exists():
                     backup_path = candidate
