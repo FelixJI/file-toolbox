@@ -3,7 +3,10 @@ name: Release
 # 完整发版流水线(本质是 CD):decide → build → publish。
 # 触发:
 #   1. 每天定时(北京时间 15:30):有新 commit 才发新版
-#   2. 手动 workflow_dispatch:可指定 bump_part 发新版,或补发最近一次失败版本
+#   2. 手动 workflow_dispatch:默认发新版(bump_part);可选补发最近失败版本
+# 设计原则:release 的语义是「发最新版本」。补发失败版本是兜底能力,默认关闭;
+#          且仅在「最近 N 个 tag」范围内查找,避免回头处理远古不可构建的历史 tag
+#          (如 Nuitka 时代的产物无法用当前 PyInstaller 工具链构建)。
 # 不再用 push: tags 自触发(原来 daily 与 release 被 tag push + API 反向调用串成两段,现合并为一)。
 on:
   schedule:
@@ -22,9 +25,9 @@ on:
           - major
           - prerelease
       rerun_latest_failed:
-        description: "优先补发最近一次尚未成功发布的版本"
+        description: "补发最近失败版本(默认关闭:默认发最新版)"
         required: false
-        default: "true"
+        default: "false"
         type: boolean
 
 permissions:
@@ -40,7 +43,7 @@ jobs:
       target_tag: ${{ steps.decide.outputs.target_tag }}
     steps:
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -51,10 +54,19 @@ jobs:
         run: |
           git fetch origin main --prune --tags
 
-          # 公共函数:扫描 v* tag,返回第一个在 GitHub Releases 不存在的(最近失败版本)。
+          # 公共函数:扫描最近 MAX_RERUN 个 v* tag,返回第一个在 GitHub Releases 不存在的
+          # (即最近一次失败版本)。限定扫描范围,避免回头处理远古不可构建的历史 tag
+          # (如 Nuitka 时代的产物无法用当前 PyInstaller 工具链构建,永远会失败)。
+          MAX_RERUN=3
           find_first_unreleased_tag() {
+            local count=0
             for tag in $(git tag --list "v*" --sort=-creatordate); do
               [ -z "$tag" ] && continue
+              count=$((count + 1))
+              if [ "$count" -gt "$MAX_RERUN" ]; then
+                echo "::notice::最近 ${MAX_RERUN} 个 tag 均已发布,更早的历史 tag 不再补发" >&2
+                return 1
+              fi
               CODE=$(curl -sS -o /tmp/release.json -w "%{http_code}" \
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Accept: application/vnd.github+json" \
@@ -115,13 +127,13 @@ jobs:
       resolved_tag: ${{ steps.resolve_tag.outputs.resolved_tag }}
     steps:
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -154,7 +166,7 @@ jobs:
           echo "::notice::已 bump 并推送 tag $NEW_TAG"
 
       - name: Checkout 发布 tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ steps.resolve_tag.outputs.resolved_tag }}
           clean: true
@@ -166,7 +178,7 @@ jobs:
         run: uv run --extra dev python scripts/build_exe.py --ci
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: FileToolbox-win64
           path: |
@@ -179,12 +191,12 @@ jobs:
     needs: [decide, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.build.outputs.resolved_tag }}
 
       - name: 下载构建产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: FileToolbox-win64
           path: artifacts
@@ -201,13 +213,13 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
 
       - name: 提取 Release notes
         run: uv run --extra dev python scripts/extract_changelog.py "${{ steps.ver.outputs.version }}" --out release_notes.md
 
       - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.build.outputs.resolved_tag }}
           body_path: release_notes.md
@@ -220,10 +232,10 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
 
       - name: 清理历史 Release(保留最近 5 个,仅删 Release+产物,保留 git tag)
         run: uv run --extra dev python scripts/cleanup_releases.py --keep 5 --repo "$REPO"

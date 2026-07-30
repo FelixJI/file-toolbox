@@ -20,10 +20,10 @@ jobs:
       # 脚本打印中文/✓/✗ 时会 UnicodeEncodeError。UTF-8 模式覆盖所有子进程。
       PYTHONUTF8: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 安装 uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
