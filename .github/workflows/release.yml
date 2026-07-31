@@ -1,252 +1,79 @@
-name: Release
+name: Build Release Assets
 
-# 完整发版流水线(本质是 CD):decide → build → publish。
-# 触发:
-#   1. 每天定时(北京时间 15:30):有新 commit 才发新版
-#   2. 手动 workflow_dispatch:默认发新版(bump_part);可选补发最近失败版本
-# 设计原则:release 的语义是「发最新版本」。补发失败版本是兜底能力,默认关闭;
-#          且仅在「最近 N 个 tag」范围内查找,避免回头处理远古不可构建的历史 tag
-#          (如 Nuitka 时代的产物无法用当前 PyInstaller 工具链构建)。
-# 不再用 push: tags 自触发(原来 daily 与 release 被 tag push + API 反向调用串成两段,现合并为一)。
 on:
-  schedule:
-    # 每天 15:30(北京时间)= 07:30 UTC
-    - cron: "30 7 * * *"
   workflow_dispatch:
     inputs:
-      bump_part:
-        description: "发新版时选择版本递增方式(仅用于新版本发版)"
-        required: false
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-          - prerelease
-      rerun_latest_failed:
-        description: "补发最近失败版本(默认关闭:默认发最新版)"
-        required: false
-        default: "false"
-        type: boolean
+      release_tag:
+        description: Existing draft Release tag, for example v0.1.15
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-assets-${{ github.repository }}-${{ inputs.release_tag }}
+  cancel-in-progress: false
 
 jobs:
-  # ---------- job 1:决定发什么 ----------
-  decide:
-    runs-on: ubuntu-latest
-    outputs:
-      should_release: ${{ steps.decide.outputs.should_release }}
-      mode: ${{ steps.decide.outputs.mode }} # new | rerun | none
-      target_tag: ${{ steps.decide.outputs.target_tag }}
+  build:
+    name: Build and upload Windows package
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONUTF8: "1"
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          fetch-tags: true
+          ref: ${{ inputs.release_tag }}
 
-      - name: 判断发版模式(补发失败版本 / 新版 / 跳过)
-        id: decide
-        shell: bash
+      - name: Verify tag and draft Release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          git fetch origin main --prune --tags
-
-          # 公共函数:扫描最近 MAX_RERUN 个 v* tag,返回第一个在 GitHub Releases 不存在的
-          # (即最近一次失败版本)。限定扫描范围,避免回头处理远古不可构建的历史 tag
-          # (如 Nuitka 时代的产物无法用当前 PyInstaller 工具链构建,永远会失败)。
-          MAX_RERUN=3
-          find_first_unreleased_tag() {
-            local count=0
-            for tag in $(git tag --list "v*" --sort=-creatordate); do
-              [ -z "$tag" ] && continue
-              count=$((count + 1))
-              if [ "$count" -gt "$MAX_RERUN" ]; then
-                echo "::notice::最近 ${MAX_RERUN} 个 tag 均已发布,更早的历史 tag 不再补发" >&2
-                return 1
-              fi
-              CODE=$(curl -sS -o /tmp/release.json -w "%{http_code}" \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")
-              if [ "$CODE" = "404" ]; then
-                echo "$tag"
-                return 0
-              fi
-            done
-            return 1
+          $version = (python -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])").Trim()
+          if ($env:RELEASE_TAG -ne "v$version") {
+            throw "Tag $env:RELEASE_TAG does not match repository version v$version"
+          }
+          $isDraft = (gh release view $env:RELEASE_TAG --json isDraft --jq '.isDraft').Trim()
+          if ($isDraft -ne "true") {
+            throw "Release $env:RELEASE_TAG must exist and remain a draft before assets are uploaded"
           }
 
-          MODE="none"
-          TARGET_TAG=""
-
-          # 手动触发:优先补发失败版本
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.rerun_latest_failed }}" = "true" ]; then
-            if TARGET_TAG=$(find_first_unreleased_tag); then
-              MODE="rerun"
-            fi
-          fi
-
-          # 没有可补发的 → 看是否需要发新版
-          if [ "$MODE" = "none" ]; then
-            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              # 手动触发且无失败版本可补发 → 直接发新版
-              MODE="new"
-            else
-              # 定时:仅当 main 有新 commit 才发
-              LATEST_TAG=$(git describe --tags --abbrev=0 --match "v*" origin/main 2>/dev/null || true)
-              if [ -z "$LATEST_TAG" ]; then
-                MODE="new" # 仓库尚无发布 tag
-              else
-                NEW_COMMITS=$(git rev-list --count "${LATEST_TAG}..HEAD")
-                if [ "${NEW_COMMITS}" -gt 0 ]; then
-                  MODE="new"
-                fi
-              fi
-            fi
-          fi
-
-          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "target_tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
-          [ "$MODE" = "none" ] && echo "should_release=false" >> "$GITHUB_OUTPUT" || echo "should_release=true" >> "$GITHUB_OUTPUT"
-
-          echo "::notice::发版模式 = $MODE, target_tag = ${TARGET_TAG:-(新版本,待 bump)}"
-
-  # ---------- job 2:构建(含新版本 bump) ----------
-  build:
-    needs: decide
-    if: needs.decide.outputs.should_release == 'true'
-    runs-on: windows-latest
-    env:
-      # 英文区域 runner 的 Python 默认 stdout/stderr 编码为 cp1252,
-      # 脚本(release.py / bump_version.py 等)打印中文时 UnicodeEncodeError。UTF-8 模式覆盖所有子进程。
-      PYTHONUTF8: "1"
-    outputs:
-      resolved_tag: ${{ steps.resolve_tag.outputs.resolved_tag }}
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 安装 uv
+      - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: 安装依赖（GUI + invoice + dev）
+      - name: Install dependencies
         run: uv sync --extra gui --extra invoice --extra dev
 
-      # 配置 git 提交身份:release.py --ci 内部会执行 git commit(打 chore(release) 提交),
-      # GitHub runner 默认无全局 user.name/user.email → commit 报 exit 128。
-      # 用 github-actions[bot] 身份(GitHub 官方推荐),配合上方 checkout 注入的 GITHUB_TOKEN 即可 push。
-      - name: 配置 git 提交身份
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      # 新版本:跑 release.py --ci(内部 bump_version --push 会 commit+tag+push),再抓出新 tag。
-      # 补发:跳过 bump,直接用 target_tag。
-      - name: 计算最终发布 tag
-        id: resolve_tag
-        shell: bash
-        env:
-          MODE: ${{ needs.decide.outputs.mode }}
-          TARGET_TAG: ${{ needs.decide.outputs.target_tag }}
-          VERSION_PART: ${{ inputs.bump_part || 'patch' }}
-        run: |
-          if [ "$MODE" = "rerun" ]; then
-            echo "resolved_tag=$TARGET_TAG" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # new:执行 bump(bump_version.py bump --push 会打 tag 并 push)
-          uv run --extra dev python scripts/release.py "$VERSION_PART" --skip-build --ci
-          # release.py 走的是 bump_version,最新 tag 即本次产物
-          NEW_TAG=$(git describe --tags --abbrev=0 --match "v*")
-          if [ "${NEW_TAG#v}" = "$NEW_TAG" ]; then
-            echo "::error::bump 后未取得合法 vX.Y.Z tag(得到 $NEW_TAG)"
-            exit 1
-          fi
-          echo "resolved_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
-          echo "::notice::已 bump 并推送 tag $NEW_TAG"
-
-      - name: Checkout 发布 tag
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ steps.resolve_tag.outputs.resolved_tag }}
-          clean: true
-
-      - name: 安装依赖（按 tag 重建）
-        run: uv sync --extra gui --extra invoice --extra dev
-
-      - name: PyInstaller 构建
+      - name: Build with PyInstaller
         run: uv run --extra dev python scripts/build_exe.py --ci
 
-      - name: 上传构建产物
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v6
         with:
-          name: FileToolbox-win64
+          name: FileToolbox-${{ inputs.release_tag }}
           path: |
             dist/FileToolbox-*-win64.zip
             dist/checksums.txt
           if-no-files-found: error
 
-  # ---------- job 3:发布 GitHub Release ----------
-  publish:
-    needs: [decide, build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.build.outputs.resolved_tag }}
-
-      - name: 下载构建产物
-        uses: actions/download-artifact@v7
-        with:
-          name: FileToolbox-win64
-          path: artifacts
-
-      - name: 计算 release version
-        id: ver
-        shell: bash
-        run: |
-          TAG="${{ needs.build.outputs.resolved_tag }}"
-          if [ -z "$TAG" ]; then
-            echo "::error::未获取到 tag 信息"
-            exit 1
-          fi
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - name: 安装 uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: 提取 Release notes
-        run: uv run --extra dev python scripts/extract_changelog.py "${{ steps.ver.outputs.version }}" --out release_notes.md
-
-      - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.build.outputs.resolved_tag }}
-          body_path: release_notes.md
-          files: |
-            artifacts/FileToolbox-*-win64.zip
-            artifacts/checksums.txt
-
-  # ---------- job 4:清理历史 Release(保留最近 5 个)----------
-  cleanup:
-    needs: publish
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: 安装 uv
-        uses: astral-sh/setup-uv@v7
-
-      - name: 清理历史 Release(保留最近 5 个,仅删 Release+产物,保留 git tag)
-        run: uv run --extra dev python scripts/cleanup_releases.py --keep 5 --repo "$REPO"
+      - name: Attach assets to draft Release
+        shell: pwsh
         env:
-          REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $assets = @(Get-ChildItem dist -File |
+            Where-Object { $_.Name -like 'FileToolbox-*-win64.zip' -or $_.Name -eq 'checksums.txt' } |
+            ForEach-Object FullName)
+          if ($assets.Count -lt 2) {
+            throw "Expected package archive and checksums"
+          }
+          gh release upload $env:RELEASE_TAG @assets --clobber

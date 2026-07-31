@@ -1,10 +1,8 @@
 name: CI
 
-# 质量门禁:push main / PR 时跑 lint + format + mypy + pytest。
+# 质量门禁:仅在 PR 上跑 lint + format + mypy + pytest。
 # 职责单一,发版逻辑见 release.yml。
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -62,3 +60,18 @@ jobs:
         # 防止误删测试导致用例数悄悄下降(line coverage 发现不了「整类边界用例被删」)。
         # 基线随新增用例上调,见 scripts/check_test_count.py。
         run: uv run --extra dev python scripts/check_test_count.py
+
+  required:
+    name: required
+    if: always()
+    needs: [quality]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require quality checks
+        env:
+          RESULT: ${{ needs.quality.result }}
+        run: |
+          if [[ "$RESULT" != "success" ]]; then
+            echo "::error::Quality checks did not succeed: $RESULT"
+            exit 1
+          fi
