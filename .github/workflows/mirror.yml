@@ -1,0 +1,48 @@
+name: Mirror
+
+on:
+  workflow_run:
+    workflows: ["Release Please"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GITEE_URL: https://gitee.com/felixjii/file-toolbox.git
+      CNB_URL: https://cnb.cool/feljii/file-toolbox
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch main and tags
+        run: git fetch origin main --tags --force
+      - name: Push main and tags to Gitee
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GITEE_TOKEN" || { echo "::error::GITEE_TOKEN is not configured"; exit 1; }
+          remote="https://${GITEE_TOKEN}@${GITEE_URL#https://}"
+          git push "$remote" refs/remotes/origin/main:refs/heads/main --tags
+      - name: Push main and tags to CNB
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CNB_TOKEN" || { echo "::error::CNB_TOKEN is not configured"; exit 1; }
+          remote="https://cnb:${CNB_TOKEN}@${CNB_URL#https://}"
+          git push "$remote" refs/remotes/origin/main:refs/heads/main --tags
+

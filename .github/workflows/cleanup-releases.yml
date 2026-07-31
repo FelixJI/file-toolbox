@@ -1,0 +1,28 @@
+name: Cleanup Releases
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Keep the five most recent published Releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 \
+            --json databaseId,tagName,isDraft,publishedAt \
+            --jq 'map(select(.isDraft == false and .publishedAt != null)) | sort_by(.publishedAt) | reverse | .[5:][] | [.databaseId, .tagName] | @tsv' |
+          while IFS=$'\t' read -r release_id tag_name; do
+            echo "Deleting old Release ${tag_name}; the git tag is retained."
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
+          done
+
