@@ -16,7 +16,17 @@ concurrency:
 
 jobs:
   mirror:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # workflow_run 监听整个 Release Please workflow 的完成,不区分 job。
+    # release-please.yml 有两个入口:
+    #   - workflow_dispatch → release-pr(仅开 Release PR,main 无变化、无新 tag)
+    #   - push main         → draft-release(打 tag + 建 draft Release)
+    # 若不过滤,手动开 Release PR 那次也会触发 mirror,造成无意义的重复推送
+    # (main 未变,git push 报 "Everything up-to-date")。故仅对 push 触发的那次
+    # 运行做镜像;手动 workflow_dispatch 仍可作为兜底随时触发。
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     env:
       GITEE_URL: https://gitee.com/felixjii/file-toolbox.git
@@ -32,6 +42,8 @@ jobs:
       - name: Fetch main and tags
         run: git fetch origin main --tags --force
       - name: Push main and tags to Gitee
+        id: gitee
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -39,10 +51,32 @@ jobs:
           remote="https://${GITEE_TOKEN}@${GITEE_URL#https://}"
           git push "$remote" refs/remotes/origin/main:refs/heads/main --tags
       - name: Push main and tags to CNB
+        id: cnb
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CNB_TOKEN" || { echo "::error::CNB_TOKEN is not configured"; exit 1; }
           remote="https://cnb:${CNB_TOKEN}@${CNB_URL#https://}"
           git push "$remote" refs/remotes/origin/main:refs/heads/main --tags
+      # 失败隔离:两个镜像源任一失败不应阻断另一个。
+      # 上方两步加 continue-on-error 后,这里汇总:必须至少有一个源成功,
+      # 否则整条镜像同步等价于未执行,job 应判失败(而非误报绿色)。
+      - name: Require at least one mirror to succeed
+        if: always()
+        shell: bash
+        run: |
+          gitee="${{ steps.gitee.outcome }}"
+          cnb="${{ steps.cnb.outcome }}"
+          echo "gitee=$gitee cnb=$cnb"
+          if [ "$gitee" != "success" ] && [ "$cnb" != "success" ]; then
+            echo "::error::所有镜像源推送均失败(gitee=$gitee, cnb=$cnb)"
+            exit 1
+          fi
+          if [ "$gitee" != "success" ]; then
+            echo "::warning::Gitee 推送失败($gitee),CNB 已成功,详见对应 step 日志"
+          fi
+          if [ "$cnb" != "success" ]; then
+            echo "::warning::CNB 推送失败($cnb),Gitee 已成功,详见对应 step 日志"
+          fi
 
