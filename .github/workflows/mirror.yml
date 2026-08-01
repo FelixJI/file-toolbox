@@ -16,23 +16,21 @@ concurrency:
 
 jobs:
   mirror:
-    # workflow_run 监听整个 Release Please workflow 的完成,不区分 job。
-    # release-please.yml 有两个入口:
-    #   - workflow_dispatch → release-pr(仅开 Release PR,main 无变化、无新 tag)
-    #   - push main         → draft-release(打 tag + 建 draft Release)
-    # 若不过滤,手动开 Release PR 那次也会触发 mirror,造成无意义的重复推送
-    # (main 未变,git push 报 "Everything up-to-date")。故仅对 push 触发的那次
-    # 运行做镜像;手动 workflow_dispatch 仍可作为兜底随时触发。
+    # workflow_run 监听整个 Release Please workflow的完成,不区分触发事件。
+    # release-please 有两类入口(push main 打 tag / workflow_dispatch 仅开 PR)。
+    # 仅对 push 触发的那次运行做镜像(此时 main 有新 commit + 新 tag);
+    # 手动开 PR 那次 main 不变,镜像无意义。workflow_dispatch 仍可随时兜底。
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     env:
-      GITEE_URL: https://gitee.com/felixjii/file-toolbox.git
-      CNB_URL: https://cnb.cool/feljii/file-toolbox
-      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      # 所有目标地址与凭据都来自 secret,改地址/换令牌无需改代码。
+      GITEE_URL: ${{ secrets.GITEE_URL }}
       GITEE_USER: ${{ secrets.GITEE_USER }}
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+      CNB_URL: ${{ secrets.CNB_URL }}
       CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
     steps:
       - uses: actions/checkout@v6
@@ -48,8 +46,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$GITEE_URL"   || { echo "::error::GITEE_URL is not configured"; exit 1; }
+          test -n "$GITEE_USER"  || { echo "::error::GITEE_USER is not configured"; exit 1; }
           test -n "$GITEE_TOKEN" || { echo "::error::GITEE_TOKEN is not configured"; exit 1; }
-          test -n "$GITEE_USER" || { echo "::error::GITEE_USER is not configured"; exit 1; }
+          # 标准格式:用户名 + token 一起放 https://<user>:<token>@<host>
           remote="https://${GITEE_USER}:${GITEE_TOKEN}@${GITEE_URL#https://}"
           git push "$remote" refs/remotes/origin/main:refs/heads/main --tags --force
       # --tags --force 使镜像可重复执行:标签是同一 commit 的不可变锚点,
@@ -61,7 +61,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$CNB_URL"   || { echo "::error::CNB_URL is not configured"; exit 1; }
           test -n "$CNB_TOKEN" || { echo "::error::CNB_TOKEN is not configured"; exit 1; }
+          # CNB 规范:用户名固定为 cnb,token 放密码槽。
           remote="https://cnb:${CNB_TOKEN}@${CNB_URL#https://}"
           git push "$remote" refs/remotes/origin/main:refs/heads/main --tags --force
       # 失败隔离:两个镜像源任一失败不应阻断另一个。
@@ -84,4 +86,3 @@ jobs:
           if [ "$cnb" != "success" ]; then
             echo "::warning::CNB 推送失败($cnb),Gitee 已成功,详见对应 step 日志"
           fi
-
