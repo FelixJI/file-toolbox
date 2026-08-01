@@ -28,6 +28,10 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
+      - name: Set up Node.js for the pinned Release Please CLI
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - name: Compute requested version
         id: version
         shell: python
@@ -50,13 +54,21 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"next={version}\n")
       - name: Create or update Release PR
-        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-          release-as: ${{ steps.version.outputs.next }}
-          skip-github-release: true
+        shell: bash
+        env:
+          RELEASE_AS: ${{ steps.version.outputs.next }}
+          RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          # release-please-action v5 ignores the dynamic release-as input in
+          # manifest mode. The pinned CLI forwards it to Manifest.fromManifest.
+          npx --yes release-please@17.11.1 release-pr \
+            --repo-url="$GITHUB_REPOSITORY" \
+            --target-branch=main \
+            --token="$RELEASE_PLEASE_TOKEN" \
+            --config-file=release-please-config.json \
+            --manifest-file=.release-please-manifest.json \
+            --release-as="$RELEASE_AS"
 
   draft-release:
     if: github.event_name == 'push'

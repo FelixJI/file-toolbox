@@ -1,11 +1,9 @@
 name: Mirror
 
 on:
-  # Mirror only after a Release is actually published, so unfinished draft tags
-  # are not pushed to the downstream mirrors ahead of the bundled assets.
+  # The publish event is emitted only after release.yml verifies all assets.
   release:
     types: [published]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,11 +14,6 @@ concurrency:
 
 jobs:
   mirror:
-    # 仅在 Release 真正发布后镜像,避免把未挂载产物的草稿 tag 提前推到下游。
-    # workflow_dispatch 仍可随时手动兜底。
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'release'
     runs-on: ubuntu-latest
     env:
       # 所有目标地址与凭据都来自 secret,改地址/换令牌无需改代码。
