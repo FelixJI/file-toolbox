@@ -7,16 +7,28 @@ on:
         description: Existing draft Release tag, for example v0.1.15
         required: true
         type: string
+  # Auto-attach assets after the Release Please workflow finishes. Release Please
+  # also runs for the non-draft scenario (workflow_dispatch opens the Release
+  # PR), so the build job resolves the latest actionable draft and skips
+  # gracefully when there is none — see the "Resolve release tag" step.
+  workflow_run:
+    workflows: ["Release Please"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-assets-${{ github.repository }}-${{ inputs.release_tag }}
+  # workflow_run events have empty inputs; fall back to a stable per-repo key so
+  # auto-triggered builds serialize. The "Resolve release tag" step + idempotency
+  # check prevent rebuilding a draft that already has assets.
+  group: release-assets-${{ github.repository }}-${{ inputs.release_tag || 'auto' }}
   cancel-in-progress: false
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run'
     name: Build and upload Windows package
     runs-on: windows-latest
     environment: release
@@ -29,12 +41,60 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ inputs.release_tag }}
+          # ref resolved per-event in the next step; default checkout keeps
+          # workflow_run (which has no ref context) from failing here.
 
-      - name: Verify tag and draft Release
+      - name: Resolve release tag
+        id: resolve
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # Manual dispatch: trust the provided tag.
+          if ($env:EVENT_NAME -eq 'workflow_dispatch') {
+            $tag = $env:INPUT_TAG.Trim()
+            if ([string]::IsNullOrEmpty($tag)) { throw "workflow_dispatch requires release_tag input" }
+            git fetch origin "$tag" --tags --force
+            git checkout "$tag"
+            "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+            "release_tag=$tag" >> $env:GITHUB_OUTPUT
+            Write-Host "::notice::Manual build for $tag"
+            return
+          }
+
+          # Auto path (workflow_run): find the latest draft release. If there is
+          # none, or it already carries assets, skip gracefully. The tag pattern
+          # tolerates prerelease suffixes (e.g. v0.1.0-preview.2).
+          $drafts = gh release list --limit 50 --json tagName,isDraft `
+            | ConvertFrom-Json | Where-Object { $_.isDraft -and $_.tagName -match '^v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$' }
+          if (-not $drafts) {
+            Write-Host "::notice::No actionable draft release; skipping build."
+            "RELEASE_TAG=" >> $env:GITHUB_ENV
+            "release_tag=" >> $env:GITHUB_OUTPUT
+            return
+          }
+          $tag = $drafts[0].tagName
+          # Idempotency: skip if this draft already has any assets attached
+          # (e.g. workflow_run fired again after a successful attach).
+          $assets = gh release view "$tag" --json assets --jq '.assets[].name'
+          if ($assets) {
+            Write-Host "::notice::Draft $tag already has assets; skipping build."
+            "RELEASE_TAG=" >> $env:GITHUB_ENV
+            "release_tag=" >> $env:GITHUB_OUTPUT
+            return
+          }
+          git fetch origin "$tag" --tags --force
+          git checkout "$tag"
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "release_tag=$tag" >> $env:GITHUB_OUTPUT
+          Write-Host "::notice::Auto build for draft $tag"
+
+      - name: Verify tag and draft Release
+        if: env.RELEASE_TAG != ''
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           $version = (python -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])").Trim()
           if ($env:RELEASE_TAG -ne "v$version") {
@@ -46,29 +106,34 @@ jobs:
           }
 
       - name: Set up uv
+        if: env.RELEASE_TAG != ''
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
       - name: Install dependencies
+        if: env.RELEASE_TAG != ''
         run: uv sync --extra gui --extra invoice --extra dev
 
       - name: Build with PyInstaller
+        if: env.RELEASE_TAG != ''
         run: uv run --extra dev python scripts/build_exe.py --ci
 
       - name: Upload workflow artifact
+        if: env.RELEASE_TAG != ''
         uses: actions/upload-artifact@v6
         with:
-          name: FileToolbox-${{ inputs.release_tag }}
+          name: FileToolbox-${{ steps.resolve.outputs.release_tag }}
           path: |
             dist/FileToolbox-*-win64.zip
             dist/checksums.txt
           if-no-files-found: error
 
       - name: Attach assets to draft Release
+        if: env.RELEASE_TAG != ''
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           $assets = @(Get-ChildItem dist -File |
             Where-Object { $_.Name -like 'FileToolbox-*-win64.zip' -or $_.Name -eq 'checksums.txt' } |
