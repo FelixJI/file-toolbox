@@ -498,6 +498,45 @@ def test_create_backup_same_stem_same_second_no_collision(tmp_path, monkeypatch)
     assert bp2.read_text(encoding="utf-8") == "second"
 
 
+def test_create_backup_collision_advances_counter(tmp_path, monkeypatch):
+    """时间戳名 + _1 候选均已存在时,counter 自增到 _2(覆盖 service.py 第 539 行)。
+
+    _create_backup 的 while 循环:第一层碰撞(时间戳名已存在)进 if,counter=1 找 _1 候选;
+    若 _1 也已存在则跳过 break,执行 counter += 1 找 _2。test_create_backup_same_stem_
+    same_second_no_collision 只覆盖了第一层碰撞(_1 命中即 break),从未制造"第二层碰撞"。
+    本用例预置时间戳名 + _1 候选两个文件,第三次备份应落到 _2,证明 counter 自增路径。
+    """
+    from datetime import datetime
+
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    # 预置:时间戳名 + _1 候选都已存在(模拟同一秒内的两次先前备份)
+    (backup_dir / "report_20260730_120000.txt").write_text("first", encoding="utf-8")
+    (backup_dir / "report_20260730_120000_1.txt").write_text("second", encoding="utf-8")
+
+    f = _write_text(tmp_path / "report.txt", "third")
+    svc = ContentReplaceService()
+    monkeypatch.setattr(svc, "_backup_dir", backup_dir)
+
+    frozen = datetime(2026, 7, 30, 12, 0, 0)
+
+    class _FrozenDateTime:
+        @staticmethod
+        def now(*a, **k):
+            return frozen
+
+    monkeypatch.setattr("file_toolbox.core.batch_replace.service.datetime", _FrozenDateTime)
+
+    bp = svc._create_backup(f)
+
+    # 命中 _2(证明 counter 从 1 自增到 2,第 539 行已执行)
+    assert bp.name == "report_20260730_120000_2.txt"
+    assert bp.read_text(encoding="utf-8") == "third"
+    # 原有两个备份未被覆盖
+    assert (backup_dir / "report_20260730_120000.txt").read_text(encoding="utf-8") == "first"
+    assert (backup_dir / "report_20260730_120000_1.txt").read_text(encoding="utf-8") == "second"
+
+
 def test_preview_replace_cancel_check(tmp_path):
     """cancel_check 返回 True 时预览立即中断。"""
     f = _write_text(tmp_path / "a.txt", "hello")

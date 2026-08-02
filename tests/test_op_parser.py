@@ -123,3 +123,19 @@ def test_parse_op_duplicate_keys_last_wins():
     """重复键 → 后值覆盖前值(无报错)。锁定当前 last-wins 行为。"""
     ops = parse_ops(["add_number:start=1,start=9"])
     assert ops[0]["params"]["start"] == 9
+
+
+def test_parse_op_spaces_around_equals_currently_drops_param():
+    """等号两侧带空格的键值对被静默丢弃(锁定当前行为,高频 CLI 误用)。
+
+    _KV_PATTERN = re.compile(r'(\\w+)=(?:...')') 要求 key 紧贴 '=' 且 key 为 \\w+。
+    用户习惯性写 'add_prefix: text = PRE_'(等号两侧空格,shell 里自然)时,
+    ' text ' 既不匹配 \\w+= 键,前面又是空格(非逗号/行首)不触发空键检测正则,
+    于是参数被静默吞掉,操作以空参数执行 —— 对 add_prefix 而言是"啥都没做但没报错"。
+    未来若加 trim 支持,此测试应变红提醒。对比:紧凑无空格写法正常。
+    """
+    result = parse_op("add_prefix: text = PRE_")
+    assert result["params"] == {}  # 当前行为:键 " text " 不匹配 \w+=,被丢弃
+    # 对比:紧凑写法正常解析
+    normal = parse_op("add_prefix:text=PRE_")
+    assert normal["params"]["text"] == "PRE_"

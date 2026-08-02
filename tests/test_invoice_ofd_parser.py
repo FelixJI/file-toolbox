@@ -632,6 +632,33 @@ def test_safe_add_invalid_returns_empty():
     assert _safe_add("100", None) == ""
 
 
+def test_safe_add_floating_point_precision_rounded():
+    """0.1 + 0.2 浮点累加误差被 round(...,2) 收敛(锁定 round 是唯一防线)。
+
+    价税合计兜底用 round(float(a)+float(b), 2):若去掉 round,0.1+0.2 会产出
+    '0.30000000000000004' 污染发票金额。现有 test_safe_add_valid 只用 "1000.00"
+    这种整数级数值,从未触达浮点累加误差。锁定此边界,防 round 被误删。
+    """
+    assert _safe_add("0.1", "0.2") == "0.30"
+
+
+def test_safe_add_negative_values():
+    """负金额累加(红字冲销发票场景)。
+
+    红字发票金额为负(冲销),_safe_add 需正确累加负数并保留两位小数与负号。
+    """
+    assert _safe_add("-100.00", "50.00") == "-50.00"
+
+
+def test_safe_add_int_and_float_mix():
+    """混合整型与浮点金额(CustomData 里金额可能无小数)。
+
+    CustomData 中金额字符串可能形如 "1000"(无小数)与 "130.5" 混合,_safe_add
+    仍需产出规范的两位小数结果。
+    """
+    assert _safe_add("1000", "130.5") == "1130.50"
+
+
 # ---------------------------------------------------------------------------
 # _column_of:边界
 # ---------------------------------------------------------------------------

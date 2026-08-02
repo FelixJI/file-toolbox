@@ -229,3 +229,29 @@ def test_import_bad_json_returns_none(svc, tmp_path):
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
     assert svc.import_template(str(bad)) is None
+
+
+def test_import_template_data_without_operations_rejected(svc, tmp_path):
+    """template_data 缺 operations 子键(或非 list)应被拒,返回 None。
+
+    get_all_templates 会硬访问 data["operations"]:若导入文件含 template_data 但
+    缺 operations 子键(手写/旧版导出常见),导入会成功但列表渲染抛 KeyError,UI 必崩。
+    import_template 在入口校验 template_data 必须含 operations 列表,非法返回 None。
+    """
+    # 缺 operations 子键
+    bad = tmp_path / "no_ops.json"
+    bad.write_text(
+        json.dumps({"template_name": "t1", "template_data": {"description": "no ops"}}),
+        encoding="utf-8",
+    )
+    assert svc.import_template(str(bad)) is None
+    assert not svc.template_exists("t1")
+
+    # operations 非 list(dict 形式,truthy 但类型错)
+    bad2 = tmp_path / "dict_ops.json"
+    bad2.write_text(
+        json.dumps({"template_name": "t2", "template_data": {"operations": {"type": "x"}}}),
+        encoding="utf-8",
+    )
+    assert svc.import_template(str(bad2)) is None
+    assert not svc.template_exists("t2")

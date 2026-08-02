@@ -570,3 +570,28 @@ def test_execute_rename_permission_error_recorded(tmp_path, monkeypatch):
     success, errors = _svc().execute_rename({src: dst})
     assert success == 0
     assert any("权限不足" in e for e in errors)
+
+
+def test_add_number_negative_start_produces_bracketed_negative():
+    """负 start 直接产出方括号负数序号(锁定当前行为,数据完整性隐患)。
+
+    _validate_add_number 只校验 digits>=1,完全不校验 start。apply 层 _add_number
+    直接 str(start + index).zfill(digits):负数穿过 zfill 产出 'f[-05]' 这类含方括号
+    负数的文件名(Windows 合法但语义荒谬,破坏字典序)。锁定当前行为,若未来在
+    校验层拦截负 start,此测试应变红提醒。
+    """
+    svc = _svc()
+    assert svc._add_number("f", {"start": -5, "digits": 3}, 0) == "f[-05]"
+
+
+def test_add_number_negative_start_zero_collision():
+    """start=-1 + index=1 → number=0 → '000',与正常 start=0 撞名(锁定当前行为)。
+
+    负 start 的隐藏风险:start=-1、index=1 时 start+index=0,zfill(3) 产出 '000',
+    与 start=0、index=0 的产出完全相同 —— 两个独立配置可能产生同序号标签。
+    锁定此撞名行为,提醒负 start 的副作用。
+    """
+    svc = _svc()
+    assert svc._add_number("f", {"start": -1, "digits": 3}, 1) == "f[000]"
+    # 与正常 start=0 idx=0 撞名
+    assert svc._add_number("f", {"start": 0, "digits": 3}, 0) == "f[000]"
