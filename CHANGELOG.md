@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.15](https://github.com/FelixJI/file-toolbox/compare/v0.1.14...v0.1.15) (2026-08-02)
+
+
+### Fixed
+
+* **release:** 收敛发布与 Changelog 工作流 ([#6](https://github.com/FelixJI/file-toolbox/issues/6)) ([39c813d](https://github.com/FelixJI/file-toolbox/commit/39c813db435881a75e76c9aca55575d3e2723c6e))
+* **rename-template:** 校验导入模板 operations 键 + 补强覆盖率与边缘测试至 100% ([#7](https://github.com/FelixJI/file-toolbox/issues/7)) ([6fcac0a](https://github.com/FelixJI/file-toolbox/commit/6fcac0a4257c6b306763f29411156545446fa4f8))
+
 ## 0.1.14 - 2026-07-30
 
 ### Fixed
