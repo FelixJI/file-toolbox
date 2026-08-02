@@ -364,6 +364,30 @@ def test_count_text_matches_unknown_op_type_ignored():
     assert count_text_matches("hello", [{"type": "bogus", "params": {"find": "x"}}]) == 0
 
 
+def test_count_text_matches_simple_find_with_regex_metachars_is_literal():
+    """simple_replace 的 find 含正则元字符时按字面量计数(锁定 simple vs regex 语义边界)。
+
+    simple_replace 用 str.count(find)(字面量),regex_replace 用 re.finditer(正则)。
+    find="." 应作字面量计 2(出现两次),而非正则"任意字符";find="(" 同样字面量
+    (若误用 re.findall(find) 会抛 re.error)。锁定此差异:一旦有人"优化"把 simple
+    也改成 re.escape+finditer 或反向误用,计数口径会静默偏移,影响 word/excel/text
+    三个 handler 的一致性契约。
+    """
+    # find="." → 字面量计 2,而非正则的 5(任意字符)
+    assert count_text_matches("a.b.c", [{"type": SIMPLE, "params": {"find": "."}}]) == 2
+    # find="(" → 字面量计 2(正则下 "(" 会 re.error)
+    assert count_text_matches("a(b(", [{"type": SIMPLE, "params": {"find": "("}}]) == 2
+
+
+def test_count_text_matches_regex_dot_matches_any_char():
+    """regex_replace 的 pattern="." 当元字符(任意字符)计 5(与上一条 simple 形成对比)。
+
+    同一内容 "a.b.c" 下:simple find="." 字面量计 2,regex pattern="." 计 5。
+    两条测试共同锁定 simple/regex 对元字符的不同语义。
+    """
+    assert count_text_matches("a.b.c", [{"type": REGEX, "params": {"pattern": "."}}]) == 5
+
+
 def test_count_text_matches_missing_params_key():
     """操作 dict 缺 params 键 → params={},find 默认 '' → 贡献 0。"""
     assert count_text_matches("hello", [{"type": SIMPLE}]) == 0

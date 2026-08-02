@@ -400,3 +400,111 @@ def test_close_event_stops_running_parse_worker(tab):
     assert cancelled, "closeEvent 应调用 worker.cancel() 停止解析"
     assert waited, "closeEvent 应 wait() 等待 worker 退出"
     assert tab._parse_worker is None
+
+
+# ---------------------------------------------------------------------------
+# 重复点击防护与解析失败处理(覆盖 invoice_tab.py 第 111、144-149 行)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_skipped_when_worker_running(tab, monkeypatch, tmp_path):
+    """重复点击防护:_parse_worker 仍 running 时直接 return,不新建 worker(第 111 行)。
+
+    _parse() 在 _files 非空时检查 _parse_worker.isRunning():为 True 则提前 return,
+    不构造新 worker、不弹"请先添加发票文件"警告。注入一个 isRunning→True 的假 worker
+    即可稳定触发(与 test_close_event_stops_running_parse_worker 同款手法)。
+    """
+    f1 = _xml(tmp_path / "1.xml", "1")
+    tab._files = [f1]
+
+    class _FakeRunningWorker:
+        def isRunning(self) -> bool:
+            return True
+
+    tab._parse_worker = _FakeRunningWorker()  # type: ignore[assignment]
+
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: warned.append(1) or QMessageBox.StandardButton.Ok
+    )
+    constructed = []
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.invoice_tab.InvoiceParseWorker",
+        lambda *a, **k: constructed.append(1),
+    )
+
+    tab._parse()
+
+    # 没走"无文件"警告分支
+    assert warned == []
+    # 没新建 worker(证明提前 return,第 111 行已执行)
+    assert constructed == []
+    # 引用未替换(仍是注入的假 worker)
+    assert isinstance(tab._parse_worker, _FakeRunningWorker)
+
+
+def test_on_parse_failed_no_prior_result_disables_export(tab, monkeypatch):
+    """解析失败且无先前结果 → btn_export 禁用(第 144-149 行,False 分支)。
+
+    _on_parse_failed 直接作为普通方法调用即可覆盖逻辑,不必走真实 worker 线程+信号
+    投递(那条路更脆)。第 147 行 _result is None → btn_export.setEnabled(False)。
+    """
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda *a, **k: warned.append(1) or QMessageBox.StandardButton.Ok
+    )
+    tab._result = None
+    tab._parse_worker = object()  # type: ignore[assignment]  # 模拟曾有 worker
+
+    tab._on_parse_failed("解析爆炸")
+
+    assert tab._parse_worker is None
+    assert tab.ui.btn_parse.isEnabled() is True
+    assert tab.ui.btn_export.isEnabled() is False  # _result is None
+    assert tab.ui.lbl_status.text() == "解析失败"
+    assert warned, "应弹出失败警告"
+
+
+def test_on_parse_failed_with_prior_result_keeps_export(tab, monkeypatch):
+    """解析失败但曾有成功结果 → btn_export 保留可导出(第 147 行,True 分支)。
+
+    失败时按已有结果重置导出按钮:若曾解析成功(invoices 非空)则保留可导出状态,
+    允许用户基于上一次成功结果导出。这是与上一条相反的 True 分支。
+    """
+    from file_toolbox.core.invoice.types import Invoice, ParseResult
+
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    inv = Invoice(
+        invoice_number="1",
+        invoice_type="",
+        issue_date="",
+        seller_name="",
+        seller_tax_id="",
+        seller_addr="",
+        seller_tel="",
+        seller_bank="",
+        seller_account="",
+        buyer_name="",
+        buyer_tax_id="",
+        buyer_addr="",
+        buyer_tel="",
+        buyer_bank="",
+        buyer_account="",
+        amount_without_tax="",
+        tax_amount="",
+        amount_with_tax="",
+        amount_chinese="",
+        drawer="",
+        remark="",
+        items=[],
+        source_file="a.xml",
+        parse_method="xml",
+    )
+    tab._result = ParseResult(invoices=[inv], duplicates=[], failed=[])
+    tab._parse_worker = object()  # type: ignore[assignment]
+
+    tab._on_parse_failed("err")
+
+    # 保留先前可导出状态
+    assert tab.ui.btn_export.isEnabled() is True
+    assert tab.ui.lbl_status.text() == "解析失败"

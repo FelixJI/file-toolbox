@@ -144,6 +144,21 @@ def test_learn_columns_empty_header_all_fallback():
     assert cols["name"] == 50
 
 
+def test_learn_columns_split_shui_e_produces_tax_amount():
+    """'税'+'额' 拆字两个相邻 word → tax_amount 列,中心取两字中点(行 136-142)。
+
+    _learn_columns 的拆字配对:'税' 设 pending='tax' 并记 cx(行 140-142),后续
+    '额' 在 pending=='tax' 时配对 → tax_amount,中心取两字中点(行 136-138)。
+    现有测试只用连写 word('税额'),从未直接单测 '税'+'额' 拆字路径;该分支是 4 个
+    pending 分支(unit_or_price/quantity/amount/tax)里唯一没被直接单测的。
+    """
+    header = [_w("税", 425, 440, 100), _w("额", 465, 480, 100)]
+    cols = _learn_columns(header)
+    assert "tax_amount" in cols
+    # 税 cx=(425+440)/2=432.5,额 cx=(465+480)/2=472.5,中点=(432.5+472.5)/2=452.5
+    assert cols["tax_amount"] == 452.5
+
+
 # ---------------------------------------------------------------------------
 # _column_of
 # ---------------------------------------------------------------------------

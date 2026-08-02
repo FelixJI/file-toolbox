@@ -10,12 +10,12 @@ class BaseOperationService(ABC):
     @abstractmethod
     def get_operation_types(self) -> list[str]:
         """获取支持的操作类型列表。"""
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def _validate_params(self, operation: dict[str, Any], index: int) -> tuple[bool, str]:
         """验证操作参数（子类实现）。"""
-        pass
+        pass  # pragma: no cover
 
     def validate_operations(self, operations: list[dict[str, Any]]) -> tuple[bool, str]:
         """

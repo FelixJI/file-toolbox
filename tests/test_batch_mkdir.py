@@ -42,6 +42,25 @@ def test_parse_inherits_empty_cell_from_prev_row():
     assert ("部门A", "项目2") in r.folder_structure
 
 
+def test_parse_handles_crlf_line_endings():
+    """Windows 剪贴板常带 \\r\\n;锁定 strip 救场行为,单元格不残留 \\r。
+
+    parse_excel_table_data 用 split("\\n") 切行(行 98):Windows 从 Excel/剪贴板
+    粘贴的文本行尾是 \\r\\n,split 后每行末尾残留 \\r。该 \\r 由 cell.strip()
+    (行 113)去掉,但 \\r 不在 INVALID_CHARS 中(若 strip 被改掉,mkdir 会产出
+    带控制字符的目录名)。锁定此救场行为,防未来 split/strip 改动破。
+    """
+    text = "部门A\t项目1\r\n部门A\t项目2\r\n"
+    r = _svc().parse_excel_table_data(text)
+    assert r.valid
+    assert ("部门A", "项目1") in r.folder_structure
+    assert ("部门A", "项目2") in r.folder_structure
+    # 关键:单元格内不得残留 \r(否则 mkdir 出带控制字符的目录名)
+    for levels in r.folder_structure:
+        for cell in levels:
+            assert "\r" not in cell
+
+
 def test_build_folder_paths(tmp_path):
     svc = _svc()
     items = svc.build_folder_paths(tmp_path, [("a", "b"), ("a", "c")])
