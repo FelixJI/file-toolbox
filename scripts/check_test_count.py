@@ -25,9 +25,9 @@ for _stream in (sys.stdout, sys.stderr):
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# 基线:本次边缘测试加固后(GUI/CLI 层)的实际用例数。
+# 基线:退役旧本地发版编排测试、补充发布契约测试后的实际用例数。
 # 超过此数即通过;低于则失败提醒「测试被删除」。
-DEFAULT_MIN = 1463
+DEFAULT_MIN = 1421
 
 
 def collect_test_count() -> int:

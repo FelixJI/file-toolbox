@@ -124,20 +124,33 @@ uv run --extra gui --extra invoice --extra dev python scripts/build_exe.py
 
 ### 版本号管理
 
-版本号唯一真相源:`pyproject.toml`。`__init__.py` 运行时经 `importlib.metadata` 读取。
+版本号由 Release Please 统一维护；`pyproject.toml`、`.release-please-manifest.json`
+和 `uv.lock` 必须保持一致。`__init__.py` 运行时经 `importlib.metadata` 读取。
 
 ```bash
 # 查看当前版本
 uv run --extra dev python scripts/bump_version.py current
-
-# bump 版本(自动改 pyproject + 迁移 CHANGELOG + git commit + tag)
-uv run --extra dev python scripts/bump_version.py bump patch
-uv run --extra dev python scripts/bump_version.py bump minor
-uv run --extra dev python scripts/bump_version.py bump --set 1.0.0
-
-# 推送 tag 触发 GitHub Actions 发版
-git push --tags
 ```
+
+不要在本地改版本、迁移 `CHANGELOG.md`、创建版本提交或打标签。需要发版时，在
+GitHub Actions 手动运行 **Release Please**，选择 `patch`、`minor` 或 `major`；
+工作流会创建或更新版本 PR。
+
+### Changelog 与提交约定
+
+Release Please 根据合入 `main` 的 Conventional Commit 生成 `CHANGELOG.md`。
+仓库采用 squash merge，因此 PR 标题就是最终参与发布说明生成的提交标题，CI 会校验其格式：
+
+```text
+type(scope): description
+type(scope)!: breaking description
+```
+
+- `feat`、`fix`、`perf`、`deps`、`revert` 会进入 Changelog。
+- `docs`、`style`、`chore`、`refactor`、`test`、`build`、`ci` 属于内部维护，默认隐藏。
+- 发布链、安装包或更新体验的用户可感知修复应使用 `fix(release)`，不要误写成纯 `ci`。
+- 一个 PR 包含多个用户可见变化时，可在合并后的 PR 描述中使用 Release Please 的
+  `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` 描述多条 Conventional Commit。
 
 ### 更新依赖
 
@@ -147,18 +160,18 @@ uv run --extra dev python scripts/update_deps.py update   # 全量升级 uv.lock
 uv run --extra dev python scripts/update_deps.py update PySide6  # 单包升级
 ```
 
-### 一键发版
-
-```bash
-uv run --extra dev python scripts/release.py patch   # bump → build,提示推送
-```
-
 ### GitHub Actions
 
-推送 `v*` tag 后,`.github/workflows/release.yml` 自动执行两个 job:
+正式发布链路为：
 
-1. **build**(Windows):PyInstaller 打包,输出便携 zip + 校验和。
-2. **release**(Ubuntu):创建 GitHub Release 并附带 zip + 校验和。
+1. 手动运行 **Release Please** 创建/更新版本 PR。
+2. 合并版本 PR 后，Release Please 创建版本标签和草稿 Release。
+3. **Build, Verify and Publish Release** 检出版本标签，构建不可变候选包并执行完整门禁。
+4. ZIP 与 `checksums.txt` 同时上传到 Actions Artifact 和草稿 Release。
+5. 必需资源校验通过后，自动路径才会发布 Release。
+6. `release: published` 再触发旧 Release 清理和下游镜像。
+
+构建失败时 Release 保持草稿。手动运行构建工作流只会重建并填充已有草稿，不会自动公开版本。
 
 ## 自动更新
 

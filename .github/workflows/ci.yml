@@ -1,9 +1,11 @@
 name: CI
 
-# 质量门禁:仅在 PR 上跑 lint + format + mypy + pytest。
+# 质量门禁:在 PR 和 main 上跑 lint + format + mypy + pytest。
 # 职责单一,发版逻辑见 release.yml。
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -20,6 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: PR 标题符合 Conventional Commits
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python scripts/check_pr_title.py
+
       - name: 安装 uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -27,6 +35,9 @@ jobs:
 
       - name: 同步依赖(含 gui + invoice + dev)
         run: uv sync --extra gui --extra invoice --extra dev
+
+      - name: 版本与发布契约检查
+        run: uv run --extra dev python scripts/check_release_contract.py
 
       - name: ruff lint
         run: uv run ruff check .
@@ -60,6 +71,9 @@ jobs:
         # 防止误删测试导致用例数悄悄下降(line coverage 发现不了「整类边界用例被删」)。
         # 基线随新增用例上调,见 scripts/check_test_count.py。
         run: uv run --extra dev python scripts/check_test_count.py
+
+      - name: 普通 Python 包构建验证
+        run: uv build --out-dir build/package-validation
 
   required:
     name: required
