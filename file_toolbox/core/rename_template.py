@@ -234,6 +234,12 @@ class RenameTemplateService:
             if not name or not template_data:
                 return None
 
+            # template_data 必须含 operations 列表:get_all_templates 会硬访问
+            # data["operations"]。导入文件若缺该子键(手写/旧版导出常见),导入会
+            # 成功但列表渲染抛 KeyError,UI 必崩。此处与"非法返回 None"语义一致。
+            if not isinstance(template_data.get("operations"), list):
+                return None
+
             # 如果模板已存在，添加后缀
             original_name = name
             counter = 1
