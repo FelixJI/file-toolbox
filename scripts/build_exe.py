@@ -15,6 +15,8 @@ CI 复用同一脚本(带 --ci)。
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -31,8 +33,11 @@ for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         _stream.reconfigure(encoding="utf-8")
 
-_ROOT = Path(__file__).resolve().parents[1]
-_DIST = _ROOT / "dist"
+_ROOT = Path(
+    os.environ.get("AUTOMATION_PROJECT_ROOT", Path(__file__).resolve().parents[1])
+).resolve()
+# canonical CI 通过绝对 AUTOMATION_ARTIFACTS_DIR 隔离构建输出；本地默认仍为仓库 dist/。
+_DIST = Path(os.environ.get("AUTOMATION_ARTIFACTS_DIR", _ROOT / "dist")).resolve()
 _BUILD = _ROOT / "build"
 _SPEC = _ROOT / "scripts" / "FileToolbox.spec"
 _PRODUCT = "FileToolbox"
@@ -52,6 +57,71 @@ def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     h.update(path.read_bytes())
     return h.hexdigest()
+
+
+def _write_build_identity(version: str, archive: Path) -> None:
+    """写入项目构建身份；候选 manifest 由公共 core 负责生成。"""
+    source_sha = os.environ.get("AUTOMATION_SOURCE_SHA", "local")
+    identity = {
+        "schema_version": 1,
+        "project": {
+            "component": "file-toolbox",
+            "repository": "FelixJI/file-toolbox",
+            "version": version,
+            "source_sha": source_sha,
+        },
+        "build": {
+            "archive": archive.name,
+            "archive_sha256": _sha256(archive),
+            "source_sha": source_sha,
+        },
+    }
+    (_DIST / "build-identity.json").write_text(
+        json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_spdx_sbom(version: str, archive: Path) -> None:
+    """写入稳定文件名、绑定真实归档的 SPDX 2.3 构建资产清单。"""
+    archive_sha256 = _sha256(archive)
+    document = {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": f"file-toolbox-{version}-build",
+        "documentNamespace": (
+            f"https://github.com/FelixJI/file-toolbox/releases/v{version}/sbom-{archive_sha256}"
+        ),
+        "creationInfo": {
+            "created": "1980-01-01T00:00:00Z",
+            "creators": ["Tool: scripts/build_exe.py"],
+        },
+        "packages": [
+            {
+                "SPDXID": "SPDXRef-Package",
+                "name": "file-toolbox",
+                "versionInfo": version,
+                "downloadLocation": "NOASSERTION",
+                "filesAnalyzed": False,
+                "licenseConcluded": "NOASSERTION",
+                "licenseDeclared": "NOASSERTION",
+                "copyrightText": "NOASSERTION",
+                "checksums": [{"algorithm": "SHA256", "checksumValue": archive_sha256}],
+            }
+        ],
+        "relationships": [
+            {
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relationshipType": "DESCRIBES",
+                "relatedSpdxElement": "SPDXRef-Package",
+            }
+        ],
+    }
+    (_DIST / "SBOM.spdx.json").write_text(
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 @cli.command()
@@ -106,6 +176,9 @@ def build(
                 zf.write(f, f.relative_to(product_dir.parent))
     typer.secho(f"✓ zip: {zip_path}", fg=typer.colors.GREEN)
 
+    _write_build_identity(version, zip_path)
+    _write_spdx_sbom(version, zip_path)
+
     # checksums
     checksums = _DIST / "checksums.txt"
     lines = [f"{_sha256(zip_path)}  {zip_name}"]
@@ -114,7 +187,7 @@ def build(
 
     if ci:
         # GitHub Actions 结构化输出(用 $GITHUB_OUTPUT,非已废弃的 ::set-output)
-        gh_output = Path(_DIST / "_gha_output.txt")
+        gh_output = _BUILD / "_gha_output.txt"
         with gh_output.open("a", encoding="utf-8") as fh:
             fh.write(f"zip={zip_name}\n")
             fh.write(f"version={version}\n")

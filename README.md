@@ -124,21 +124,20 @@ uv run --extra gui --extra invoice --extra dev python scripts/build_exe.py
 
 ### 版本号管理
 
-版本号由 Release Please 统一维护；`pyproject.toml`、`.release-please-manifest.json`
-和 `uv.lock` 必须保持一致。`__init__.py` 运行时经 `importlib.metadata` 读取。
+`pyproject.toml` 是唯一版本来源，`uv.lock` 是其派生锁文件；`__init__.py` 运行时经
+`importlib.metadata` 读取版本。发布准备命令会同时更新版本、锁文件与 Changelog。
 
 ```bash
 # 查看当前版本
 uv run --extra dev python scripts/bump_version.py current
 ```
 
-不要在本地改版本、迁移 `CHANGELOG.md`、创建版本提交或打标签。需要发版时，在
-GitHub Actions 手动运行 **Release Please**，选择 `patch`、`minor` 或 `major`；
-工作流会创建或更新版本 PR。
+不要手工编辑多个版本文件、创建版本提交或打标签。需要发版时，在 GitHub Actions
+手动选择 `patch`、`minor` 或 `major`；统一自动化会创建或刷新唯一的版本 PR。
 
 ### Changelog 与提交约定
 
-Release Please 根据合入 `main` 的 Conventional Commit 生成 `CHANGELOG.md`。
+统一自动化根据合入 `main` 的 Conventional Commit 生成 `CHANGELOG.md`。
 仓库采用 squash merge，因此 PR 标题就是最终参与发布说明生成的提交标题，CI 会校验其格式：
 
 ```text
@@ -149,8 +148,7 @@ type(scope)!: breaking description
 - `feat`、`fix`、`perf`、`deps`、`revert` 会进入 Changelog。
 - `docs`、`style`、`chore`、`refactor`、`test`、`build`、`ci` 属于内部维护，默认隐藏。
 - 发布链、安装包或更新体验的用户可感知修复应使用 `fix(release)`，不要误写成纯 `ci`。
-- 一个 PR 包含多个用户可见变化时，可在合并后的 PR 描述中使用 Release Please 的
-  `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` 描述多条 Conventional Commit。
+- 仅包含维护类提交时，发布说明会生成一条明确的 Maintenance release 记录。
 
 ### 更新依赖
 
@@ -164,14 +162,10 @@ uv run --extra dev python scripts/update_deps.py update PySide6  # 单包升级
 
 正式发布链路为：
 
-1. 手动运行 **Release Please** 创建/更新版本 PR。
-2. 合并版本 PR 后，Release Please 创建版本标签和草稿 Release。
-3. **Build, Verify and Publish Release** 检出版本标签，构建不可变候选包并执行完整门禁。
-4. ZIP 与 `checksums.txt` 同时上传到 Actions Artifact 和草稿 Release。
-5. 必需资源校验通过后，自动路径才会发布 Release。
-6. `release: published` 再触发旧 Release 清理和下游镜像。
-
-构建失败时 Release 保持草稿。手动运行构建工作流只会重建并填充已有草稿，不会自动公开版本。
+1. 手动选择 bump，统一自动化基于当前版本、稳定标签和已发布稳定 Release 计算绝对目标版本。
+2. 合并唯一的版本 PR 后，main CI 构建不可变候选，包含 ZIP、校验和、SPDX SBOM、attestation 输入和 release manifest。
+3. CD 仅在候选完整且 source SHA 绑定时直接发布稳定 Release；同 tag、同 source 的不完整 Release 可以修复。
+4. 发布后保留最近 5 个 Release，并按配置镜像。
 
 ## 自动更新
 

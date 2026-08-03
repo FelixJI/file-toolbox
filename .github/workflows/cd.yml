@@ -1,0 +1,106 @@
+name: CD
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version part to bump in the Release PR
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    permissions: {}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.16"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Create or refresh release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: python scripts/automation.py release prepare --bump '${{ inputs.bump }}'
+
+  publish:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      actions: read
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.16"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Download exact CI candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-candidate
+          path: build/automation/release-candidate
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Stage release
+        id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python scripts/automation.py release stage
+          --candidate-dir build/automation/release-candidate
+          --source-sha '${{ github.event.workflow_run.head_sha }}'
+      - name: Attest release provenance
+        if: steps.stage.outputs.publish == 'true'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-checksums: ${{ steps.stage.outputs.checksums }}
+      - name: Attest release SBOM
+        if: steps.stage.outputs.publish == 'true'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-checksums: ${{ steps.stage.outputs.checksums }}
+          sbom-path: ${{ steps.stage.outputs.sbom }}
+      - name: Publish and reconcile release
+        if: steps.stage.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_URL: ${{ secrets.GITEE_URL }}
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          CNB_URL: ${{ secrets.CNB_URL }}
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+        run: >-
+          python scripts/automation.py release publish
+          --candidate-dir build/automation/release-candidate
+          --source-sha '${{ github.event.workflow_run.head_sha }}'
