@@ -1318,3 +1318,5 @@ class Automation:
                     f"repos/{self.repository}/releases/{release['id']}",
                 ]
             )
+
+# fmt: on
