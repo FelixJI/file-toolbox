@@ -48,6 +48,7 @@ ignore = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
+exclude = ["scripts/automation_core.py"]
 
 [tool.mypy]
 python_version = "3.11"

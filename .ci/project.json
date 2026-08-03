@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "project": {
+    "component": "file-toolbox",
+    "repository": "FelixJI/file-toolbox"
+  },
+  "ci": {
+    "bootstrap": [["uv", "sync", "--frozen", "--all-extras"]],
+    "quality": [
+      ["uv", "run", "--all-extras", "python", "scripts/check_release_contract.py"],
+      ["uv", "run", "ruff", "check", "."],
+      ["uv", "run", "ruff", "format", "--check", "."],
+      ["uv", "run", "mypy"],
+      ["uv", "run", "--all-extras", "python", "scripts/regen_ui.py", "--check"]
+    ],
+    "e2e": [
+      ["uv", "run", "pytest", "--cov=file_toolbox.core", "--cov-branch", "--cov-fail-under=90", "-W", "error::ResourceWarning", "-W", "error::DeprecationWarning", "-q"],
+      ["uv", "run", "pytest", "--cov=file_toolbox", "--cov-branch", "--cov-fail-under=90", "-W", "error::ResourceWarning", "-W", "error::DeprecationWarning", "-q"],
+      ["uv", "run", "--all-extras", "python", "scripts/check_test_count.py"],
+      ["uv", "build", "--out-dir", "build/package-validation"]
+    ],
+    "release_build": [["uv", "run", "--all-extras", "python", "scripts/build_exe.py", "--ci"]],
+    "release_smoke": [["python", "scripts/release_smoke.py"]]
+  },
+  "release": {
+    "version_sources": [
+      {"kind": "toml", "path": "pyproject.toml", "key": "project.version"},
+      {"kind": "uv-lock", "path": "uv.lock", "key": "file-toolbox", "derived": true}
+    ],
+    "generated_commands": [["python", "scripts/sync_version.py", "--version", "{version}"]],
+    "required_assets": [
+      "FileToolbox-{version}-win64.zip",
+      "checksums.txt",
+      "SBOM.spdx.json",
+      "build-identity.json"
+    ],
+    "identity_asset": "build-identity.json",
+    "retain": 5,
+    "mirrors": [
+      {"name": "gitee", "url_env": "GITEE_URL", "user_env": "GITEE_USER", "token_env": "GITEE_TOKEN"},
+      {"name": "cnb", "url_env": "CNB_URL", "token_env": "CNB_TOKEN", "user": "cnb"}
+    ]
+  }
+}
