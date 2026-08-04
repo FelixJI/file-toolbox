@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from file_toolbox import __version__  # noqa: E402
+from file_toolbox.common import metadata  # noqa: E402
 from file_toolbox.gui.dialogs.about_tab import AboutTab  # noqa: E402
 
 
@@ -60,7 +61,9 @@ def test_about_tab_shows_version(app):
 
 def test_about_tab_shows_repo_url(app):
     tab = AboutTab()
-    assert "github.com" in _collect_text(tab)
+    # 精确匹配权威仓库 URL,而非 "github.com" 子串(避免 notgithub.com 等误匹配,
+    # 也消除 CodeQL Incomplete URL substring sanitization 告警)。
+    assert metadata.REPO_URL in _collect_text(tab)
 
 
 def test_about_tab_shows_changelog(app):
