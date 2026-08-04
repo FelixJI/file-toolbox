@@ -71,8 +71,20 @@ class TestRemoteRelease:
 
 import json as _json  # noqa: E402
 from urllib import error as urlerror  # noqa: E402
+from urllib.parse import urlparse  # noqa: E402
 
 from file_toolbox.updater import versions as vmod  # noqa: E402
+
+
+def _host_is(url: object, host: str) -> bool:
+    """精确判断 URL 的 hostname 是否等于 host(避免子串误匹配)。
+
+    CodeQL 会把 `"github.com" in url` 这种子串校验标记为 Incomplete URL
+    substring sanitization:host 为 notgithub.com 或 github.com.evil 等也能命中。
+    这里用 urlparse().hostname 做权威比对,与生产代码 proxy._is_github 一致。
+    """
+    raw = url.full_url if hasattr(url, "full_url") else str(url)
+    return urlparse(raw).hostname == host
 
 
 class _FakeResp:
@@ -121,7 +133,7 @@ class TestFetchLatest:
 
         def fake_urlopen(req, timeout=None):
             url = req.full_url if hasattr(req, "full_url") else str(req)
-            if "github.com" in url:
+            if _host_is(url, "api.github.com"):
                 return _FakeResp(_make_github_payload("v2.0.0"))
             raise AssertionError(f"unexpected url: {url}")
 
@@ -147,7 +159,7 @@ class TestFetchLatest:
 
         def fake_urlopen(req, timeout=None):
             url = req.full_url if hasattr(req, "full_url") else str(req)
-            if "github.com" in url:
+            if _host_is(url, "api.github.com"):
                 return _FakeResp(_make_github_payload("v2.0.0a1"))
             raise AssertionError(f"unexpected url: {url}")
 
