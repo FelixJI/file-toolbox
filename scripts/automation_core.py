@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import quote
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+_GENERATED_RELEASE_ASSETS = frozenset({"release-manifest.json", "SHA256SUMS"})
 _STABLE_TAG = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _CONVENTIONAL = re.compile(
     r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]+)\))?(?P<breaking>!)?:\s+(?P<title>.+)$"
@@ -475,8 +476,9 @@ class Automation:
             return
 
         actual = {path.name for path in artifacts_dir.iterdir() if path.is_file()}
-        self._validate_asset_patterns(actual, version)
-        candidate_names = actual | {"release-manifest.json", "SHA256SUMS"}
+        build_assets = actual - _GENERATED_RELEASE_ASSETS
+        self._validate_asset_patterns(build_assets, version)
+        candidate_names = build_assets | _GENERATED_RELEASE_ASSETS
         candidate_manifest = self._build_candidate_manifest(
             artifacts_dir=artifacts_dir,
             plan=plan,
@@ -514,7 +516,9 @@ class Automation:
                     "published Release cannot be complete without a verifiable manifest"
                 )
             if remote_names == candidate_names and remote_manifest is not None:
-                self._verify_remote_release_assets(plan["tag"], actual, tag_identity)
+                self._verify_remote_release_assets(
+                    plan["tag"], build_assets, tag_identity
+                )
                 self._sentinel(candidate_dir, source_sha, "already-published")
                 return
             if tag_sha != source_sha:
@@ -524,10 +528,7 @@ class Automation:
 
         candidate_dir.mkdir(parents=True, exist_ok=False)
         for path in artifacts_dir.iterdir():
-            if path.is_file() and path.name not in {
-                "release-manifest.json",
-                "SHA256SUMS",
-            }:
+            if path.is_file() and path.name not in _GENERATED_RELEASE_ASSETS:
                 shutil.copyfile(path, candidate_dir / path.name)
         _write_json(candidate_dir / "release-manifest.json", candidate_manifest)
         self._write_checksums(candidate_dir)
@@ -543,7 +544,7 @@ class Automation:
         artifact_records = {
             path.name: {"sha256": _sha256(path), "size": path.stat().st_size}
             for path in sorted(artifacts_dir.iterdir())
-            if path.is_file()
+            if path.is_file() and path.name not in _GENERATED_RELEASE_ASSETS
         }
         identity_pattern = self.config["release"].get("identity_asset")
         build_identity = None
@@ -628,7 +629,7 @@ class Automation:
         self, root: Path, build_assets: set[str]
     ) -> dict[str, Any]:
         actual = {path.name for path in root.iterdir() if path.is_file()}
-        expected = build_assets | {"release-manifest.json", "SHA256SUMS"}
+        expected = build_assets | _GENERATED_RELEASE_ASSETS
         if actual != expected:
             raise AutomationError("manifested assets are not an exact file set")
         indexed: dict[str, str] = {}
@@ -716,7 +717,7 @@ class Automation:
         if manifest["release"]["tag"] != f"v{version}":
             raise AutomationError("candidate tag/version mismatch")
         actual = {path.name for path in root.iterdir() if path.is_file()}
-        common = {"release-manifest.json", "SHA256SUMS"}
+        common = _GENERATED_RELEASE_ASSETS
         if not common.issubset(actual):
             raise AutomationError(
                 "candidate is missing common manifest/checksum assets"
@@ -737,7 +738,7 @@ class Automation:
         for name, digest in indexed.items():
             if _sha256(root / name) != digest:
                 raise AutomationError(f"candidate checksum mismatch: {name}")
-        artifact_names = actual - {"release-manifest.json", "SHA256SUMS"}
+        artifact_names = actual - _GENERATED_RELEASE_ASSETS
         if set(manifest["artifacts"]) != artifact_names:
             raise AutomationError(
                 "candidate manifest does not describe exact artifacts"
