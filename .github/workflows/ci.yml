@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
 
@@ -17,8 +18,31 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  required:
-    name: required
+  plan:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    runs-on: windows-latest
+    outputs:
+      sharded: ${{ steps.plan.outputs.sharded }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      handoff-paths: ${{ steps.plan.outputs.handoff_paths }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version-file: .python-version
+      - name: Plan repository gates
+        id: plan
+        run: >-
+          python scripts/automation.py ci
+          --phase plan
+          --event '${{ github.event_name }}'
+          --source-sha '${{ github.sha }}'
+
+  prepare:
+    needs: plan
+    if: needs.plan.outputs.sharded == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -47,13 +71,161 @@ jobs:
         with:
           go-version-file: sidecar/go.mod
           cache-dependency-path: sidecar/go.sum
-      - name: Verify repository
+      - name: Build immutable candidate after pre-release gates
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           python scripts/automation.py ci
+          --phase prepare
           --event '${{ github.event_name }}'
           --source-sha '${{ github.sha }}'
+      - name: Upload immutable candidate handoff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-candidate-handoff
+          path: ${{ needs.plan.outputs.handoff-paths }}
+          if-no-files-found: error
+          retention-days: 1
+
+  shard:
+    needs: [plan, prepare]
+    if: needs.plan.outputs.sharded == 'true' && needs.prepare.result == 'success'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        if: matrix.uv == true
+        with:
+          version: "0.11.16"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        if: matrix.dotnet == true && hashFiles('global.json') != ''
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: matrix.node == true && hashFiles('**/package-lock.json') != ''
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: matrix.go == true && hashFiles('sidecar/go.mod') != ''
+        with:
+          go-version-file: sidecar/go.mod
+          cache-dependency-path: sidecar/go.sum
+      - name: Download immutable candidate handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-candidate-handoff
+          path: .
+      - name: Verify immutable candidate lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_SHARD_LANE: ${{ matrix.name }}
+        run: >-
+          python scripts/automation.py ci
+          --phase shard
+          --lane $env:CI_SHARD_LANE
+          --event '${{ github.event_name }}'
+          --source-sha '${{ github.sha }}'
+      - name: Upload lane evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-lane-${{ matrix.name }}
+          path: build/automation/lane-reports/${{ matrix.name }}.json
+          if-no-files-found: error
+          retention-days: 1
+
+  required:
+    needs: [plan, prepare, shard]
+    if: always() && (github.event_name != 'pull_request' || github.event.action != 'closed')
+    name: required
+    runs-on: windows-latest
+    steps:
+      - name: Fail closed on orchestration errors
+        env:
+          CI_SHARDED: ${{ needs.plan.outputs.sharded }}
+          CI_PLAN_RESULT: ${{ needs.plan.result }}
+          CI_PREPARE_RESULT: ${{ needs.prepare.result }}
+          CI_SHARD_RESULT: ${{ needs.shard.result }}
+        shell: pwsh
+        run: |
+          if ($env:CI_PLAN_RESULT -ne 'success') { exit 1 }
+          if ($env:CI_SHARDED -eq 'true') {
+            if ($env:CI_PREPARE_RESULT -ne 'success' -or $env:CI_SHARD_RESULT -ne 'success') { exit 1 }
+          } elseif ($env:CI_SHARDED -eq 'false') {
+            if ($env:CI_PREPARE_RESULT -ne 'skipped' -or $env:CI_SHARD_RESULT -ne 'skipped') { exit 1 }
+          } else {
+            exit 1
+          }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        if: needs.plan.outputs.sharded != 'true'
+        with:
+          version: "0.11.16"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        if: needs.plan.outputs.sharded != 'true' && hashFiles('global.json') != ''
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: needs.plan.outputs.sharded != 'true' && hashFiles('**/package-lock.json') != ''
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: needs.plan.outputs.sharded != 'true' && hashFiles('sidecar/go.mod') != ''
+        with:
+          go-version-file: sidecar/go.mod
+          cache-dependency-path: sidecar/go.sum
+      - name: Download immutable candidate handoff
+        if: needs.plan.outputs.sharded == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ci-candidate-handoff
+          path: .
+      - name: Download lane evidence
+        if: needs.plan.outputs.sharded == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ci-lane-*
+          path: build/automation/lane-reports
+          merge-multiple: true
+      - name: Verify repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_SHARDED: ${{ needs.plan.outputs.sharded }}
+        shell: pwsh
+        run: |
+          if ($env:CI_SHARDED -eq 'true') {
+            python scripts/automation.py ci `
+              --phase finalize `
+              --reports-dir 'build/automation/lane-reports' `
+              --event '${{ github.event_name }}' `
+              --source-sha '${{ github.sha }}'
+          } else {
+            python scripts/automation.py ci `
+              --event '${{ github.event_name }}' `
+              --source-sha '${{ github.sha }}'
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Upload main release candidate
         if: github.event_name == 'push'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

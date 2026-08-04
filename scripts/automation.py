@@ -16,6 +16,13 @@ def _parser() -> argparse.ArgumentParser:
     ci = commands.add_parser("ci")
     ci.add_argument("--event", choices=("pull_request", "push"), required=True)
     ci.add_argument("--source-sha", required=True)
+    ci.add_argument(
+        "--phase",
+        choices=("full", "plan", "prepare", "shard", "finalize"),
+        default="full",
+    )
+    ci.add_argument("--lane")
+    ci.add_argument("--reports-dir", default="build/automation/lane-reports")
 
     release = commands.add_parser("release")
     release_commands = release.add_subparsers(dest="release_command", required=True)
@@ -32,7 +39,26 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     automation = Automation.for_repository()
     if args.command == "ci":
-        automation.ci(event=args.event, source_sha=args.source_sha)
+        if args.phase == "full":
+            automation.ci(event=args.event, source_sha=args.source_sha)
+        elif args.phase == "plan":
+            automation.ci_plan(event=args.event, source_sha=args.source_sha)
+        elif args.phase == "prepare":
+            automation.ci_prepare(event=args.event, source_sha=args.source_sha)
+        elif args.phase == "shard":
+            if not args.lane:
+                raise SystemExit("--lane is required for --phase shard")
+            automation.ci_shard(
+                event=args.event,
+                source_sha=args.source_sha,
+                lane=args.lane,
+            )
+        else:
+            automation.ci_finalize(
+                event=args.event,
+                source_sha=args.source_sha,
+                reports_dir=args.reports_dir,
+            )
     elif args.release_command == "prepare":
         automation.prepare(bump=args.bump)
     elif args.release_command == "stage":
