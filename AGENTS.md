@@ -9,23 +9,24 @@
 
 - 与用户、Issue、PR、review 和交付说明使用简体中文；代码标识符、协议字段、CLI 参数和行业缩写保持原文。代码注释遵循所在模块既有语言，不为翻译而改名。
 - 事实优先级依次为：可执行配置/锁文件与代码、`.ci/project.json`、项目脚本、测试、当前文档。文档与实现冲突时先核实实现并在同一 PR 修正文档，不凭记忆扩写。
-- 大改先说明影响的模块、接口、风险与验证；优先把复杂实现藏在小而稳定的接口后。`scripts/automation.py` 是自动化稳定接口，项目差异通过声明式配置和项目适配器表达。
+- 大改先说明影响的模块、接口、风险与验证；优先把复杂实现藏在小而稳定的接口后。`scripts/automation.py` 是自动化稳定接口，项目差异通过声明式配置、项目适配器和必要的 workflow 编排表达。
+- 评审 rubric、验收清单和风险分级只保留能区分结果、支撑决策的条目；不要机械枚举所有组合，也不要把普通工程工作包装成安全攻防论文。
 
 ### 修改范围与安全
 
 - 开始工作前读取 `git status -sb`、远端、当前分支、最近的仓库指令和实际 hooks。保留用户未完成工作；禁止擅自 stash、reset、checkout 覆盖、递归删除或绕过 hook。
 - 在最新远端 `main` 的独立 `codex/<slug>` 分支/worktree 中工作。只暂存本任务文件，不提交密钥、凭据、本地路径、缓存、数据库、模型、构建包或编辑器状态。
 - 生成文件、版本派生文件和 lock 必须由仓库脚本更新；不得手改生成物后跳过生成/一致性检查。会删除或重建目录的脚本只可作用于仓库声明的固定输出目录。
-- 不通过降低覆盖率、放宽 hash/identity、跳过 E2E、吞掉错误、添加无依据重试或禁用安全检查来使 CI 变绿。修复必须针对根因，并补充能在旧实现上失败的回归契约。
+- 不通过降低覆盖率、跳过与变更相关的 E2E、吞掉错误、添加无依据重试、删除有明确边界契约的校验或禁用安全检查来使 CI 变绿。修复针对根因；存在稳定且合适的测试 seam 时补充能在旧实现上失败的回归契约，不为勾选条目制造脆弱测试。
 - Python 环境统一由 `uv` 管理：使用仓库锁定配置通过 `uv sync --frozen ...`（或项目明确声明的 `uv venv`）创建/更新仓库内 `.venv`，所有 Python 入口通过 `uv run python ...` 或仓库封装脚本调用。禁止直接用系统 `python`/`pip` 安装项目依赖，禁止把依赖散装到全局或用户 `site-packages`。
-- 新增安全或一致性防御必须有可复现故障、明确 threat model 或平台契约支持；不要为未经证实的极端状态堆叠跨层 hash/identity 校验、重试、冻结或人工 gate。SHA-256 用于核对具体边界上的实际字节集合，不把摘要本身描述成业务权威或“绝对不可变”的状态；已有真实来源、身份和精确资产集合验证仍须保留。
+- 校验与防御按可复现故障、平台契约和实际影响设计。默认面对正常协作者和常规故障，不预设潜入者、破坏者或对抗性场景；除发布资产、外部下载和更新包等确有字节完整性契约的边界外，不新增多层 hash、SHA-256 或 identity 比对，不为基本不可能发生的 case 反复叠加检查、重试、冻结或人工 gate。已有校验若说不清来源、边界和消费者，应优先简化。
 
 ### CI/CD 架构保护
 
-- 六仓只保留 `.github/workflows/ci.yml` 与 `.github/workflows/cd.yml`。这两个 workflow 以及 `scripts/automation.py`、`scripts/automation_core.py` 是六仓镜像的公共深模块；禁止单仓私改、格式化或复制分叉。公共变更必须在六仓协调实施，并校验提交后的 Git blob/字节一致。
-- 项目专属工具链、测试、E2E、构建、smoke 和环境准备只写在 `.ci/project.json` 及项目脚本中。需要新依赖或新平台步骤时优先扩展项目 bootstrap/adapter，不把项目判断塞回 YAML。
-- CI 在 PR 和 `main` push 上按 `bootstrap → quality → e2e → release_build → release_smoke` 顺序 fail closed。PR 必须完整执行 release build/smoke；只有 `main` push 会整理并上传正式候选。只有同一 PR 的陈旧运行可取消，`main` 运行不可互相取消。
-- `main` CI 额外上传固定名 `release-candidate`。CD 的 publish job 只下载触发它的那次 `main` CI、同一 source SHA 的候选；禁止在 CD 重建、替换或人工上传资产。
+- 六仓默认只保留 `.github/workflows/ci.yml` 与 `.github/workflows/cd.yml`；`scripts/automation.py` 与 `scripts/automation_core.py` 是公共深模块，公共 core 变更必须六仓协调并保持提交后的 Git blob/字节一致。workflow 共享稳定 CLI、`required` 门禁、候选交接和发布状态机等不变量，但不要求字节一致；VibeTable 可按其多栈构建和 E2E 瓶颈调整 job、lane、缓存及产物交接。
+- 项目专属命令、测试集合和构建语义优先写在 `.ci/project.json` 及项目脚本中。workflow 可表达项目所需的 runner、job 拓扑、缓存和产物交接，但不重复实现项目命令；需要新依赖或平台步骤时优先扩展 bootstrap/adapter。
+- CI 在 PR 和 `main` push 上完成 `.ci/project.json` 声明的 `bootstrap`、`quality`、`e2e`、`release_build` 与 `release_smoke`，按项目真实依赖串并行编排并 fail closed。PR 必须执行适用的完整 release build/smoke；只有 `main` push 会整理并上传正式候选。只有同一 PR 的陈旧运行可取消，`main` 运行不可互相取消。
+- PR CI 是合并门禁；squash merge 后的 `main` CI 验证合并结果，并额外上传固定名 `release-candidate`。CD 的 publish job 只下载触发它的那次 `main` CI、同一 source SHA 的候选，不重新运行完整 CI，也禁止在 CD 重建、替换或人工上传资产。
 - 手动运行 CD 只允许选择 `patch`/`minor`/`major`，作用是创建或刷新唯一 `automation/release` changelog/version PR。该 PR 合并后依次运行 `main` CI、provenance/SBOM attestation、正式非草稿 Release 和镜像同步；不再设置人工发布确认。
 
 ### 版本、changelog 与 Release 不变量
@@ -39,7 +40,7 @@
 
 - 先运行最小相关 formatter/lint/type/test，再运行项目专属质量入口；修改生成器、构建、版本、组件绑定或发布逻辑时必须执行相应 contract/smoke。完整矩阵以 GitHub PR 的 `required` check 为权威。
 - Python 使用仓库配置的 Ruff 和类型检查；TypeScript/Vue 使用锁定 Node 与项目脚本；C# 使用锁定 .NET SDK、warnings-as-errors 与 locked restore；Go 必须 `gofmt`/`go vet`/`go test`。不得用宽泛 `Any`、ignore、禁用规则或更新 snapshot 掩盖缺陷。
-- 测试与源码相邻或进入仓库既有测试目录，命名、marker 和覆盖率遵循项目章节。修复跨进程、GUI、打包或协议问题时同时验证成功路径、失败路径、取消/超时和产物身份。
+- 测试与源码相邻或进入仓库既有测试目录，命名、marker 和覆盖率遵循项目章节。修复跨进程、GUI、打包或协议问题时，选择与可复现故障、接口契约或高概率风险直接相关的成功、失败、取消、超时或产物路径；不机械要求每次改动覆盖全部组合。
 - 本地 hook 若已安装必须正常执行且不得 `--no-verify`；若 clone 未安装 hook，运行其配置对应命令并在 PR 说明。格式化若会改变公共镜像文件，必须按镜像豁免规则处理。
 
 ### Commit、PR 与合并
@@ -64,10 +65,10 @@
 - 唯一版本源是 `pyproject.toml [project].version`；`uv.lock` 的 editable package 版本和运行时 metadata 是派生值。不要新增 `version.txt` 或手打 tag。
 - 发布契约固定为 `FileToolbox-{version}-win64.zip`、`checksums.txt`、`SBOM.spdx.json`、`build-identity.json`；ZIP 顶层 `FileToolbox/` 和 `FileToolbox/FileToolbox.exe` 是更新器接口，checksum/SBOM/identity 必须绑定同一归档。
 - 文件修改命令默认 dry-run，只有明确 `--yes` 才执行；不得为了简化调用移除此保险。自动更新只替换程序目录，必须保留 `.file_toolbox/` 备份/历史并维持 hash 校验与失败回滚。
-- Ruff 使用双引号/100 列/Python 3.11，mypy strict 且以 win32 为目标。仓库提供 pre-commit 配置（Ruff fix/format 与 mypy）；当前 clone 未必安装 hook，应运行等价命令。
+- Ruff 使用双引号/100 列/Python 3.11，mypy strict 且以 win32 为目标。仓库提供 pre-commit 配置（Ruff fix/format 与 mypy）；不在文档中假定某个 clone 是否安装 hook，按工作开始时的实际检查执行，未安装时运行等价命令。
 
 ## 六仓关系
 
 - 本仓与 VibeOCR Protocol/Backend/Classic/Next、VibeTable 没有源码或运行时依赖，也不参与其组件版本链。
 - 六仓关系仅是共享相同的 CI/CD 深模块、版本 PR 状态机、GitHub 治理和镜像策略；本仓项目命令继续留在自己的 adapter。
-- 任何公共 workflow/core 修改必须与其余五仓同步；File Toolbox 的 GUI/COM/覆盖率/更新器规则不得反向塞入公共 YAML。
+- 任何公共 core 修改必须与其余五仓同步；workflow 可按项目瓶颈差异化，File Toolbox 的 GUI/COM/覆盖率/更新器规则不得反向塞入其他仓库 YAML。

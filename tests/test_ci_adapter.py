@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -17,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 release_smoke = importlib.import_module("release_smoke")
 sync_version = importlib.import_module("sync_version")
 check_release_contract = importlib.import_module("check_release_contract")
+automation_core = importlib.import_module("automation_core")
 
 
 def test_sync_version_updates_only_derived_lockfile(tmp_path: Path) -> None:
@@ -159,6 +161,51 @@ def test_publish_checkout_keeps_job_token_for_git_tag_push() -> None:
     assert "persist-credentials: true" in checkout
     assert "persist-credentials: false" not in checkout
     assert "token:" not in checkout
+
+
+def test_mirror_pushes_main_and_only_tags_missing_from_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    class Runner(automation_core.CommandRunner):
+        def run(self, argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls.append(argv)
+            if argv[:3] == ["git", "for-each-ref", "--format=%(refname:strip=2)"]:
+                return subprocess.CompletedProcess(argv, 0, "v0.1.14\nv0.1.15\n", "")
+            if argv[:4] == ["git", "ls-remote", "--refs", "--tags"]:
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    "old-tag-object\trefs/tags/v0.1.14\n",
+                    "",
+                )
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+    config = {
+        "schema_version": 1,
+        "project": {"component": "test", "repository": "owner/repository"},
+        "release": {
+            "mirrors": [
+                {
+                    "name": "mirror",
+                    "url_env": "TEST_MIRROR_URL",
+                    "user": "cnb",
+                    "token_env": "TEST_MIRROR_TOKEN",
+                }
+            ]
+        },
+    }
+    monkeypatch.setenv("TEST_MIRROR_URL", "https://example.invalid/owner/repository")
+    monkeypatch.setenv("TEST_MIRROR_TOKEN", "token")
+
+    automation_core.Automation(tmp_path, config, runner=Runner(tmp_path))._mirror()
+
+    push = next(call for call in calls if call[:2] == ["git", "push"])
+    assert "refs/remotes/origin/main:refs/heads/main" in push
+    assert "refs/tags/v0.1.15:refs/tags/v0.1.15" in push
+    assert "refs/tags/v0.1.14:refs/tags/v0.1.14" not in push
+    assert "refs/tags/*:refs/tags/*" not in push
 
 
 def test_repository_release_contract_is_consistent() -> None:
