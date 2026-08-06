@@ -1456,10 +1456,25 @@ class Automation:
         self._cleanup_releases()
 
     def _mirror(self) -> None:
+        mirrors = self.config["release"].get("mirrors", [])
+        if not mirrors:
+            return
         self.runner.run(["git", "fetch", "origin", "main", "--tags"])
+        local_tags = (
+            self.runner.run(
+                [
+                    "git",
+                    "for-each-ref",
+                    "--format=%(refname:strip=2)",
+                    "refs/tags",
+                ],
+                capture=True,
+            ).stdout
+            or ""
+        ).splitlines()
         failures: list[str] = []
         successes = 0
-        for mirror in self.config["release"].get("mirrors", []):
+        for mirror in mirrors:
             url = os.environ.get(mirror["url_env"], "")
             token = os.environ.get(mirror["token_env"], "")
             user = mirror.get("user") or os.environ.get(mirror.get("user_env", ""), "")
@@ -1467,13 +1482,32 @@ class Automation:
                 failures.append(f"{mirror['name']}: missing credentials")
                 continue
             target = f"https://{quote(user, safe='')}:{quote(token, safe='')}@{url.removeprefix('https://')}"
+            remote = self.runner.run(
+                ["git", "ls-remote", "--refs", "--tags", target],
+                capture=True,
+                check=False,
+            )
+            if remote.returncode:
+                failures.append(f"{mirror['name']}: git ls-remote failed")
+                continue
+            remote_tags = {
+                ref.removeprefix("refs/tags/")
+                for line in (remote.stdout or "").splitlines()
+                for _, separator, ref in [line.partition("\t")]
+                if separator and ref.startswith("refs/tags/")
+            }
+            missing_tags = [
+                f"refs/tags/{tag}:refs/tags/{tag}"
+                for tag in local_tags
+                if tag not in remote_tags
+            ]
             result = self.runner.run(
                 [
                     "git",
                     "push",
                     target,
                     "refs/remotes/origin/main:refs/heads/main",
-                    "refs/tags/*:refs/tags/*",
+                    *missing_tags,
                 ],
                 check=False,
             )
@@ -1481,7 +1515,7 @@ class Automation:
                 failures.append(f"{mirror['name']}: git push failed")
             else:
                 successes += 1
-        if self.config["release"].get("mirrors") and successes == 0:
+        if mirrors and successes == 0:
             raise AutomationError("mirror failures: " + "; ".join(failures))
 
     def _cleanup_releases(self) -> None:
