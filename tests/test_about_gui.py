@@ -206,13 +206,15 @@ def test_about_tab_add_custom_proxy(app):
     from PySide6.QtWidgets import QListWidget
 
     tab = AboutTab()
-    tab._proxy_edit.setText("https://my-proxy.example")
+    custom = "https://my-proxy.example"
+    tab._proxy_edit.setText(custom)
     tab.btn_proxy_add.click()
     lst = tab.findChild(QListWidget)
     urls = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    assert "https://my-proxy.example" in urls
+    # 用 count 精确判定成员(避免 CodeQL 的 URL 子串 sanitization 启发式误报)
+    assert urls.count(custom) == 1
     # 新增项默认勾选
-    idx = urls.index("https://my-proxy.example")
+    idx = urls.index(custom)
     assert lst.item(idx).checkState() == Qt.CheckState.Checked
     # 输入框被清空
     assert tab._proxy_edit.text() == ""
@@ -268,23 +270,25 @@ def test_about_tab_remove_custom_proxy(app):
     from PySide6.QtWidgets import QListWidget
 
     tab = AboutTab()
+    custom = "https://removable.example"
     # 添加一个自定义项
-    tab._proxy_edit.setText("https://removable.example")
+    tab._proxy_edit.setText(custom)
     tab.btn_proxy_add.click()
     lst = tab.findChild(QListWidget)
     # 找到自定义项并选中
     custom_row = None
     for i in range(lst.count()):
-        if lst.item(i).data(Qt.ItemDataRole.UserRole) == "https://removable.example":
+        if lst.item(i).data(Qt.ItemDataRole.UserRole) == custom:
             custom_row = i
             break
     assert custom_row is not None
     lst.setCurrentRow(custom_row)
     urls_before = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    assert "https://removable.example" in urls_before
+    # 用 count 精确判定成员(避免 CodeQL 的 URL 子串 sanitization 启发式误报)
+    assert urls_before.count(custom) == 1
     tab.btn_proxy_remove.click()
     urls_after = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    assert "https://removable.example" not in urls_after
+    assert urls_after.count(custom) == 0
 
 
 def test_about_tab_default_items_not_removable(app):
