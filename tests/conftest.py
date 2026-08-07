@@ -24,6 +24,34 @@ if os.environ.get("QT_QPA_PLATFORM") is None:
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _qt_session_cleanup():
+    """会话退出前主动清理 Qt 事件与顶层 widget。
+
+    根因补充:offscreen 消除了渲染期崩溃,但测试会话退出时(coverage 写报告的 atexit
+    阶段),残留的顶层 widget 与待决事件由解释器隐式析构,在 Windows 无桌面环境下仍
+    偶发触发原生库 access violation(0xC0000005)。在会话末尾主动 quit + flush 事件 +
+    删除顶层 widget,让 Qt 在受控点完成清理,避免 atexit 期析构崩溃。
+    """
+    yield
+    try:
+        from PySide6.QtWidgets import QApplication, QWidget
+
+        app = QApplication.instance()
+        if app is not None:
+            # 处理完所有待决事件(含 widget 退出/延迟删除)
+            app.processEvents()
+            # 删除所有残留顶层 widget(防止 atexit 隐式析构)
+            for w in app.topLevelWidgets():
+                if isinstance(w, QWidget):
+                    w.deleteLater()
+            app.processEvents()
+            app.quit()
+    except Exception:
+        # 清理失败不应影响测试结果(会话已结束)
+        pass
+
+
 @pytest.fixture(autouse=True)
 def _disable_live_com_detect():
     """全局禁用 PDF Tab 构造时的实时 Office COM 检测。
