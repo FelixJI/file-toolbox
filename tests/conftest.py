@@ -24,31 +24,30 @@ if os.environ.get("QT_QPA_PLATFORM") is None:
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _qt_session_cleanup():
-    """会话退出前主动清理 Qt 事件与顶层 widget。
+@pytest.fixture(autouse=True)
+def _qt_widget_gc():
+    """每个测试后清理残留 Qt 顶层 widget,防止跨测试累积导致原生库崩溃。
 
-    根因补充:offscreen 消除了渲染期崩溃,但测试会话退出时(coverage 写报告的 atexit
-    阶段),残留的顶层 widget 与待决事件由解释器隐式析构,在 Windows 无桌面环境下仍
-    偶发触发原生库 access violation(0xC0000005)。在会话末尾主动 quit + flush 事件 +
-    删除顶层 widget,让 Qt 在受控点完成清理,避免 atexit 期析构崩溃。
+    根因:GUI 测试(各 test_*_gui.py)每例新建 QWidget/对话框,Qt 不会立即释放已关闭
+    的顶层 widget(由 GC 时机决定 deleteLater 落地)。会话内 widget 实例跨测试累积,
+    在 Windows 无桌面 CI 环境下越过临界点后触发 access violation(0xC0000005),
+    固定崩在后续 GUI 测试的 show()/processEvents()。本 fixture 在每例结束后主动
+    deleteLater 所有非父级顶层 widget 并 flush 事件,把累积量压回零,治本。
     """
     yield
     try:
-        from PySide6.QtWidgets import QApplication, QWidget
+        from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
-        if app is not None:
-            # 处理完所有待决事件(含 widget 退出/延迟删除)
-            app.processEvents()
-            # 删除所有残留顶层 widget(防止 atexit 隐式析构)
-            for w in app.topLevelWidgets():
-                if isinstance(w, QWidget):
-                    w.deleteLater()
-            app.processEvents()
-            app.quit()
+        if app is None:
+            return
+        for w in app.topLevelWidgets():
+            # 仅清理无父 widget 的顶层窗口(测试内临时对话框/窗口),
+            # 不动主窗口等被 fixture 持有的对象(它们有引用,不会被误删)。
+            if w.parent() is None:
+                w.deleteLater()
+        app.processEvents()
     except Exception:
-        # 清理失败不应影响测试结果(会话已结束)
         pass
 
 
