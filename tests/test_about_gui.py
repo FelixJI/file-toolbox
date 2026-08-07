@@ -145,25 +145,164 @@ def test_about_tab_has_proxy_edit(app):
     assert isinstance(tab._proxy_edit, QLineEdit)
 
 
-def test_about_tab_save_proxy_writes_settings(app, monkeypatch, tmp_path):
-    """保存按钮 → settings 写入输入框值。"""
+# ---------------------------------------------------------------------------
+# 更新与代理整合分组 + 默认候选 / 全选 / 自定义添加 / 保存
+# ---------------------------------------------------------------------------
+
+
+def test_about_tab_has_update_and_proxy_group(app):
+    """关于 Tab 应含'更新与代理'分组(整合检查更新与代理设置)。"""
+    from PySide6.QtWidgets import QGroupBox
+
+    tab = AboutTab()
+    boxes = [b.title() for b in tab.findChildren(QGroupBox)]
+    assert any("更新与代理" in t for t in boxes)
+
+
+def test_about_tab_proxy_list_has_defaults(app):
+    """代理列表应列出 DEFAULT_PROXIES(默认项)。"""
+    from PySide6.QtWidgets import QListWidget
+
+    from file_toolbox.updater.proxy import DEFAULT_PROXIES
+
+    tab = AboutTab()
+    lst = tab.findChild(QListWidget)
+    assert lst is not None
+    texts = [lst.item(i).text() for i in range(lst.count())]
+    # 每个默认代理出现在某条目文本中(默认项带"(默认)"后缀)
+    for p in DEFAULT_PROXIES:
+        assert any(p in t for t in texts), f"默认代理 {p} 未出现在列表"
+
+
+def test_about_tab_proxy_select_all(app):
+    """全选按钮 → 列表所有项 checked。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    tab = AboutTab()
+    tab.btn_proxy_select_none.click()  # 先全不选
+    tab.btn_proxy_select_all.click()
+    lst = tab.findChild(QListWidget)
+    for i in range(lst.count()):
+        assert lst.item(i).checkState() == Qt.CheckState.Checked
+
+
+def test_about_tab_proxy_select_none(app):
+    """全不选按钮 → 列表所有项 unchecked。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    tab = AboutTab()
+    tab.btn_proxy_select_all.click()  # 先全选
+    tab.btn_proxy_select_none.click()
+    lst = tab.findChild(QListWidget)
+    for i in range(lst.count()):
+        assert lst.item(i).checkState() == Qt.CheckState.Unchecked
+
+
+def test_about_tab_add_custom_proxy(app):
+    """添加自定义代理 → 列表新增一项且默认勾选。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    tab = AboutTab()
+    tab._proxy_edit.setText("https://my-proxy.example")
+    tab.btn_proxy_add.click()
+    lst = tab.findChild(QListWidget)
+    urls = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
+    assert "https://my-proxy.example" in urls
+    # 新增项默认勾选
+    idx = urls.index("https://my-proxy.example")
+    assert lst.item(idx).checkState() == Qt.CheckState.Checked
+    # 输入框被清空
+    assert tab._proxy_edit.text() == ""
+
+
+def test_about_tab_add_duplicate_proxy_no_dup(app):
+    """添加已存在的代理 → 不重复添加,仅勾选已存在项。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    from file_toolbox.updater.proxy import DEFAULT_PROXIES
+
+    tab = AboutTab()
+    tab._proxy_edit.setText(DEFAULT_PROXIES[0])  # 与默认项重复
+    tab.btn_proxy_add.click()
+    lst = tab.findChild(QListWidget)
+    urls = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
+    assert urls.count(DEFAULT_PROXIES[0]) == 1  # 仍只有一项
+
+
+def test_about_tab_save_writes_checked_proxies(app, monkeypatch, tmp_path):
+    """保存按钮 → settings['gh_proxies'] = 列表中所有已勾选项。"""
     monkeypatch.chdir(tmp_path)
     from file_toolbox.common import settings
 
     tab = AboutTab()
-    tab._proxy_edit.setText("https://ghproxy.example")
+    tab.btn_proxy_select_none.click()  # 先全不选
+    # 手动勾选第一个默认项
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    lst = tab.findChild(QListWidget)
+    first_url = lst.item(0).data(Qt.ItemDataRole.UserRole)
+    lst.item(0).setCheckState(Qt.CheckState.Checked)
     tab.btn_proxy_save.click()
-    assert settings.get("gh_proxy") == "https://ghproxy.example"
+    assert settings.get("gh_proxies") == [first_url]
 
 
-def test_about_tab_clear_proxy_empties_settings(app, monkeypatch, tmp_path):
+def test_about_tab_save_none_means_direct(app, monkeypatch, tmp_path):
+    """全不选保存 → settings['gh_proxies'] 为空列表(= 直连)。"""
     monkeypatch.chdir(tmp_path)
     from file_toolbox.common import settings
 
-    settings.set("gh_proxy", "https://old.example")
     tab = AboutTab()
-    tab.btn_proxy_clear.click()
-    assert settings.get("gh_proxy") == ""
+    tab.btn_proxy_select_none.click()
+    tab.btn_proxy_save.click()
+    assert settings.get("gh_proxies") == []
+
+
+def test_about_tab_remove_custom_proxy(app):
+    """移除选中 → 自定义项被移除;默认项不可移除(仅取消勾选)。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    tab = AboutTab()
+    # 添加一个自定义项
+    tab._proxy_edit.setText("https://removable.example")
+    tab.btn_proxy_add.click()
+    lst = tab.findChild(QListWidget)
+    # 找到自定义项并选中
+    custom_row = None
+    for i in range(lst.count()):
+        if lst.item(i).data(Qt.ItemDataRole.UserRole) == "https://removable.example":
+            custom_row = i
+            break
+    assert custom_row is not None
+    lst.setCurrentRow(custom_row)
+    urls_before = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
+    assert "https://removable.example" in urls_before
+    tab.btn_proxy_remove.click()
+    urls_after = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
+    assert "https://removable.example" not in urls_after
+
+
+def test_about_tab_default_items_not_removable(app):
+    """移除默认项 → 不删除,仅取消勾选。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListWidget
+
+    tab = AboutTab()
+    lst = tab.findChild(QListWidget)
+    # 选中第一个(默认)项并尝试移除
+    lst.setCurrentRow(0)
+    first_url = lst.item(0).data(Qt.ItemDataRole.UserRole)
+    count_before = lst.count()
+    tab.btn_proxy_remove.click()
+    # 默认项仍在(数量不变),只是被取消勾选
+    urls = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
+    assert first_url in urls
+    assert lst.count() == count_before
 
 
 # ---------------------------------------------------------------------------

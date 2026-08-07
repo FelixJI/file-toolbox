@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from urllib import request as urlrequest
 
-from file_toolbox.updater.proxy import apply_proxy
+from file_toolbox.updater.proxy import apply_proxy, get_fetch_candidates
 
 # owner/repo 硬编码常量(与 git remote 一致,不引入配置真相源)
 GITHUB_REPO = ("FelixJI", "file-toolbox")
@@ -127,9 +127,12 @@ def _parse_release(payload: bytes, platform: str) -> RemoteRelease | None:
     )
 
 
-def _fetch(platform: str) -> RemoteRelease | None:
-    """从单个平台拉取并解析最新 Release。失败返回 None(不抛)。"""
-    url = apply_proxy(_build_release_url(platform))
+def _fetch(platform: str, proxy: str = "") -> RemoteRelease | None:
+    """从单个平台拉取并解析最新 Release。失败返回 None(不抛)。
+
+    proxy: 显式代理基址("" = 直连不拼接)。
+    """
+    url = apply_proxy(_build_release_url(platform), proxy=proxy)
     req = urlrequest.Request(url, headers={"Accept": "application/json"})
     try:
         with _urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
@@ -143,9 +146,12 @@ def _fetch(platform: str) -> RemoteRelease | None:
 def fetch_latest() -> RemoteRelease | None:
     """从 GitHub 取最新正式版 Release。
 
-    仅返回正式版(过滤 prerelease)。源失败/为 prerelease/无 zip asset → 返回 None。
+    按 get_fetch_candidates() 的代理候选顺序逐个尝试(含末尾直连兜底),
+    首个成功的候选即返回。仅返回正式版(过滤 prerelease)。
+    全部候选失败/为 prerelease/无 zip asset → 返回 None。
     """
-    rel = _fetch("github")
-    if rel and not _is_prerelease(rel.version):
-        return rel
+    for proxy in get_fetch_candidates():
+        rel = _fetch("github", proxy=proxy)
+        if rel and not _is_prerelease(rel.version):
+            return rel
     return None

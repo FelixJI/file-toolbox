@@ -7,7 +7,6 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QProgressDialog,
     QStatusBar,
@@ -49,29 +48,19 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 顶部:历史按钮(下拉菜单直达各模块,右对齐)
+        # 顶部:历史按钮(直接对应当前标签页,无需二次选择;右对齐)
         top = QHBoxLayout()
         top.setContentsMargins(9, 5, 9, 2)
         top.addStretch(1)
         self.btn_history = QToolButton()
         self.btn_history.setText("历史")
-        self.btn_history.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        hist_menu = QMenu(self.btn_history)
-        for label, tool in [
-            ("重命名历史", "rename"),
-            ("建文件夹历史", "mkdir"),
-            ("生成PDF历史", "pdf"),
-            ("内容替换历史", "replace"),
-            ("发票识别历史", "invoice"),
-        ]:
-            act = hist_menu.addAction(label)
-            act.triggered.connect(lambda checked=False, t=tool: self._open_history_tool(t))
-        self.btn_history.setMenu(hist_menu)
+        self.btn_history.clicked.connect(self._open_history_for_current_tab)
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
         # 5 Tab
         tabs = QTabWidget()
+        self._tabs = tabs
         self._rename_tab = FileRenamerDialog()
         self._mkdir_tab = BatchFolderCreatorDialog()
         self._pdf_tab = PDFGeneratorDialog()
@@ -84,6 +73,16 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._invoice_tab, "发票识别")
         self._about_tab = AboutTab()
         tabs.addTab(self._about_tab, "关于")
+        # 各 Tab 对应的历史工具名;"关于"页无历史 → None(按钮禁用)
+        self._tab_tools: list[str | None] = [
+            "rename",
+            "mkdir",
+            "pdf",
+            "replace",
+            "invoice",
+            None,
+        ]
+        tabs.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(tabs, stretch=1)
 
         central.setLayout(layout)
@@ -114,8 +113,20 @@ class MainWindow(QMainWindow):
         self._update_worker.checked.connect(self._on_update_checked)
         self._manual_check_pending = False  # 区分手动 vs 自动检查
 
-    def _open_history_tool(self, tool: str) -> None:
-        """直接打开指定工具的历史(下拉菜单项触发,无二次选择)。"""
+        # 历史按钮初始状态跟随当前(首个)标签页
+        self._on_tab_changed(self._tabs.currentIndex())
+
+    def _on_tab_changed(self, index: int) -> None:
+        """标签页切换:更新历史按钮可用状态(关于页无历史 → 禁用)。"""
+        tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
+        self.btn_history.setEnabled(tool is not None)
+
+    def _open_history_for_current_tab(self) -> None:
+        """点击历史按钮:直接打开当前标签页对应的历史(无需二次选择)。"""
+        index = self._tabs.currentIndex()
+        tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
+        if tool is None:
+            return
         dlg = HistoryDialog(self._history, tool, self)
         dlg.exec()
 

@@ -177,26 +177,20 @@ class TestMainWindowIntegration:
         assert win._update_banner.isHidden() is True
         win.deleteLater()
 
-    def test_history_button_is_toolbutton_with_menu(self, app):
-        """历史按钮是 QToolButton 且带 5 项菜单。"""
+    def test_history_button_is_toolbutton_without_menu(self, app):
+        """历史按钮是 QToolButton 且无下拉菜单(直接对应当前标签页)。"""
         from PySide6.QtWidgets import QToolButton
 
         win = MainWindow()
         assert isinstance(win.btn_history, QToolButton)
-        menu = win.btn_history.menu()
-        assert menu is not None
-        actions = menu.actions()
-        assert len(actions) == 5
-        labels = [a.text() for a in actions]
-        assert "重命名历史" in labels
-        assert "建文件夹历史" in labels
-        assert "生成PDF历史" in labels
-        assert "内容替换历史" in labels
-        assert "发票识别历史" in labels
+        # 不再有下拉菜单:点击直接打开当前 tab 历史
+        assert win.btn_history.menu() is None
+        # 默认当前 tab(重命名)→ 按钮启用
+        assert win.btn_history.isEnabled() is True
         win.deleteLater()
 
-    def test_history_menu_item_opens_dialog(self, app, monkeypatch):
-        """点菜单项 → 打开对应 HistoryDialog(无二次选择)。"""
+    def test_history_button_opens_current_tab_dialog(self, app, monkeypatch):
+        """点击历史按钮 → 打开当前 tab 对应的 HistoryDialog(无二次选择)。"""
         opened: list[str] = []
 
         from file_toolbox.gui import main_window as mw_mod
@@ -210,11 +204,10 @@ class TestMainWindowIntegration:
 
         monkeypatch.setattr(mw_mod, "HistoryDialog", _SpyDialog)
         win = MainWindow()
-        menu = win.btn_history.menu()
-        # 点「重命名历史」
-        act = next(a for a in menu.actions() if a.text() == "重命名历史")
-        act.trigger()
-        assert opened == ["rename"]
+        # 切到 pdf tab(index 2),点击历史按钮应打开 pdf 历史
+        win._tabs.setCurrentIndex(2)
+        win._open_history_for_current_tab()
+        assert opened == ["pdf"]
         win.deleteLater()
 
     def test_check_requested_triggers_worker(self, app, monkeypatch):

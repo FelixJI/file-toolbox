@@ -257,6 +257,114 @@ class TestNormalizeSegments:
         assert vmod._normalize_segments("1.2") == [1, 2]
 
 
+class TestFetchLatestFallback:
+    """fetch_latest 遍历代理候选回退:首个失败则试下一个,直到直连兜底。"""
+
+    def test_first_proxy_fails_second_succeeds(self, monkeypatch, tmp_path):
+        """候选1(坏代理)失败 → 候选2(好代理)成功。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://bad-proxy.example", "https://good-proxy.example"])
+        attempted: list[str] = []
+
+        def fake_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            attempted.append(url)
+            if url.startswith("https://bad-proxy.example/"):
+                raise urlerror.URLError("bad proxy down")
+            if url.startswith("https://good-proxy.example/"):
+                return _FakeResp(_make_github_payload("v2.0.0"))
+            raise AssertionError(f"unexpected url: {url}")
+
+        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
+        rel = vmod.fetch_latest()
+        assert rel is not None
+        assert rel.version == "2.0.0"
+        # 第一个候选失败,第二个候选成功(中间应有两次 urlopen 调用)
+        assert any("bad-proxy.example" in u for u in attempted)
+        assert any("good-proxy.example" in u for u in attempted)
+
+    def test_all_proxies_fail_then_direct_succeeds(self, monkeypatch, tmp_path):
+        """所有代理失败 → 末尾直连兜底成功。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://bad-proxy.example"])
+        attempted: list[str] = []
+
+        def fake_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            attempted.append(url)
+            if url.startswith("https://bad-proxy.example/"):
+                raise urlerror.URLError("bad proxy down")
+            # 直连(api.github.com 原样)
+            if _host_is(url, "api.github.com"):
+                return _FakeResp(_make_github_payload("v2.0.0"))
+            raise AssertionError(f"unexpected url: {url}")
+
+        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
+        rel = vmod.fetch_latest()
+        assert rel is not None
+        assert rel.version == "2.0.0"
+        # 代理失败后走到了直连(api.github.com 无前缀)
+        assert any(_host_is(u, "api.github.com") for u in attempted)
+
+    def test_all_candidates_fail_returns_none(self, monkeypatch, tmp_path):
+        """代理 + 直连全部失败 → None。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://bad-proxy.example"])
+
+        def fake_urlopen(req, timeout=None):
+            raise urlerror.URLError("all down")
+
+        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
+        assert vmod.fetch_latest() is None
+
+    def test_default_direct_only_works(self, monkeypatch, tmp_path):
+        """无任何配置时仅直连候选,直连成功即返回。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.updater import proxy
+
+        monkeypatch.delenv(proxy.ENV_VAR, raising=False)
+
+        def fake_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if _host_is(url, "api.github.com"):
+                return _FakeResp(_make_github_payload("v2.0.0"))
+            raise AssertionError(f"unexpected url: {url}")
+
+        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
+        rel = vmod.fetch_latest()
+        assert rel is not None
+        assert rel.version == "2.0.0"
+
+    def test_env_proxy_tried_before_settings(self, monkeypatch, tmp_path):
+        """环境变量代理排在 settings 代理之前优先尝试。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://settings-proxy.example"])
+        monkeypatch.setenv("FILE_TOOLBOX_GH_PROXY", "https://env-proxy.example")
+        attempted: list[str] = []
+
+        def fake_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            attempted.append(url)
+            if url.startswith("https://env-proxy.example/"):
+                return _FakeResp(_make_github_payload("v3.0.0"))
+            raise AssertionError(f"unexpected url: {url}")
+
+        monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
+        rel = vmod.fetch_latest()
+        assert rel is not None
+        assert rel.version == "3.0.0"
+        # 第一个尝试的是 env 代理
+        assert attempted[0].startswith("https://env-proxy.example/")
+
+
 class TestBuildReleaseUrl:
     """覆盖 _build_release_url 未知 platform raise(missing 96)。"""
 

@@ -144,3 +144,163 @@ class TestApplyProxy:
         monkeypatch.chdir(tmp_path)
         no_env.setenv(proxy.ENV_VAR, "https://ghproxy.com")
         assert proxy.apply_proxy("https://example.com/file.zip") == "https://example.com/file.zip"
+
+
+class TestDefaultProxies:
+    """预置默认代理候选常量。"""
+
+    def test_default_proxies_nonempty(self):
+        assert len(proxy.DEFAULT_PROXIES) >= 1
+
+    def test_default_proxies_all_https_normalized(self):
+        for p in proxy.DEFAULT_PROXIES:
+            assert p.startswith("https://")
+            assert not p.endswith("/")  # 归一化无尾斜杠
+
+
+class TestGetEnabledProxies:
+    """get_enabled_proxies:读 gh_proxies 列表 + 旧 gh_proxy 迁移 + 归一化去重。"""
+
+    def test_empty_when_nothing_set(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert proxy.get_enabled_proxies() == []
+
+    def test_reads_gh_proxies_list(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://a.com", "https://b.com"])
+        assert proxy.get_enabled_proxies() == ["https://a.com", "https://b.com"]
+
+    def test_normalizes_and_dedups(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set(
+            "gh_proxies",
+            ["https://a.com/", "a.com", "https://b.com", "  ", "b.com"],  # 含尾斜杠/无scheme/重复
+        )
+        # a.com 无 scheme → https://a.com;https://a.com/ → https://a.com;去重保序
+        assert proxy.get_enabled_proxies() == ["https://a.com", "https://b.com"]
+
+    def test_legacy_gh_proxy_migrated_when_no_list(self, no_env, tmp_path, monkeypatch):
+        """未设 gh_proxies 但有旧 gh_proxy → 迁移为单元素列表(向后兼容)。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxy", "https://legacy.com")
+        assert proxy.get_enabled_proxies() == ["https://legacy.com"]
+
+    def test_gh_proxies_takes_precedence_over_legacy(self, no_env, tmp_path, monkeypatch):
+        """同时有 gh_proxies(空列表)和 gh_proxy → 不迁移旧值(列表优先)。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", [])
+        settings.set("gh_proxy", "https://legacy.com")
+        assert proxy.get_enabled_proxies() == []
+
+    def test_non_list_gh_proxies_ignored(self, no_env, tmp_path, monkeypatch):
+        """gh_proxies 为非 list(损坏)→ 视为未设置,迁移旧 gh_proxy。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", "not-a-list")
+        settings.set("gh_proxy", "https://legacy.com")
+        assert proxy.get_enabled_proxies() == ["https://legacy.com"]
+
+
+class TestGetFetchCandidates:
+    """get_fetch_candidates:env + enabled + 直连兜底,去重保序。"""
+
+    def test_default_only_direct(self, no_env, tmp_path, monkeypatch):
+        """无任何配置 → 仅直连 [""]。"""
+        monkeypatch.chdir(tmp_path)
+        assert proxy.get_fetch_candidates() == [""]
+
+    def test_env_first_then_direct(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        no_env.setenv(proxy.ENV_VAR, "https://env-proxy.com")
+        assert proxy.get_fetch_candidates() == ["https://env-proxy.com", ""]
+
+    def test_env_enabled_then_direct(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        no_env.setenv(proxy.ENV_VAR, "https://env-proxy.com")
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://a.com", "https://b.com"])
+        assert proxy.get_fetch_candidates() == [
+            "https://env-proxy.com",
+            "https://a.com",
+            "https://b.com",
+            "",
+        ]
+
+    def test_dedup_keeps_order(self, no_env, tmp_path, monkeypatch):
+        """env 与 enabled 重复 → 去重保序;末尾总直连。"""
+        monkeypatch.chdir(tmp_path)
+        no_env.setenv(proxy.ENV_VAR, "https://a.com")
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://a.com", "https://b.com", "a.com"])
+        assert proxy.get_fetch_candidates() == ["https://a.com", "https://b.com", ""]
+
+    def test_direct_always_last(self, no_env, tmp_path, monkeypatch):
+        """直连("")总在末尾(即便 enabled 列表很长)。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://x.com", "https://y.com"])
+        cands = proxy.get_fetch_candidates()
+        assert cands[-1] == ""  # 末尾直连
+        assert "" not in cands[:-1]  # 直连只在末尾出现一次
+
+
+class TestApplyProxyExplicitProxy:
+    """apply_proxy(url, proxy=...):显式 proxy 参数。"""
+
+    def test_explicit_proxy_prefixes(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        url = "https://github.com/a/b.zip"
+        assert proxy.apply_proxy(url, proxy="https://explicit.com") == (
+            "https://explicit.com/https://github.com/a/b.zip"
+        )
+
+    def test_explicit_empty_string_is_direct(self, no_env, tmp_path, monkeypatch):
+        """显式 proxy='' → 直连(不拼接),即使 get_proxy() 非空。"""
+        monkeypatch.chdir(tmp_path)
+        no_env.setenv(proxy.ENV_VAR, "https://should-be-ignored.com")
+        url = "https://github.com/a/b.zip"
+        assert proxy.apply_proxy(url, proxy="") == url
+
+    def test_none_uses_get_proxy(self, no_env, tmp_path, monkeypatch):
+        """proxy=None → 用 get_proxy()(向后兼容默认行为)。"""
+        monkeypatch.chdir(tmp_path)
+        no_env.setenv(proxy.ENV_VAR, "https://auto.com")
+        url = "https://github.com/a/b.zip"
+        assert proxy.apply_proxy(url) == "https://auto.com/https://github.com/a/b.zip"
+        assert proxy.apply_proxy(url, proxy=None) == "https://auto.com/https://github.com/a/b.zip"
+
+    def test_explicit_proxy_non_github_unchanged(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert (
+            proxy.apply_proxy("https://example.com/x", proxy="https://p.com")
+            == "https://example.com/x"
+        )
+
+
+class TestGetProxyBackwardCompat:
+    """get_proxy:首个候选,向后兼容旧测试。"""
+
+    def test_returns_first_candidate(self, no_env, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        no_env.setenv(proxy.ENV_VAR, "https://first.com")
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://second.com"])
+        assert proxy.get_proxy() == "https://first.com"
+
+    def test_returns_empty_when_all_empty(self, no_env, tmp_path, monkeypatch):
+        """get_proxy 现在基于 candidates,candidates 至少含 [""]→ get_proxy 返回 ""。"""
+        monkeypatch.chdir(tmp_path)
+        assert proxy.get_proxy() == ""

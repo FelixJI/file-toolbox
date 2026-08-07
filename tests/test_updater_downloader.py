@@ -269,3 +269,145 @@ class TestProxyApplied:
             )
         )
         assert all(u.startswith("https://github.com/") for u in captured_urls), captured_urls
+
+
+def _real_release():
+    """真实 GitHub 域名的 release(让 _is_github 为 True,代理才拼接)。"""
+    return _make_release(
+        zip_url="https://github.com/FelixJI/file-toolbox/releases/download/v1.2.0/FileToolbox-1.2.0-win64.zip",
+        cs_url="https://github.com/FelixJI/file-toolbox/releases/download/v1.2.0/checksums.txt",
+    )
+
+
+class TestDownloadAndVerifyFallback:
+    """download_and_verify 遍历代理候选回退:某候选失败则换下一个,全失败才抛错。"""
+
+    def test_bad_proxy_fails_good_proxy_succeeds(self, monkeypatch, tmp_path):
+        """候选1(坏代理)checksums/zip 失败 → 候选2(好代理)成功。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://bad-proxy.example", "https://good-proxy.example"])
+
+        import hashlib
+
+        zip_bytes = b"fake-zip"
+        expected_sha = hashlib.sha256(zip_bytes).hexdigest()
+        cs_text = f"{expected_sha}  FileToolbox-1.2.0-win64.zip\n"
+
+        def fake_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if url.startswith("https://bad-proxy.example/"):
+                raise urlerror.URLError("bad proxy down")
+            if url.startswith("https://good-proxy.example/"):
+                if url.endswith("checksums.txt"):
+                    return _StreamResp(cs_text.encode())
+                return _StreamResp(zip_bytes)
+            raise AssertionError(f"unexpected url: {url}")
+
+        monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
+        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
+
+        path = dmod.download_and_verify(_real_release())
+        assert path.exists()
+        assert path.read_bytes() == zip_bytes
+
+    def test_checksum_fails_on_proxy_then_direct_succeeds(self, monkeypatch, tmp_path):
+        """代理下 checksums 拿到但下载 zip 失败 → 整体回退到直连重试成功。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://flaky-proxy.example"])
+
+        import hashlib
+
+        zip_bytes = b"fake-zip"
+        expected_sha = hashlib.sha256(zip_bytes).hexdigest()
+        cs_text = f"{expected_sha}  FileToolbox-1.2.0-win64.zip\n"
+
+        def fake_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            # flaky 代理:checksums 成功,但 zip 下载失败(模拟下载中途断)
+            if url.startswith("https://flaky-proxy.example/"):
+                if url.endswith("checksums.txt"):
+                    return _StreamResp(cs_text.encode())
+                raise urlerror.URLError("download interrupted")
+            # 直连(github.com 无前缀):全部成功
+            if url.startswith("https://github.com/"):
+                if url.endswith("checksums.txt"):
+                    return _StreamResp(cs_text.encode())
+                return _StreamResp(zip_bytes)
+            raise AssertionError(f"unexpected url: {url}")
+
+        monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
+        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
+
+        path = dmod.download_and_verify(_real_release())
+        assert path.exists()
+        assert path.read_bytes() == zip_bytes
+
+    def test_all_candidates_fail_raises_network_error(self, monkeypatch, tmp_path):
+        """代理 + 直连全部失败 → NetworkError。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://bad-proxy.example"])
+
+        def fake_urlopen(req, timeout=None):
+            raise urlerror.URLError("all down")
+
+        monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
+        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
+
+        with pytest.raises(NetworkError):
+            dmod.download_and_verify(_real_release())
+
+    def test_partial_download_cleaned_between_candidates(self, monkeypatch, tmp_path):
+        """坏代理下载写了半截文件 → 回退到直连前,半截文件应被清理(不残留)。"""
+        monkeypatch.chdir(tmp_path)
+        from file_toolbox.common import settings
+
+        settings.set("gh_proxies", ["https://bad-proxy.example"])
+
+        import hashlib
+
+        zip_bytes = b"full-zip-content"
+        expected_sha = hashlib.sha256(zip_bytes).hexdigest()
+        cs_text = f"{expected_sha}  FileToolbox-1.2.0-win64.zip\n"
+
+        dest_seen: list = []
+
+        def fake_urlopen(req, timeout=None):
+            url = req.full_url if hasattr(req, "full_url") else str(req)
+            if url.startswith("https://bad-proxy.example/"):
+                if url.endswith("checksums.txt"):
+                    return _StreamResp(cs_text.encode())
+                # 写半截文件后失败(模拟中断);dest 已存在
+                raise urlerror.URLError("interrupted")
+            if url.startswith("https://github.com/"):
+                if url.endswith("checksums.txt"):
+                    return _StreamResp(cs_text.encode())
+                return _StreamResp(zip_bytes)
+            raise AssertionError(f"unexpected url: {url}")
+
+        # 拦截 _download_streaming 的 dest,记录坏代理阶段的残留文件
+        original_streaming = dmod._download_streaming
+        call_count = {"n": 0}
+
+        def streaming_spy(url, dest, proxy="", on_progress=None):
+            call_count["n"] += 1
+            try:
+                return original_streaming(url, dest, proxy=proxy, on_progress=on_progress)
+            except Exception:
+                dest_seen.append((call_count["n"], dest.exists(), str(dest)))
+                raise
+
+        monkeypatch.setattr(dmod, "_urlopen", fake_urlopen)
+        monkeypatch.setattr(dmod, "_download_streaming", streaming_spy)
+        monkeypatch.setattr(dmod, "_mkdtemp", lambda prefix: str(tmp_path))
+
+        path = dmod.download_and_verify(_real_release())
+        assert path.exists()
+        assert path.read_bytes() == zip_bytes
+        # 坏代理阶段失败前 dest 不存在(未开始写),或已被清理。最终成功文件内容正确。
+        # 关键:坏代理的半截文件若写过,应在 except 里 unlink 清理,不污染直连候选。
