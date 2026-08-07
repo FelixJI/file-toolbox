@@ -7,6 +7,49 @@ from pathlib import Path
 
 import pytest
 
+# 强制 Qt 使用离屏平台插件(QT_QPA_PLATFORM=offscreen)。
+#
+# 必须在模块顶层(conftest 被 pytest import 时,早于任何 fixture)设置,而非 autouse
+# fixture:QT_QPA_PLATFORM 只在 QApplication 首次构造时读取平台插件,而 GUI 测试用
+# module-scoped app fixture 创建 QApplication,function-scoped autouse fixture 不保证
+# 先于它执行 → 平台插件可能已固定,设值无效。
+#
+# 根因:PySide6 在 Windows 无桌面 CI runner 上,会话内大量 QApplication/widget 实例化
+# + show()/processEvents() 走真实窗口系统,在 coverage 写报告的 atexit 阶段触发原生库
+# access violation(0xC0000005);随 GUI 测试数量增加越过临界点后稳定复现。offscreen
+# 绕过真实窗口系统渲染消除该崩溃,不改变测试逻辑/断言/覆盖率(Qt 官方无头测试配置)。
+#
+# 仅当未显式设置时注入(尊重本地开发者显式选择,如调试时用 windows/cocoa)。
+if os.environ.get("QT_QPA_PLATFORM") is None:
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+
+@pytest.fixture(autouse=True)
+def _qt_widget_gc():
+    """每个测试后清理残留 Qt 顶层 widget,防止跨测试累积导致原生库崩溃。
+
+    根因:GUI 测试(各 test_*_gui.py)每例新建 QWidget/对话框,Qt 不会立即释放已关闭
+    的顶层 widget(由 GC 时机决定 deleteLater 落地)。会话内 widget 实例跨测试累积,
+    在 Windows 无桌面 CI 环境下越过临界点后触发 access violation(0xC0000005),
+    固定崩在后续 GUI 测试的 show()/processEvents()。本 fixture 在每例结束后主动
+    deleteLater 所有非父级顶层 widget 并 flush 事件,把累积量压回零,治本。
+    """
+    yield
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return
+        for w in app.topLevelWidgets():
+            # 仅清理无父 widget 的顶层窗口(测试内临时对话框/窗口),
+            # 不动主窗口等被 fixture 持有的对象(它们有引用,不会被误删)。
+            if w.parent() is None:
+                w.deleteLater()
+        app.processEvents()
+    except Exception:
+        pass
+
 
 @pytest.fixture(autouse=True)
 def _disable_live_com_detect():

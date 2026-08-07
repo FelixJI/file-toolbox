@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from file_toolbox.common import metadata, settings, shortcuts
+from file_toolbox.updater.proxy import DEFAULT_PROXIES
 
 
 class AboutTab(QWidget):
@@ -71,42 +74,68 @@ class AboutTab(QWidget):
         info_layout.addWidget(QLabel(f"Python 要求: {metadata.PYTHON_REQUIREMENT}"))
         info_layout.addWidget(QLabel(f"运行环境: {platform.platform()}"))
 
-        # --- 检查更新行(基本信息组内) ---
+        root.addWidget(info_box)
+
+        # --- 更新与代理组(检查更新 + 代理设置整合) ---
+        update_box = QGroupBox("更新与代理")
+        update_layout = QVBoxLayout(update_box)
+
+        # 上半:检查更新
         check_row = QHBoxLayout()
         self.btn_check_update = QPushButton("检查更新")
         self.btn_check_update.clicked.connect(self._on_check_clicked)
         check_row.addWidget(self.btn_check_update)
         self._check_result_lbl = QLabel("")
         check_row.addWidget(self._check_result_lbl, stretch=1)
-        info_layout.addLayout(check_row)
+        update_layout.addLayout(check_row)
 
-        root.addWidget(info_box)
-
-        # --- GitHub 代理组 ---
-        proxy_box = QGroupBox("GitHub 代理(可选)")
-        proxy_layout = QVBoxLayout(proxy_box)
-        proxy_intro = QLabel("用于加速版本检查与更新下载。留空则直连 GitHub。")
+        # 下半:代理设置
+        proxy_intro = QLabel(
+            "勾选要启用的 GitHub 加速代理。检查更新与下载时按勾选顺序自动尝试,"
+            "全部失败回退直连(程序内部自动回退,无需手动干预)。"
+        )
         proxy_intro.setWordWrap(True)
-        proxy_layout.addWidget(proxy_intro)
-        proxy_row = QHBoxLayout()
-        proxy_row.addWidget(QLabel("代理地址:"))
-        self._proxy_edit = QLineEdit()
-        self._proxy_edit.setPlaceholderText("如 https://ghproxy.com")
-        # 初始化为已保存的值(环境变量优先显示)
-        from file_toolbox.updater.proxy import get_proxy
+        update_layout.addWidget(proxy_intro)
 
-        self._proxy_edit.setText(get_proxy())
-        proxy_row.addWidget(self._proxy_edit, stretch=1)
-        self.btn_proxy_save = QPushButton("保存")
+        self._proxy_list = QListWidget()
+        update_layout.addWidget(self._proxy_list)
+
+        proxy_btn_row = QHBoxLayout()
+        self.btn_proxy_select_all = QPushButton("全选")
+        self.btn_proxy_select_all.clicked.connect(self._select_all_proxies)
+        proxy_btn_row.addWidget(self.btn_proxy_select_all)
+        self.btn_proxy_select_none = QPushButton("全不选")
+        self.btn_proxy_select_none.clicked.connect(self._select_no_proxies)
+        proxy_btn_row.addWidget(self.btn_proxy_select_none)
+        proxy_btn_row.addStretch(1)
+        update_layout.addLayout(proxy_btn_row)
+
+        add_row = QHBoxLayout()
+        add_row.addWidget(QLabel("自定义代理:"))
+        self._proxy_edit = QLineEdit()
+        self._proxy_edit.setPlaceholderText("如 https://your-proxy.example")
+        add_row.addWidget(self._proxy_edit, stretch=1)
+        self.btn_proxy_add = QPushButton("添加")
+        self.btn_proxy_add.clicked.connect(self._add_custom_proxy)
+        add_row.addWidget(self.btn_proxy_add)
+        self.btn_proxy_remove = QPushButton("移除选中")
+        self.btn_proxy_remove.clicked.connect(self._remove_selected_proxy)
+        add_row.addWidget(self.btn_proxy_remove)
+        update_layout.addLayout(add_row)
+
+        save_row = QHBoxLayout()
+        self.btn_proxy_save = QPushButton("保存代理设置")
         self.btn_proxy_save.clicked.connect(self._save_proxy)
-        proxy_row.addWidget(self.btn_proxy_save)
-        self.btn_proxy_clear = QPushButton("清空")
-        self.btn_proxy_clear.clicked.connect(self._clear_proxy)
-        proxy_row.addWidget(self.btn_proxy_clear)
-        proxy_layout.addLayout(proxy_row)
+        save_row.addWidget(self.btn_proxy_save)
+        save_row.addStretch(1)
+        update_layout.addLayout(save_row)
+
         self._proxy_status_lbl = QLabel("")
-        proxy_layout.addWidget(self._proxy_status_lbl)
-        root.addWidget(proxy_box)
+        update_layout.addWidget(self._proxy_status_lbl)
+        root.addWidget(update_box)
+
+        # 填充代理列表(默认候选 + 已保存的自定义/勾选状态)
+        self._populate_proxy_list()
 
         # --- 技术路线组 ---
         tech_box = QGroupBox("技术路线")
@@ -195,12 +224,109 @@ class AboutTab(QWidget):
         self._check_result_lbl.setText(text)
 
     # --- GitHub 代理设置 ---
-    def _save_proxy(self) -> None:
-        value = self._proxy_edit.text().strip()
-        settings.set("gh_proxy", value)
-        self._proxy_status_lbl.setText("已保存" if value else "已保存(空 = 直连)")
+    # 列表项数据:UserRole 存归一化代理 URL;UserRole+1 存是否默认项(True 不可移除)。
+    _ROLE_URL = Qt.ItemDataRole.UserRole
+    _ROLE_DEFAULT = Qt.ItemDataRole.UserRole + 1
 
-    def _clear_proxy(self) -> None:
-        self._proxy_edit.setText("")
-        settings.set("gh_proxy", "")
-        self._proxy_status_lbl.setText("已清空")
+    def _populate_proxy_list(self) -> None:
+        """填充代理列表:默认候选 + 已保存的自定义项,并回显勾选状态。"""
+        self._proxy_list.clear()
+        from file_toolbox.updater.proxy import get_enabled_proxies
+
+        enabled = [p for p in get_enabled_proxies() if p]
+        enabled_set = set(enabled)
+
+        # 默认候选(标记为默认项,不可移除)
+        for proxy in DEFAULT_PROXIES:
+            item = QListWidgetItem(f"{proxy}    (默认)")
+            item.setData(self._ROLE_URL, proxy)
+            item.setData(self._ROLE_DEFAULT, True)
+            item.setCheckState(
+                Qt.CheckState.Checked if proxy in enabled_set else Qt.CheckState.Unchecked
+            )
+            self._proxy_list.addItem(item)
+
+        # 已保存但不在默认列表中的 → 自定义项
+        for proxy in enabled:
+            if proxy not in DEFAULT_PROXIES:
+                item = QListWidgetItem(proxy)
+                item.setData(self._ROLE_URL, proxy)
+                item.setData(self._ROLE_DEFAULT, False)
+                item.setCheckState(Qt.CheckState.Checked)
+                self._proxy_list.addItem(item)
+
+        # 若旧单值 gh_proxy 未迁移进列表(冗余兜底),忽略:已被 get_enabled_proxies 迁移。
+
+    def _select_all_proxies(self) -> None:
+        """全选:勾选列表中所有代理项。"""
+        for i in range(self._proxy_list.count()):
+            self._proxy_list.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def _select_no_proxies(self) -> None:
+        """全不选:取消勾选所有代理项。"""
+        for i in range(self._proxy_list.count()):
+            self._proxy_list.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def _add_custom_proxy(self) -> None:
+        """添加自定义代理到列表(归一化后追加,默认勾选,标记为非默认项可移除)。"""
+        from file_toolbox.updater.proxy import _normalize
+
+        raw = self._proxy_edit.text().strip()
+        if not raw:
+            self._proxy_status_lbl.setText("请输入代理地址")
+            return
+        proxy = _normalize(raw)
+        if not proxy:
+            self._proxy_status_lbl.setText("代理地址无效")
+            return
+        # 去重:已存在则不重复添加,仅勾选
+        for i in range(self._proxy_list.count()):
+            if self._proxy_list.item(i).data(self._ROLE_URL) == proxy:
+                self._proxy_list.item(i).setCheckState(Qt.CheckState.Checked)
+                self._proxy_edit.clear()
+                self._proxy_status_lbl.setText(f"已存在:{proxy}")
+                return
+        item = QListWidgetItem(proxy)
+        item.setData(self._ROLE_URL, proxy)
+        item.setData(self._ROLE_DEFAULT, False)
+        item.setCheckState(Qt.CheckState.Checked)
+        self._proxy_list.addItem(item)
+        self._proxy_edit.clear()
+        self._proxy_status_lbl.setText(f"已添加:{proxy}(记得保存)")
+
+    def _remove_selected_proxy(self) -> None:
+        """移除当前选中的自定义代理项(默认项不可移除,仅取消勾选)。"""
+        removed = 0
+        for item in self._proxy_list.selectedItems():
+            if item.data(self._ROLE_DEFAULT):
+                # 默认项:不可移除,仅取消勾选
+                item.setCheckState(Qt.CheckState.Unchecked)
+                continue
+            self._proxy_list.takeItem(self._proxy_list.row(item))
+            removed += 1
+        if removed:
+            self._proxy_status_lbl.setText(f"已移除 {removed} 个自定义代理(记得保存)")
+        else:
+            self._proxy_status_lbl.setText("无可移除的自定义项(默认项不可移除)")
+
+    def _save_proxy(self) -> None:
+        """保存:把列表中所有已勾选的代理 URL 写入 settings['gh_proxies']。"""
+        enabled: list[str] = []
+        for i in range(self._proxy_list.count()):
+            item = self._proxy_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                url = item.data(self._ROLE_URL)
+                if isinstance(url, str) and url:
+                    enabled.append(url)
+        # 去重保序(防重复勾选)
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for p in enabled:
+            if p not in seen:
+                seen.add(p)
+                deduped.append(p)
+        settings.set("gh_proxies", deduped)
+        n = len(deduped)
+        self._proxy_status_lbl.setText(
+            f"已保存 {n} 个代理" if n else "已保存(无勾选 = 直连 GitHub)"
+        )

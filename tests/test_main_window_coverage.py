@@ -30,12 +30,51 @@ def win(app, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _open_history_tool(行 117-120)
+# 历史按钮跟随当前标签页(_open_history_for_current_tab / _on_tab_changed)
 # ---------------------------------------------------------------------------
 
 
-def test_open_history_tool_opens_dialog(win, monkeypatch):
-    """_open_history_tool 构造 HistoryDialog 并 exec(mock exec 避免阻塞)。"""
+def test_history_button_opens_current_tab_history(win, monkeypatch):
+    """点击历史按钮 → 打开当前 tab 对应的历史(默认首个 tab = rename)。"""
+    called = {"n": 0, "tool": None}
+
+    def fake_init(self, history, tool, parent=None):
+        called["tool"] = tool
+
+    def fake_exec(self):
+        called["n"] += 1
+        return 0
+
+    monkeypatch.setattr(mw_mod.HistoryDialog, "__init__", fake_init)
+    monkeypatch.setattr(mw_mod.HistoryDialog, "exec", fake_exec)
+    # 默认当前 tab 是 0 = rename
+    win._open_history_for_current_tab()
+    assert called["n"] == 1
+    assert called["tool"] == "rename"
+
+
+def test_history_button_disabled_on_about_tab(win):
+    """切到'关于'tab → 历史按钮禁用(关于页无历史)。"""
+    # 关于 tab 是最后一个(index 5)
+    about_index = len(win._tab_tools) - 1
+    win._tabs.setCurrentIndex(about_index)
+    assert win.btn_history.isEnabled() is False
+
+
+def test_history_button_enabled_on_function_tab(win):
+    """切到功能 tab(如 pdf)→ 历史按钮启用。"""
+    pdf_index = win._tab_tools.index("pdf")
+    win._tabs.setCurrentIndex(pdf_index)
+    assert win.btn_history.isEnabled() is True
+
+
+def test_history_button_no_menu(win):
+    """历史按钮不再有下拉菜单(直接点击打开当前 tab 历史)。"""
+    assert win.btn_history.menu() is None
+
+
+def test_history_button_noop_on_tab_without_history(win, monkeypatch):
+    """当前 tab 无历史(关于页)→ 点击历史按钮无操作(不弹窗)。"""
     called = {"n": 0}
 
     def fake_exec(self):
@@ -43,8 +82,15 @@ def test_open_history_tool_opens_dialog(win, monkeypatch):
         return 0
 
     monkeypatch.setattr(mw_mod.HistoryDialog, "exec", fake_exec)
-    win._open_history_tool("rename")
-    assert called["n"] == 1
+    about_index = len(win._tab_tools) - 1
+    win._tabs.setCurrentIndex(about_index)
+    win._open_history_for_current_tab()
+    assert called["n"] == 0  # 未打开对话框
+
+
+def test_tab_tools_mapping(win):
+    """_tab_tools 前 5 项对应功能工具,末尾(关于)为 None。"""
+    assert win._tab_tools == ["rename", "mkdir", "pdf", "replace", "invoice", None]
 
 
 # ---------------------------------------------------------------------------
