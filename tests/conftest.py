@@ -7,6 +7,22 @@ from pathlib import Path
 
 import pytest
 
+# 强制 Qt 使用离屏平台插件(QT_QPA_PLATFORM=offscreen)。
+#
+# 必须在模块顶层(conftest 被 pytest import 时,早于任何 fixture)设置,而非 autouse
+# fixture:QT_QPA_PLATFORM 只在 QApplication 首次构造时读取平台插件,而 GUI 测试用
+# module-scoped app fixture 创建 QApplication,function-scoped autouse fixture 不保证
+# 先于它执行 → 平台插件可能已固定,设值无效。
+#
+# 根因:PySide6 在 Windows 无桌面 CI runner 上,会话内大量 QApplication/widget 实例化
+# + show()/processEvents() 走真实窗口系统,在 coverage 写报告的 atexit 阶段触发原生库
+# access violation(0xC0000005);随 GUI 测试数量增加越过临界点后稳定复现。offscreen
+# 绕过真实窗口系统渲染消除该崩溃,不改变测试逻辑/断言/覆盖率(Qt 官方无头测试配置)。
+#
+# 仅当未显式设置时注入(尊重本地开发者显式选择,如调试时用 windows/cocoa)。
+if os.environ.get("QT_QPA_PLATFORM") is None:
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
 
 @pytest.fixture(autouse=True)
 def _disable_live_com_detect():
@@ -26,30 +42,6 @@ def _disable_live_com_detect():
             os.environ.pop("FILE_TOOLBOX_NO_COM_DETECT", None)
         else:
             os.environ["FILE_TOOLBOX_NO_COM_DETECT"] = old
-
-
-@pytest.fixture(autouse=True)
-def _qt_offscreen():
-    """强制 Qt 使用离屏平台插件(QT_QPA_PLATFORM=offscreen)。
-
-    根因:PySide6 在 Windows 无桌面 CI runner 上,会话内大量 QApplication/widget
-    实例化 + show()/processEvents() 走真实窗口系统,会在 coverage 写报告的 atexit
-    阶段触发原生库 access violation(0xC0000005),且随 GUI 测试数量增加越过临界点
-    后稳定复现。offscreen 平台插件绕过真实窗口系统渲染,消除该崩溃,且不改变测试
-    逻辑/覆盖率/断言(Qt 官方推荐的无头测试配置)。
-
-    仅当未显式设置 QT_QPA_PLATFORM 时注入(尊重本地开发者显式选择)。
-    """
-    old = os.environ.get("QT_QPA_PLATFORM")
-    if old is None:
-        os.environ["QT_QPA_PLATFORM"] = "offscreen"
-    try:
-        yield
-    finally:
-        if old is None:
-            os.environ.pop("QT_QPA_PLATFORM", None)
-        else:
-            os.environ["QT_QPA_PLATFORM"] = old
 
 
 # --- 虚构 OFD 内容(XML 明文,均为占位数据) ---
