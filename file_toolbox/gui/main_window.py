@@ -290,6 +290,9 @@ class MainWindow(QMainWindow):
                 # 触发各 tab 的清理(吞掉异常避免一个 tab 清理失败影响其余)
                 with contextlib.suppress(Exception):
                     tab.closeEvent(event)
+        if self._attendance_tab.close_pending:
+            event.ignore()
+            return
         super().closeEvent(event)
 
 

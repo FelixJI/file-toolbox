@@ -159,6 +159,7 @@ class AttendanceResult:
     employee_count: int
     day_count: int
     status_counts: Mapping[str, int]
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

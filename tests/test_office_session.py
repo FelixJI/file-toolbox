@@ -11,6 +11,8 @@ ComSession / init_office_app / dispose_office_app 是纯 COM 基础设施工具,
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from file_toolbox.common.office_session import (
     ComSession,
     dispose_office_app,
@@ -204,6 +206,21 @@ def test_dispose_office_app_quit_exception_swallowed(monkeypatch):
     dispose_office_app(app)  # 不应抛
 
     app.Quit.assert_called_once_with()
+    gc_collect.assert_called_once_with()
+
+
+def test_dispose_office_app_can_propagate_quit_failure_after_gc(monkeypatch):
+    """严格调用方可让 Quit 失败阻止后续文件晋升，且仍先执行 gc。"""
+    import gc
+
+    gc_collect = MagicMock()
+    monkeypatch.setattr(gc, "collect", gc_collect)
+    app = MagicMock()
+    app.Quit.side_effect = RuntimeError("Excel busy")
+
+    with pytest.raises(RuntimeError, match="关闭 Office 应用失败"):
+        dispose_office_app(app, raise_on_error=True)
+
     gc_collect.assert_called_once_with()
 
 

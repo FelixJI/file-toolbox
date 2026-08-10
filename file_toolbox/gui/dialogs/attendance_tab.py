@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem, QWidget
 
@@ -29,6 +29,8 @@ from file_toolbox.core.attendance import (
 from file_toolbox.gui.generated.ui_attendance_dialog import Ui_AttendanceDialog
 from file_toolbox.gui.workers import AttendanceWorker
 
+_WORKER_CLOSE_WAIT_MS = 5000
+
 
 class AttendanceTab(QWidget):
     """当前给定格式的可配置考勤汇总原型。"""
@@ -46,6 +48,7 @@ class AttendanceTab(QWidget):
         self._service = service or AttendanceService(history_store=JsonHistoryStore())
         self._plans = plan_store or AttendancePlanStore()
         self._worker: AttendanceWorker | None = None
+        self._close_pending = False
         self._preview_request: AttendanceRequest | None = None
         self._loading = False
         self._setup_tables()
@@ -61,6 +64,11 @@ class AttendanceTab(QWidget):
         self.ui.table_rules.setColumnWidth(1, 260)
         self.ui.table_mappings.setColumnWidth(0, 150)
         self.ui.table_mappings.setColumnWidth(1, 90)
+
+    @property
+    def close_pending(self) -> bool:
+        """是否正等待 COM worker 安全退出后重试关闭主窗口。"""
+        return self._close_pending
 
     def _set_defaults(self) -> None:
         today = date.today()
@@ -188,7 +196,11 @@ class AttendanceTab(QWidget):
             != QMessageBox.StandardButton.Yes
         ):
             return
-        self._plans.delete(name)
+        try:
+            self._plans.delete(name)
+        except OSError as exc:
+            QMessageBox.critical(self, "删除方案失败", str(exc))
+            return
         self._refresh_plans()
         self.ui.lbl_status.setText(f"已删除方案：{name}")
 
@@ -401,13 +413,14 @@ class AttendanceTab(QWidget):
     def _start_worker(
         self, request: AttendanceRequest, mode: Literal["preview", "generate"]
     ) -> None:
-        if self._worker is not None and self._worker.isRunning():
+        if self._worker is not None:
             return
         worker = AttendanceWorker(self._service, request, mode, self)
         worker.finished_ok.connect(
             self._on_preview_ok if mode == "preview" else self._on_generate_ok
         )
         worker.failed.connect(self._on_failed)
+        worker.finished.connect(self._on_worker_finished)
         self._worker = worker
         self._set_busy(True, "正在预览并校验…" if mode == "preview" else "正在生成结果…")
         worker.start()
@@ -429,7 +442,6 @@ class AttendanceTab(QWidget):
         except ValueError as exc:
             self._on_failed(str(exc))
             return
-        self._worker = None
         self._show_preview(result)
         self._set_busy(False, "预览通过" if result.can_generate else "存在未匹配记录")
         self.ui.btn_generate.setEnabled(result.can_generate)
@@ -451,32 +463,47 @@ class AttendanceTab(QWidget):
             self.ui.table_unmatched.setItem(row, 2, QTableWidgetItem(item.raw))
 
     def _on_generate_ok(self, result: object) -> None:
-        self._worker = None
         if not isinstance(result, AttendanceResult):
             self._on_failed("生成返回了无效结果")
             return
         self._preview_request = None
         self._set_busy(False, "生成完成")
         self.ui.btn_generate.setEnabled(False)
+        warning_text = ""
+        if result.warnings:
+            warning_text = "\n\n注意：" + "；".join(result.warnings)
         QMessageBox.information(
             self,
             "生成完成",
             f"已另存结果：\n{result.output_path}\n\n员工 {result.employee_count} 人，"
-            f"{result.day_count} 天。",
+            f"{result.day_count} 天。{warning_text}",
         )
 
     def _on_failed(self, message: str) -> None:
-        self._worker = None
         self._preview_request = None
         self._set_busy(False, "操作失败")
         self.ui.btn_generate.setEnabled(False)
         QMessageBox.critical(self, "考勤处理失败", message)
+
+    def _on_worker_finished(self) -> None:
+        """bound slot 固定在 GUI 线程处理 worker 最终释放与延迟关闭。"""
+        worker = self._worker
+        if worker is None:
+            return
+        self._worker = None
+        worker.deleteLater()
+        if self._close_pending:
+            self._close_pending = False
+            QTimer.singleShot(0, self.window().close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         worker = self._worker
         if worker is not None and worker.isRunning():
             worker.cancel()
             worker.quit()
-            worker.wait(5000)
-        self._worker = None
+            if not worker.wait(_WORKER_CLOSE_WAIT_MS):
+                self._close_pending = True
+                self.ui.lbl_status.setText("正在等待 Excel 安全退出，完成后将自动关闭…")
+                event.ignore()
+                return
         super().closeEvent(event)

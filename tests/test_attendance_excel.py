@@ -201,3 +201,68 @@ def test_write_output_save_failure_still_closes_excel(monkeypatch, tmp_path):
 
     workbook.Close.assert_called_once_with(SaveChanges=False)
     app.Quit.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("failure_target", "message"), [("close", "关闭工作簿"), ("quit", "关闭 Office")]
+)
+def test_write_output_cleanup_failure_is_propagated(monkeypatch, tmp_path, failure_target, message):
+    plan = _plan()
+    detail = MagicMock()
+    summary = MagicMock()
+    detail.Cells.side_effect = lambda row, col: _cell()
+    summary.Cells.side_effect = lambda row, col: _cell(formula='=COUNTIF(出勤明细!$D$7:$AG$7,"√")')
+    workbook = MagicMock()
+    workbook.ReadOnly = False
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    app = _patch_excel(monkeypatch, workbook)
+    if failure_target == "close":
+        workbook.Close.side_effect = RuntimeError("close failed")
+    else:
+        app.Quit.side_effect = RuntimeError("quit failed")
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(30))),), "市场部"
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        ExcelComAdapter().write_output(
+            tmp_path / "staging.xlsx",
+            plan,
+            source,
+            (tuple("√" for _ in range(30)),),
+            (),
+            30,
+        )
+
+    workbook.Save.assert_called_once_with()
+    workbook.Close.assert_called_once_with(SaveChanges=False)
+    app.Quit.assert_called_once_with()
+
+
+def test_write_output_rejects_final_column_only_in_unrelated_formula_position(
+    monkeypatch, tmp_path
+):
+    plan = _plan()
+    detail = MagicMock()
+    summary = MagicMock()
+    detail.Cells.side_effect = lambda row, col: _cell()
+    summary.Cells.side_effect = lambda row, col: _cell(
+        formula='=COUNTIF(出勤明细!D7:AG7,"√")+IF(AH1>0,0,0)'
+    )
+    workbook = MagicMock()
+    workbook.ReadOnly = False
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    _patch_excel(monkeypatch, workbook)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31))),), "市场部"
+    )
+
+    with pytest.raises(ValueError, match="D7:AH7"):
+        ExcelComAdapter().write_output(
+            tmp_path / "staging.xlsx",
+            plan,
+            source,
+            (tuple("√" for _ in range(31)),),
+            (),
+            31,
+        )

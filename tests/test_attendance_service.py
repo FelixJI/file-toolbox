@@ -1,6 +1,7 @@
 """AttendanceService interface 测试。"""
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -130,6 +131,18 @@ def test_generate_writes_staging_then_promotes_and_records_history(tmp_path):
     assert mapping_values[0][2] == "2026年7月 市场部"
     record = history.get_records("attendance")[0]
     assert record["data"]["employee_count"] == 1
+
+
+def test_generate_history_failure_returns_success_with_warning(tmp_path):
+    request = _request(tmp_path)
+    history = MagicMock()
+    history.add_record.side_effect = OSError("history readonly")
+
+    result = AttendanceService(FakeExcel(_source(31)), history).generate(request)
+
+    assert request.output_path.read_bytes() == b"template-filled"
+    assert result.output_path == request.output_path
+    assert result.warnings == ("结果已生成，但历史记录保存失败: history readonly",)
 
 
 def test_generate_does_not_replace_existing_output_on_write_failure(tmp_path):

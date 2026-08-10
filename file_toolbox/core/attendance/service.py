@@ -111,18 +111,27 @@ class AttendanceService:
             status_counts=prepared.preview.status_counts,
         )
         if self._history_store is not None:
-            self._history_store.add_record(
-                "attendance",
-                {
-                    "plan": request.plan.name,
-                    "source": str(request.source_path),
-                    "output": str(request.output_path),
-                    "year": request.year,
-                    "month": request.month,
-                    "employee_count": result.employee_count,
-                    "status_counts": dict(result.status_counts),
-                },
-            )
+            try:
+                self._history_store.add_record(
+                    "attendance",
+                    {
+                        "plan": request.plan.name,
+                        "source": str(request.source_path),
+                        "output": str(request.output_path),
+                        "year": request.year,
+                        "month": request.month,
+                        "employee_count": result.employee_count,
+                        "status_counts": dict(result.status_counts),
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - 输出已提交，历史只能降级为警告
+                result = AttendanceResult(
+                    output_path=result.output_path,
+                    employee_count=result.employee_count,
+                    day_count=result.day_count,
+                    status_counts=result.status_counts,
+                    warnings=(f"结果已生成，但历史记录保存失败: {exc}",),
+                )
         return result
 
     def _prepare(

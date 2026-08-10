@@ -415,6 +415,29 @@ def test_close_event_worker_exception_swallowed(win, monkeypatch):
     win.closeEvent(QCloseEvent())  # 不应抛
 
 
+def test_close_event_waits_for_attendance_com_worker(win, monkeypatch):
+    """考勤 COM worker 未退出时，主窗口必须尊重延迟关闭状态。"""
+    from PySide6.QtGui import QCloseEvent
+
+    for tab in (
+        win._rename_tab,
+        win._mkdir_tab,
+        win._pdf_tab,
+        win._replace_tab,
+        win._invoice_tab,
+        win._about_tab,
+    ):
+        monkeypatch.setattr(type(tab), "closeEvent", lambda self, e: None, raising=False)
+    monkeypatch.setattr(type(win._attendance_tab), "closeEvent", lambda self, e: None)
+    win._attendance_tab._close_pending = True
+    event = QCloseEvent()
+
+    win.closeEvent(event)
+
+    assert event.isAccepted() is False
+    win._attendance_tab._close_pending = False
+
+
 # ---------------------------------------------------------------------------
 # run_gui(行 280-)
 # ---------------------------------------------------------------------------
