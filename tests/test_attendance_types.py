@@ -8,6 +8,8 @@ from file_toolbox.core.attendance.types import (
     AttendanceRule,
     CellMapping,
     CellRef,
+    EmployeeGroupOverride,
+    GroupSheetConfig,
     SourceLayout,
     TargetLayout,
     column_letters,
@@ -70,6 +72,8 @@ def test_plan_serialization_round_trip():
                 CellRef.parse("B2"),
             ),
             "split_by_group": True,
+            "employee_group_overrides": (EmployeeGroupOverride("张三", "售后组", "管理组"),),
+            "group_sheet_configs": (GroupSheetConfig("管理组", "管理明细", "管理汇总"),),
         }
     )
     assert plan_from_dict(plan_to_dict(plan)) == plan
@@ -87,11 +91,40 @@ def test_plan_from_old_dict_defaults_to_single_group_mode():
 
     assert plan.split_by_group is False
     assert plan.source.attendance_group_start is None
-    assert plan.schema_version == 2
+    assert plan.schema_version == 3
 
 
-def test_new_plan_serializes_as_v2_so_old_reader_rejects_new_semantics():
-    assert plan_to_dict(_plan())["schema_version"] == 2
+def test_v2_plan_migrates_without_manual_adjustments():
+    original = _plan()
+    plan = AttendancePlan(
+        **{
+            **original.__dict__,
+            "source": SourceLayout(
+                original.source.sheet_name,
+                original.source.name_start,
+                original.source.department_start,
+                original.source.detail_start,
+                CellRef.parse("B2"),
+            ),
+            "split_by_group": True,
+        }
+    )
+    data = plan_to_dict(plan)
+    data["schema_version"] = 2
+    data.pop("employee_group_overrides")
+    data.pop("group_sheet_configs")
+
+    migrated = plan_from_dict(data)
+
+    assert migrated.split_by_group is True
+    assert migrated.source.attendance_group_start == CellRef.parse("B2")
+    assert migrated.employee_group_overrides == ()
+    assert migrated.group_sheet_configs == ()
+    assert migrated.schema_version == 3
+
+
+def test_new_plan_serializes_as_v3_so_old_reader_rejects_new_semantics():
+    assert plan_to_dict(_plan())["schema_version"] == 3
 
 
 def test_plan_from_dict_rejects_unknown_version():

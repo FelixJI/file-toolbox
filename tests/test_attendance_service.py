@@ -14,6 +14,8 @@ from file_toolbox.core.attendance import (
     AttendanceService,
     CellMapping,
     CellRef,
+    EmployeeGroupOverride,
+    GroupSheetConfig,
     SourceLayout,
     TargetLayout,
 )
@@ -355,4 +357,117 @@ def test_group_mode_rejects_group_variable_on_global_sheet(tmp_path):
     )
 
     with pytest.raises(AttendanceError, match="非分组工作表"):
+        AttendanceService(FakeExcel(source)).preview(request)
+
+
+def test_employee_override_moves_one_person_and_preserves_source_order(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        employee_group_overrides=(EmployeeGroupOverride("张三", "售后组", "管理组"),),
+        group_sheet_configs=(GroupSheetConfig("管理组", "管理明细", "管理汇总"),),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance("王五", "市场部", tuple("正常" for _ in range(31)), "管理组"),
+        ),
+        "市场部",
+    )
+    excel = FakeExcel(source)
+
+    result = AttendanceService(excel).generate(request)
+
+    assert result.group_counts == {"管理组": 2, "售后组": 1}
+    prepared = excel.write_calls[0][2]
+    assert [group.attendance_group for group in prepared.groups] == ["管理组", "售后组"]
+    assert [employee.name for employee in prepared.groups[0].source.employees] == ["张三", "王五"]
+    assert result.target_sheets["管理组"] == ("管理明细", "管理汇总")
+    assert [
+        (employee.employee_name, employee.source_group, employee.target_group)
+        for employee in prepared.preview.employees
+    ] == [
+        ("张三", "售后组", "管理组"),
+        ("李四", "售后组", "售后组"),
+        ("王五", "管理组", "管理组"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("employees", "override", "message"),
+    [
+        (
+            (
+                EmployeeAttendance("张三", "市场部", ("正常",), "售后组"),
+                EmployeeAttendance("张三", "市场部", ("正常",), "售后组"),
+            ),
+            EmployeeGroupOverride("张三", "售后组", "管理组"),
+            "同组同名歧义",
+        ),
+        (
+            (EmployeeAttendance("张三", "市场部", ("正常",), "售后组"),),
+            EmployeeGroupOverride("李四", "售后组", "管理组"),
+            "未找到员工",
+        ),
+    ],
+)
+def test_employee_override_rejects_ambiguous_or_missing_employee(
+    tmp_path, employees, override, message
+):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        employee_group_overrides=(override,),
+    )
+    request = replace(request, plan=plan)
+
+    with pytest.raises(AttendanceError, match=message):
+        AttendanceService(FakeExcel(SourceAttendance(employees, "市场部"))).preview(request)
+
+
+def test_explicit_sheet_names_win_and_automatic_names_avoid_them(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        group_sheet_configs=(GroupSheetConfig("管理组", "出勤明细-售后组", "管理组自定义汇总"),),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31)), "管理组"),
+        ),
+        "市场部",
+    )
+
+    preview = AttendanceService(FakeExcel(source)).preview(request)
+
+    assert preview.target_sheets["管理组"] == ("出勤明细-售后组", "管理组自定义汇总")
+    assert preview.target_sheets["售后组"][0] == "出勤明细-售后组 (2)"
+
+
+@pytest.mark.parametrize("sheet_name", ["坏/名称", "A" * 32, "'首尾引号'"])
+def test_explicit_sheet_names_reject_invalid_excel_names(tmp_path, sheet_name):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        group_sheet_configs=(GroupSheetConfig("管理组", sheet_name, "管理汇总"),),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "管理组"),),
+        "市场部",
+    )
+
+    with pytest.raises(AttendanceError, match="Sheet 名"):
         AttendanceService(FakeExcel(source)).preview(request)

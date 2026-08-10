@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
-_PLAN_SCHEMA_VERSION = 2
+_PLAN_SCHEMA_VERSION = 3
 
 
 def _column_number(letters: str) -> int:
@@ -87,6 +87,20 @@ class AttendanceRule:
     enabled: bool = True
 
 
+@dataclass(frozen=True)
+class EmployeeGroupOverride:
+    employee_name: str
+    source_group: str
+    target_group: str
+
+
+@dataclass(frozen=True)
+class GroupSheetConfig:
+    attendance_group: str
+    detail_sheet: str
+    summary_sheet: str
+
+
 def default_rules() -> tuple[AttendanceRule, ...]:
     return (
         AttendanceRule("出差", "差"),
@@ -110,6 +124,8 @@ class AttendancePlan:
     rules: tuple[AttendanceRule, ...] = field(default_factory=default_rules)
     schema_version: int = _PLAN_SCHEMA_VERSION
     split_by_group: bool = False
+    employee_group_overrides: tuple[EmployeeGroupOverride, ...] = ()
+    group_sheet_configs: tuple[GroupSheetConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -145,6 +161,13 @@ class UnmatchedAttendance:
 
 
 @dataclass(frozen=True)
+class EmployeeGroupPreview:
+    employee_name: str
+    source_group: str
+    target_group: str
+
+
+@dataclass(frozen=True)
 class AttendancePreview:
     employee_count: int
     day_count: int
@@ -154,6 +177,7 @@ class AttendancePreview:
     unmatched: tuple[UnmatchedAttendance, ...]
     group_counts: Mapping[str, int] = field(default_factory=dict)
     target_sheets: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    employees: tuple[EmployeeGroupPreview, ...] = ()
 
     @property
     def can_generate(self) -> bool:
@@ -244,6 +268,22 @@ def plan_to_dict(plan: AttendancePlan) -> dict[str, object]:
             for rule in plan.rules
         ],
         "split_by_group": plan.split_by_group,
+        "employee_group_overrides": [
+            {
+                "employee_name": override.employee_name,
+                "source_group": override.source_group,
+                "target_group": override.target_group,
+            }
+            for override in plan.employee_group_overrides
+        ],
+        "group_sheet_configs": [
+            {
+                "attendance_group": config.attendance_group,
+                "detail_sheet": config.detail_sheet,
+                "summary_sheet": config.summary_sheet,
+            }
+            for config in plan.group_sheet_configs
+        ],
     }
 
 
@@ -251,14 +291,14 @@ def plan_from_dict(value: object) -> AttendancePlan:
     """严格解析持久化方案。"""
     data = _mapping(value, "方案")
     version = data.get("schema_version")
-    if version not in {1, _PLAN_SCHEMA_VERSION}:
+    if version not in {1, 2, _PLAN_SCHEMA_VERSION}:
         raise ValueError("不支持的考勤方案版本")
     source_data = _mapping(data.get("source"), "source")
     target_data = _mapping(data.get("target"), "target")
-    split_by_group = data.get("split_by_group", False) if version == 2 else False
+    split_by_group = data.get("split_by_group", False) if version in {2, 3} else False
     if not isinstance(split_by_group, bool):
         raise ValueError("split_by_group 必须是布尔值")
-    group_start_value = source_data.get("attendance_group_start") if version == 2 else None
+    group_start_value = source_data.get("attendance_group_start") if version in {2, 3} else None
     if group_start_value is not None and not isinstance(group_start_value, str):
         raise ValueError("attendance_group_start 必须是单元格地址或 null")
 
@@ -287,6 +327,28 @@ def plan_from_dict(value: object) -> AttendancePlan:
             )
         )
 
+    employee_group_overrides: list[EmployeeGroupOverride] = []
+    group_sheet_configs: list[GroupSheetConfig] = []
+    if version == 3:
+        for item in _sequence(data.get("employee_group_overrides", []), "employee_group_overrides"):
+            override = _mapping(item, "employee_group_override")
+            employee_group_overrides.append(
+                EmployeeGroupOverride(
+                    employee_name=_text(override, "employee_name"),
+                    source_group=_text(override, "source_group"),
+                    target_group=_text(override, "target_group"),
+                )
+            )
+        for item in _sequence(data.get("group_sheet_configs", []), "group_sheet_configs"):
+            config = _mapping(item, "group_sheet_config")
+            group_sheet_configs.append(
+                GroupSheetConfig(
+                    attendance_group=_text(config, "attendance_group"),
+                    detail_sheet=_text(config, "detail_sheet"),
+                    summary_sheet=_text(config, "summary_sheet"),
+                )
+            )
+
     return AttendancePlan(
         name=_text(data, "name"),
         template_path=Path(_text(data, "template_path")),
@@ -309,5 +371,7 @@ def plan_from_dict(value: object) -> AttendancePlan:
         mappings=tuple(mappings),
         rules=tuple(rules),
         split_by_group=split_by_group,
+        employee_group_overrides=tuple(employee_group_overrides),
+        group_sheet_configs=tuple(group_sheet_configs),
         schema_version=_PLAN_SCHEMA_VERSION,
     )

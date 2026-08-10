@@ -371,22 +371,64 @@ class Ui_AttendanceDialog(object):
 
         self.layout_preview.addWidget(self.lbl_preview)
 
-        self.table_unmatched = QTableWidget(self.tab_preview)
-        if (self.table_unmatched.columnCount() < 4):
-            self.table_unmatched.setColumnCount(4)
-        __qtablewidgetitem6 = QTableWidgetItem()
-        self.table_unmatched.setHorizontalHeaderItem(0, __qtablewidgetitem6)
-        __qtablewidgetitem7 = QTableWidgetItem()
-        self.table_unmatched.setHorizontalHeaderItem(1, __qtablewidgetitem7)
-        __qtablewidgetitem8 = QTableWidgetItem()
-        self.table_unmatched.setHorizontalHeaderItem(2, __qtablewidgetitem8)
-        __qtablewidgetitem9 = QTableWidgetItem()
-        self.table_unmatched.setHorizontalHeaderItem(3, __qtablewidgetitem9)
-        self.table_unmatched.setObjectName(u"table_unmatched")
-        self.table_unmatched.setColumnCount(4)
-        self.table_unmatched.setRowCount(0)
+        self.label_group_preview = QLabel(self.tab_preview)
+        self.label_group_preview.setObjectName(u"label_group_preview")
 
-        self.layout_preview.addWidget(self.table_unmatched)
+        self.layout_preview.addWidget(self.label_group_preview)
+
+        self.table_group_preview = QTableWidget(self.tab_preview)
+        if (self.table_group_preview.columnCount() < 4):
+            self.table_group_preview.setColumnCount(4)
+        __qtablewidgetitem6 = QTableWidgetItem()
+        self.table_group_preview.setHorizontalHeaderItem(0, __qtablewidgetitem6)
+        __qtablewidgetitem7 = QTableWidgetItem()
+        self.table_group_preview.setHorizontalHeaderItem(1, __qtablewidgetitem7)
+        __qtablewidgetitem8 = QTableWidgetItem()
+        self.table_group_preview.setHorizontalHeaderItem(2, __qtablewidgetitem8)
+        __qtablewidgetitem9 = QTableWidgetItem()
+        self.table_group_preview.setHorizontalHeaderItem(3, __qtablewidgetitem9)
+        self.table_group_preview.setObjectName(u"table_group_preview")
+        self.table_group_preview.setColumnCount(4)
+        self.table_group_preview.setRowCount(0)
+
+        self.layout_preview.addWidget(self.table_group_preview)
+
+        self.label_employee_preview = QLabel(self.tab_preview)
+        self.label_employee_preview.setObjectName(u"label_employee_preview")
+
+        self.layout_preview.addWidget(self.label_employee_preview)
+
+        self.table_employee_preview = QTableWidget(self.tab_preview)
+        if (self.table_employee_preview.columnCount() < 4):
+            self.table_employee_preview.setColumnCount(4)
+        __qtablewidgetitem10 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(0, __qtablewidgetitem10)
+        __qtablewidgetitem11 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(1, __qtablewidgetitem11)
+        __qtablewidgetitem12 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(2, __qtablewidgetitem12)
+        __qtablewidgetitem13 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(3, __qtablewidgetitem13)
+        self.table_employee_preview.setObjectName(u"table_employee_preview")
+        self.table_employee_preview.setColumnCount(4)
+        self.table_employee_preview.setRowCount(0)
+
+        self.layout_preview.addWidget(self.table_employee_preview)
+
+        self.layout_preview_adjustments = QHBoxLayout()
+        self.layout_preview_adjustments.setObjectName(u"layout_preview_adjustments")
+        self.preview_adjustment_spacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.layout_preview_adjustments.addItem(self.preview_adjustment_spacer)
+
+        self.btn_apply_adjustments = QPushButton(self.tab_preview)
+        self.btn_apply_adjustments.setObjectName(u"btn_apply_adjustments")
+        self.btn_apply_adjustments.setEnabled(False)
+
+        self.layout_preview_adjustments.addWidget(self.btn_apply_adjustments)
+
+
+        self.layout_preview.addLayout(self.layout_preview_adjustments)
 
         self.config_tabs.addTab(self.tab_preview, "")
 
@@ -479,14 +521,25 @@ class Ui_AttendanceDialog(object):
         self.btn_rule_down.setText(QCoreApplication.translate("AttendanceDialog", u"\u4e0b\u79fb", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_rules), QCoreApplication.translate("AttendanceDialog", u"\u5224\u5b9a\u89c4\u5219", None))
         self.lbl_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u5c1a\u672a\u9884\u89c8", None))
-        ___qtablewidgetitem6 = self.table_unmatched.horizontalHeaderItem(0)
-        ___qtablewidgetitem6.setText(QCoreApplication.translate("AttendanceDialog", u"\u59d3\u540d", None))
-        ___qtablewidgetitem7 = self.table_unmatched.horizontalHeaderItem(1)
-        ___qtablewidgetitem7.setText(QCoreApplication.translate("AttendanceDialog", u"\u8003\u52e4\u7ec4", None))
-        ___qtablewidgetitem8 = self.table_unmatched.horizontalHeaderItem(2)
-        ___qtablewidgetitem8.setText(QCoreApplication.translate("AttendanceDialog", u"\u65e5\u671f", None))
-        ___qtablewidgetitem9 = self.table_unmatched.horizontalHeaderItem(3)
-        ___qtablewidgetitem9.setText(QCoreApplication.translate("AttendanceDialog", u"\u672a\u5339\u914d\u539f\u6587", None))
+        self.label_group_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u5206\u7ec4\u8f93\u51fa\uff08\u53ef\u7f16\u8f91\u660e\u7ec6/\u6c47\u603b Sheet \u540d\uff09", None))
+        ___qtablewidgetitem6 = self.table_group_preview.horizontalHeaderItem(0)
+        ___qtablewidgetitem6.setText(QCoreApplication.translate("AttendanceDialog", u"\u8f93\u51fa\u8003\u52e4\u7ec4", None))
+        ___qtablewidgetitem7 = self.table_group_preview.horizontalHeaderItem(1)
+        ___qtablewidgetitem7.setText(QCoreApplication.translate("AttendanceDialog", u"\u4eba\u6570", None))
+        ___qtablewidgetitem8 = self.table_group_preview.horizontalHeaderItem(2)
+        ___qtablewidgetitem8.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6 Sheet", None))
+        ___qtablewidgetitem9 = self.table_group_preview.horizontalHeaderItem(3)
+        ___qtablewidgetitem9.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b Sheet", None))
+        self.label_employee_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u4eba\u5458\u5206\u7ec4\uff08\u53ef\u7f16\u8f91\u8f93\u51fa\u8003\u52e4\u7ec4\uff1b\u672a\u5339\u914d\u8bb0\u5f55\u4ecd\u4f1a\u963b\u6b62\u751f\u6210\uff09", None))
+        ___qtablewidgetitem10 = self.table_employee_preview.horizontalHeaderItem(0)
+        ___qtablewidgetitem10.setText(QCoreApplication.translate("AttendanceDialog", u"\u59d3\u540d", None))
+        ___qtablewidgetitem11 = self.table_employee_preview.horizontalHeaderItem(1)
+        ___qtablewidgetitem11.setText(QCoreApplication.translate("AttendanceDialog", u"\u539f\u8003\u52e4\u7ec4", None))
+        ___qtablewidgetitem12 = self.table_employee_preview.horizontalHeaderItem(2)
+        ___qtablewidgetitem12.setText(QCoreApplication.translate("AttendanceDialog", u"\u8f93\u51fa\u8003\u52e4\u7ec4", None))
+        ___qtablewidgetitem13 = self.table_employee_preview.horizontalHeaderItem(3)
+        ___qtablewidgetitem13.setText(QCoreApplication.translate("AttendanceDialog", u"\u672a\u5339\u914d", None))
+        self.btn_apply_adjustments.setText(QCoreApplication.translate("AttendanceDialog", u"\u5e94\u7528\u8c03\u6574\u5e76\u91cd\u65b0\u9884\u89c8", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_preview), QCoreApplication.translate("AttendanceDialog", u"\u9884\u89c8\u7ed3\u679c", None))
         self.lbl_status.setText(QCoreApplication.translate("AttendanceDialog", u"\u5c31\u7eea", None))
         self.btn_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u9884\u89c8\u5e76\u6821\u9a8c", None))

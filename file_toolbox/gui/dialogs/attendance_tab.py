@@ -22,6 +22,8 @@ from file_toolbox.core.attendance import (
     AttendanceService,
     CellMapping,
     CellRef,
+    EmployeeGroupOverride,
+    GroupSheetConfig,
     SourceLayout,
     TargetLayout,
     default_rules,
@@ -50,6 +52,8 @@ class AttendanceTab(QWidget):
         self._worker: AttendanceWorker | None = None
         self._close_pending = False
         self._preview_request: AttendanceRequest | None = None
+        self._employee_group_overrides: tuple[EmployeeGroupOverride, ...] = ()
+        self._group_sheet_configs: tuple[GroupSheetConfig, ...] = ()
         self._loading = False
         self._setup_tables()
         self._set_defaults()
@@ -57,13 +61,24 @@ class AttendanceTab(QWidget):
         self._refresh_plans()
 
     def _setup_tables(self) -> None:
-        for table in (self.ui.table_mappings, self.ui.table_rules, self.ui.table_unmatched):
+        for table in (
+            self.ui.table_mappings,
+            self.ui.table_rules,
+            self.ui.table_group_preview,
+            self.ui.table_employee_preview,
+        ):
             table.horizontalHeader().setStretchLastSection(True)
             table.setAlternatingRowColors(True)
         self.ui.table_rules.setColumnWidth(0, 52)
         self.ui.table_rules.setColumnWidth(1, 260)
         self.ui.table_mappings.setColumnWidth(0, 150)
         self.ui.table_mappings.setColumnWidth(1, 90)
+        self.ui.table_group_preview.setColumnWidth(0, 150)
+        self.ui.table_group_preview.setColumnWidth(1, 60)
+        self.ui.table_group_preview.setColumnWidth(2, 220)
+        self.ui.table_employee_preview.setColumnWidth(0, 120)
+        self.ui.table_employee_preview.setColumnWidth(1, 140)
+        self.ui.table_employee_preview.setColumnWidth(2, 140)
 
     @property
     def close_pending(self) -> bool:
@@ -105,6 +120,7 @@ class AttendanceTab(QWidget):
         self.ui.btn_rule_down.clicked.connect(lambda: self._move_rule(1))
         self.ui.btn_preview.clicked.connect(self._preview)
         self.ui.btn_generate.clicked.connect(self._generate)
+        self.ui.btn_apply_adjustments.clicked.connect(self._apply_preview_adjustments)
 
         for edit in (
             self.ui.edit_source,
@@ -127,6 +143,8 @@ class AttendanceTab(QWidget):
         self.ui.spin_month.valueChanged.connect(self._invalidate_preview)
         self.ui.table_mappings.cellChanged.connect(self._invalidate_preview)
         self.ui.table_rules.cellChanged.connect(self._invalidate_preview)
+        self.ui.table_group_preview.cellChanged.connect(self._preview_adjustments_changed)
+        self.ui.table_employee_preview.cellChanged.connect(self._preview_adjustments_changed)
         self.ui.chk_split_groups.toggled.connect(self._invalidate_preview)
 
     def _browse_source(self) -> None:
@@ -160,6 +178,9 @@ class AttendanceTab(QWidget):
 
     def _save_plan(self) -> None:
         try:
+            if self.ui.chk_split_groups.isChecked() and self.ui.table_group_preview.rowCount() > 0:
+                self._capture_preview_adjustments()
+                self._invalidate_preview()
             plan = self._build_plan()
         except ValueError as exc:
             QMessageBox.warning(self, "方案无效", str(exc))
@@ -228,8 +249,11 @@ class AttendanceTab(QWidget):
             self.ui.edit_summary_sheet.setText(plan.target.summary_sheet)
             self.ui.edit_summary_name.setText(plan.target.summary_name_start.address)
             self.ui.chk_split_groups.setChecked(plan.split_by_group)
+            self._employee_group_overrides = plan.employee_group_overrides
+            self._group_sheet_configs = plan.group_sheet_configs
             self._set_mappings(plan.mappings)
             self._set_rules(plan.rules)
+            self._clear_preview_tables()
         finally:
             self._loading = False
         self._invalidate_preview()
@@ -261,6 +285,8 @@ class AttendanceTab(QWidget):
             mappings=self._mappings(),
             rules=self._rules(),
             split_by_group=self.ui.chk_split_groups.isChecked(),
+            employee_group_overrides=self._employee_group_overrides,
+            group_sheet_configs=self._group_sheet_configs,
         )
 
     def _build_request(self, *, allow_overwrite: bool = False) -> AttendanceRequest:
@@ -384,6 +410,79 @@ class AttendanceTab(QWidget):
             self._loading = False
         self._invalidate_preview()
 
+    @staticmethod
+    def _readonly_item(value: str) -> QTableWidgetItem:
+        item = QTableWidgetItem(value)
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        return item
+
+    def _clear_preview_tables(self) -> None:
+        self.ui.table_group_preview.setRowCount(0)
+        self.ui.table_employee_preview.setRowCount(0)
+        self.ui.btn_apply_adjustments.setEnabled(False)
+
+    def _capture_preview_adjustments(self) -> None:
+        configs: list[GroupSheetConfig] = []
+        for row in range(self.ui.table_group_preview.rowCount()):
+            group_name = self._required_text(
+                self._item_text(self.ui.table_group_preview, row, 0),
+                f"第 {row + 1} 个输出考勤组",
+            )
+            detail_sheet = self._required_text(
+                self._item_text(self.ui.table_group_preview, row, 2),
+                f"考勤组“{group_name}”的明细 Sheet 名",
+            )
+            summary_sheet = self._required_text(
+                self._item_text(self.ui.table_group_preview, row, 3),
+                f"考勤组“{group_name}”的汇总 Sheet 名",
+            )
+            configs.append(GroupSheetConfig(group_name, detail_sheet, summary_sheet))
+
+        overrides: dict[tuple[str, str], EmployeeGroupOverride] = {}
+        for row in range(self.ui.table_employee_preview.rowCount()):
+            employee_name = self._required_text(
+                self._item_text(self.ui.table_employee_preview, row, 0),
+                f"第 {row + 1} 名员工姓名",
+            )
+            source_group = self._required_text(
+                self._item_text(self.ui.table_employee_preview, row, 1),
+                f"员工“{employee_name}”的原考勤组",
+            )
+            target_group = self._required_text(
+                self._item_text(self.ui.table_employee_preview, row, 2),
+                f"员工“{employee_name}”的输出考勤组",
+            )
+            if source_group.casefold() == target_group.casefold():
+                continue
+            key = (source_group.casefold(), employee_name.casefold())
+            override = EmployeeGroupOverride(employee_name, source_group, target_group)
+            existing = overrides.get(key)
+            if existing is not None and existing.target_group.casefold() != target_group.casefold():
+                raise ValueError(f"同组同名员工“{source_group}/{employee_name}”存在不同调整")
+            overrides[key] = override
+
+        self._group_sheet_configs = tuple(configs)
+        self._employee_group_overrides = tuple(overrides.values())
+
+    def _preview_adjustments_changed(self, *_args: object) -> None:
+        if self._loading:
+            return
+        self._preview_request = None
+        self.ui.btn_generate.setEnabled(False)
+        self.ui.btn_apply_adjustments.setEnabled(True)
+        self.ui.lbl_status.setText("分组调整已修改，请应用并重新预览")
+
+    def _apply_preview_adjustments(self) -> None:
+        if not self.ui.chk_split_groups.isChecked() or self.ui.table_group_preview.rowCount() == 0:
+            return
+        try:
+            self._capture_preview_adjustments()
+        except ValueError as exc:
+            QMessageBox.warning(self, "分组调整无效", str(exc))
+            return
+        self._invalidate_preview()
+        self._preview()
+
     def _invalidate_preview(self, *_args: object) -> None:
         if self._loading:
             return
@@ -443,6 +542,11 @@ class AttendanceTab(QWidget):
         self.ui.config_tabs.setEnabled(not busy)
         self.ui.btn_preview.setEnabled(not busy)
         self.ui.btn_generate.setEnabled(not busy and self._preview_request is not None)
+        self.ui.btn_apply_adjustments.setEnabled(
+            not busy
+            and self.ui.chk_split_groups.isChecked()
+            and self.ui.table_group_preview.rowCount() > 0
+        )
         self.ui.lbl_status.setText(status)
 
     def _on_preview_ok(self, result: object) -> None:
@@ -475,12 +579,47 @@ class AttendanceTab(QWidget):
             f"新增员工行 {result.extra_employee_rows}；判定：{counts}；"
             f"{group_text}未匹配 {len(result.unmatched)} 条。"
         )
-        self.ui.table_unmatched.setRowCount(len(result.unmatched))
-        for row, item in enumerate(result.unmatched):
-            self.ui.table_unmatched.setItem(row, 0, QTableWidgetItem(item.employee))
-            self.ui.table_unmatched.setItem(row, 1, QTableWidgetItem(item.attendance_group))
-            self.ui.table_unmatched.setItem(row, 2, QTableWidgetItem(str(item.day)))
-            self.ui.table_unmatched.setItem(row, 3, QTableWidgetItem(item.raw))
+        unmatched_by_employee: dict[tuple[str, str], list[str]] = {}
+        for item in result.unmatched:
+            key = (item.employee.strip().casefold(), item.attendance_group.strip().casefold())
+            unmatched_by_employee.setdefault(key, []).append(f"{item.day}日: {item.raw}")
+
+        self._loading = True
+        try:
+            self.ui.table_group_preview.setRowCount(len(result.group_counts))
+            for row, (group_name, count) in enumerate(result.group_counts.items()):
+                detail_sheet, summary_sheet = result.target_sheets[group_name]
+                self.ui.table_group_preview.setItem(row, 0, self._readonly_item(group_name))
+                self.ui.table_group_preview.setItem(row, 1, self._readonly_item(str(count)))
+                self.ui.table_group_preview.setItem(row, 2, QTableWidgetItem(detail_sheet))
+                self.ui.table_group_preview.setItem(row, 3, QTableWidgetItem(summary_sheet))
+
+            self.ui.table_employee_preview.setRowCount(len(result.employees))
+            for row, employee in enumerate(result.employees):
+                key = (
+                    employee.employee_name.strip().casefold(),
+                    employee.target_group.strip().casefold(),
+                )
+                unmatched_items = unmatched_by_employee.get(key, [])
+                unmatched_text = "；".join(unmatched_items[:3])
+                if len(unmatched_items) > 3:
+                    unmatched_text += f"；另 {len(unmatched_items) - 3} 条"
+                self.ui.table_employee_preview.setItem(
+                    row, 0, self._readonly_item(employee.employee_name)
+                )
+                self.ui.table_employee_preview.setItem(
+                    row, 1, self._readonly_item(employee.source_group)
+                )
+                target_item = (
+                    QTableWidgetItem(employee.target_group)
+                    if result.group_counts
+                    else self._readonly_item(employee.target_group)
+                )
+                self.ui.table_employee_preview.setItem(row, 2, target_item)
+                self.ui.table_employee_preview.setItem(row, 3, self._readonly_item(unmatched_text))
+        finally:
+            self._loading = False
+        self.ui.btn_apply_adjustments.setEnabled(bool(result.group_counts))
 
     def _on_generate_ok(self, result: object) -> None:
         if not isinstance(result, AttendanceResult):
@@ -503,6 +642,9 @@ class AttendanceTab(QWidget):
         self._preview_request = None
         self._set_busy(False, "操作失败")
         self.ui.btn_generate.setEnabled(False)
+        self.ui.btn_apply_adjustments.setEnabled(
+            self.ui.chk_split_groups.isChecked() and self.ui.table_employee_preview.rowCount() > 0
+        )
         QMessageBox.critical(self, "考勤处理失败", message)
 
     def _on_worker_finished(self) -> None:

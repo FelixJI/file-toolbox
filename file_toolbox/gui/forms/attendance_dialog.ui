@@ -100,9 +100,13 @@
      </widget>
      <widget class="QWidget" name="tab_preview">
       <attribute name="title"><string>预览结果</string></attribute>
-      <layout class="QVBoxLayout" name="layout_preview">
+     <layout class="QVBoxLayout" name="layout_preview">
        <item><widget class="QLabel" name="lbl_preview"><property name="text"><string>尚未预览</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
-       <item><widget class="QTableWidget" name="table_unmatched"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>姓名</string></property></column><column><property name="text"><string>考勤组</string></property></column><column><property name="text"><string>日期</string></property></column><column><property name="text"><string>未匹配原文</string></property></column></widget></item>
+       <item><widget class="QLabel" name="label_group_preview"><property name="text"><string>分组输出（可编辑明细/汇总 Sheet 名）</string></property></widget></item>
+       <item><widget class="QTableWidget" name="table_group_preview"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>输出考勤组</string></property></column><column><property name="text"><string>人数</string></property></column><column><property name="text"><string>明细 Sheet</string></property></column><column><property name="text"><string>汇总 Sheet</string></property></column></widget></item>
+       <item><widget class="QLabel" name="label_employee_preview"><property name="text"><string>人员分组（可编辑输出考勤组；未匹配记录仍会阻止生成）</string></property></widget></item>
+       <item><widget class="QTableWidget" name="table_employee_preview"><property name="columnCount"><number>4</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>姓名</string></property></column><column><property name="text"><string>原考勤组</string></property></column><column><property name="text"><string>输出考勤组</string></property></column><column><property name="text"><string>未匹配</string></property></column></widget></item>
+       <item><layout class="QHBoxLayout" name="layout_preview_adjustments"><item><spacer name="preview_adjustment_spacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item><item><widget class="QPushButton" name="btn_apply_adjustments"><property name="enabled"><bool>false</bool></property><property name="text"><string>应用调整并重新预览</string></property></widget></item></layout></item>
       </layout>
      </widget>
     </widget>

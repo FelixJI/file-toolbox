@@ -1,6 +1,7 @@
 """考勤方案存储测试。"""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from file_toolbox.core.attendance import (
     AttendancePlan,
     AttendancePlanStore,
     CellRef,
+    EmployeeGroupOverride,
+    GroupSheetConfig,
     SourceLayout,
     TargetLayout,
 )
@@ -45,6 +48,29 @@ def test_store_requires_explicit_overwrite(tmp_path):
     with pytest.raises(ValueError, match="已存在"):
         store.save(_plan())
     store.save(_plan(), overwrite=True)
+
+
+def test_store_persists_group_output_adjustments(tmp_path):
+    store = AttendancePlanStore(tmp_path / "plans.json")
+    plan = replace(
+        _plan(),
+        split_by_group=True,
+        employee_group_overrides=(EmployeeGroupOverride("张三", "销售组", "管理组"),),
+        group_sheet_configs=(GroupSheetConfig("管理组", "管理明细", "管理汇总"),),
+    )
+
+    store.save(plan)
+
+    assert store.get(plan.name) == plan
+    payload = json.loads(store.config_path.read_text(encoding="utf-8"))
+    saved_plan = payload["plans"][plan.name]
+    assert saved_plan["schema_version"] == 3
+    assert saved_plan["employee_group_overrides"] == [
+        {"employee_name": "张三", "source_group": "销售组", "target_group": "管理组"}
+    ]
+    assert saved_plan["group_sheet_configs"] == [
+        {"attendance_group": "管理组", "detail_sheet": "管理明细", "summary_sheet": "管理汇总"}
+    ]
 
 
 def test_store_corrupt_or_invalid_file_falls_back_empty(tmp_path):

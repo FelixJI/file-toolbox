@@ -1,6 +1,7 @@
 """考勤 Tab 的配置、方案、预览门禁与另存编排测试。"""
 
 import time
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +16,10 @@ from file_toolbox.core.attendance import (  # noqa: E402
     AttendancePlanStore,
     AttendancePreview,
     AttendanceResult,
+    EmployeeGroupOverride,
+    EmployeeGroupPreview,
+    GroupSheetConfig,
+    UnmatchedAttendance,
 )
 from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab  # noqa: E402
 
@@ -94,36 +99,23 @@ def test_group_preview_shows_sheet_pairs(tab):
             "售后组": ("出勤明细-售后组", "考勤汇总表-售后组"),
             "管理组": ("出勤明细-管理组", "考勤汇总表-管理组"),
         },
+        (
+            EmployeeGroupPreview("张三", "售后组", "售后组"),
+            EmployeeGroupPreview("李四", "售后组", "售后组"),
+            EmployeeGroupPreview("王五", "管理组", "管理组"),
+        ),
     )
 
     tab._on_preview_ok(preview)
 
     assert "售后组 2 人→出勤明细-售后组/考勤汇总表-售后组" in tab.ui.lbl_preview.text()
+    assert tab.ui.table_group_preview.rowCount() == 2
+    assert tab.ui.table_group_preview.item(0, 2).text() == "出勤明细-售后组"
+    assert tab.ui.table_employee_preview.rowCount() == 3
+    assert tab.ui.table_employee_preview.item(0, 0).text() == "张三"
 
 
 def test_unmatched_preview_blocks_generation(tab):
-    from file_toolbox.core.attendance import UnmatchedAttendance
-
-    preview = AttendancePreview(
-        1,
-        31,
-        0,
-        1,
-        {},
-        (UnmatchedAttendance("张三", 2, "特殊状态"),),
-    )
-
-    tab._on_preview_ok(preview)
-
-    assert tab.ui.btn_generate.isEnabled() is False
-    assert tab.ui.table_unmatched.item(0, 0).text() == "张三"
-    assert tab.ui.table_unmatched.item(0, 1).text() == ""
-    assert tab.ui.table_unmatched.item(0, 3).text() == "特殊状态"
-
-
-def test_unmatched_preview_shows_attendance_group(tab):
-    from file_toolbox.core.attendance import UnmatchedAttendance
-
     preview = AttendancePreview(
         1,
         31,
@@ -131,11 +123,88 @@ def test_unmatched_preview_shows_attendance_group(tab):
         1,
         {},
         (UnmatchedAttendance("张三", 2, "特殊状态", "售后组"),),
+        {"售后组": 1},
+        {"售后组": ("售后明细", "售后汇总")},
+        (EmployeeGroupPreview("张三", "售后组", "售后组"),),
     )
 
     tab._on_preview_ok(preview)
 
-    assert tab.ui.table_unmatched.item(0, 1).text() == "售后组"
+    assert tab.ui.btn_generate.isEnabled() is False
+    assert tab.ui.table_employee_preview.item(0, 0).text() == "张三"
+    assert tab.ui.table_employee_preview.item(0, 2).text() == "售后组"
+    assert "2日: 特殊状态" in tab.ui.table_employee_preview.item(0, 3).text()
+
+
+def test_unmatched_preview_shows_attendance_group(tab):
+    preview = AttendancePreview(
+        1,
+        31,
+        0,
+        1,
+        {},
+        (UnmatchedAttendance("张三", 2, "特殊状态", "售后组"),),
+        {"售后组": 1},
+        {"售后组": ("售后明细", "售后汇总")},
+        (EmployeeGroupPreview("张三", "原组", "售后组"),),
+    )
+
+    tab._on_preview_ok(preview)
+
+    assert tab.ui.table_employee_preview.item(0, 1).text() == "原组"
+    assert tab.ui.table_employee_preview.item(0, 2).text() == "售后组"
+
+
+def test_preview_edits_apply_employee_move_and_sheet_names(tab, monkeypatch):
+    preview = AttendancePreview(
+        2,
+        31,
+        0,
+        1,
+        {"√": 62},
+        (),
+        {"售后组": 1, "管理组": 1},
+        {
+            "售后组": ("售后明细", "售后汇总"),
+            "管理组": ("管理明细", "管理汇总"),
+        },
+        (
+            EmployeeGroupPreview("张三", "售后组", "售后组"),
+            EmployeeGroupPreview("李四", "管理组", "管理组"),
+        ),
+    )
+    tab._on_preview_ok(preview)
+    calls = []
+    monkeypatch.setattr(tab, "_preview", lambda: calls.append(True))
+
+    tab.ui.table_group_preview.item(0, 2).setText("自定义售后明细")
+    tab.ui.table_employee_preview.item(0, 2).setText("管理组")
+
+    assert tab.ui.btn_generate.isEnabled() is False
+    assert "请应用" in tab.ui.lbl_status.text()
+    tab._apply_preview_adjustments()
+
+    plan = tab._build_plan()
+    assert calls == [True]
+    assert plan.employee_group_overrides == (EmployeeGroupOverride("张三", "售后组", "管理组"),)
+    assert plan.group_sheet_configs[0] == GroupSheetConfig("售后组", "自定义售后明细", "售后汇总")
+
+
+def test_plan_load_restores_saved_preview_adjustments(tab):
+    original = replace(
+        tab._build_plan(),
+        employee_group_overrides=(EmployeeGroupOverride("张三", "售后组", "管理组"),),
+        group_sheet_configs=(GroupSheetConfig("管理组", "管理明细", "管理汇总"),),
+    )
+    tab._plans.save(original)
+    tab._refresh_plans(original.name)
+
+    tab._load_plan()
+
+    restored = tab._build_plan()
+    assert restored.employee_group_overrides == original.employee_group_overrides
+    assert restored.group_sheet_configs == original.group_sheet_configs
+    assert tab.ui.table_employee_preview.rowCount() == 0
 
 
 def test_edit_after_preview_invalidates_generation(tab):

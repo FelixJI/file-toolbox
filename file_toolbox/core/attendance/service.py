@@ -8,7 +8,7 @@ import re
 import shutil
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -21,12 +21,15 @@ from file_toolbox.core.attendance.excel import (
 )
 from file_toolbox.core.attendance.rules import classify, compile_rules, render_content
 from file_toolbox.core.attendance.types import (
+    AttendancePlan,
     AttendancePreview,
     AttendanceRequest,
     AttendanceResult,
     CellMapping,
     CellRef,
     EmployeeAttendance,
+    EmployeeGroupPreview,
+    GroupSheetConfig,
     PreparedAttendance,
     PreparedGroup,
     SourceAttendance,
@@ -164,6 +167,7 @@ class AttendanceService:
         except (OSError, ValueError) as exc:
             raise AttendanceError(str(exc)) from exc
 
+        source, employee_previews = self._apply_employee_group_overrides(source, request.plan)
         employee_groups = self._partition_employees(source, request.plan.split_by_group)
         target_sheets = self._allocate_target_sheets(
             tuple(employee_groups), request, template_sheets
@@ -215,12 +219,59 @@ class AttendanceService:
             unmatched=tuple(unmatched),
             group_counts=group_counts,
             target_sheets=target_sheets if request.plan.split_by_group else {},
+            employees=employee_previews,
         )
         return PreparedAttendance(
             groups=tuple(prepared_groups),
             preview=preview,
             global_mapping_values=global_mapping_values,
         )
+
+    @staticmethod
+    def _apply_employee_group_overrides(
+        source: SourceAttendance, plan: AttendancePlan
+    ) -> tuple[SourceAttendance, tuple[EmployeeGroupPreview, ...]]:
+        source_keys = Counter(
+            (
+                employee.attendance_group.strip().casefold(),
+                employee.name.strip().casefold(),
+            )
+            for employee in source.employees
+        )
+        overrides: dict[tuple[str, str], str] = {}
+        if plan.split_by_group:
+            for override in plan.employee_group_overrides:
+                key = (
+                    override.source_group.strip().casefold(),
+                    override.employee_name.strip().casefold(),
+                )
+                target_group = override.target_group.strip()
+                if key in overrides:
+                    raise AttendanceError(
+                        f"人员分组调整重复: {override.source_group}/{override.employee_name}"
+                    )
+                count = source_keys[key]
+                if count == 0:
+                    raise AttendanceError(
+                        f"人员分组调整未找到员工: {override.source_group}/{override.employee_name}"
+                    )
+                if count > 1:
+                    raise AttendanceError(
+                        f"人员分组调整存在同组同名歧义: {override.source_group}/{override.employee_name}"
+                    )
+                if not target_group:
+                    raise AttendanceError(f"员工“{override.employee_name}”的输出考勤组不能为空")
+                overrides[key] = target_group
+
+        adjusted: list[EmployeeAttendance] = []
+        previews: list[EmployeeGroupPreview] = []
+        for employee in source.employees:
+            source_group = employee.attendance_group.strip()
+            key = (source_group.casefold(), employee.name.strip().casefold())
+            target_group = overrides.get(key, source_group)
+            adjusted.append(replace(employee, attendance_group=target_group))
+            previews.append(EmployeeGroupPreview(employee.name, source_group, target_group))
+        return SourceAttendance(tuple(adjusted), source.department), tuple(previews)
 
     @staticmethod
     def _partition_employees(
@@ -276,11 +327,51 @@ class AttendanceService:
             return {"": (target.detail_sheet, target.summary_sheet)}
         reserved = {name.casefold() for name in template_sheets}
         result: dict[str, tuple[str, str]] = {}
+        configs: dict[str, GroupSheetConfig] = {}
+        for config in request.plan.group_sheet_configs:
+            key = config.attendance_group.strip().casefold()
+            if key in configs:
+                raise AttendanceError(f"考勤组 Sheet 配置重复: {config.attendance_group}")
+            configs[key] = config
+
         for group_name in group_names:
+            configured = configs.get(group_name.casefold())
+            if configured is None:
+                continue
+            detail = cls._reserve_configured_sheet_name(
+                configured.detail_sheet, group_name, "明细", reserved
+            )
+            summary = cls._reserve_configured_sheet_name(
+                configured.summary_sheet, group_name, "汇总", reserved
+            )
+            result[group_name] = (detail, summary)
+
+        for group_name in group_names:
+            if group_name in result:
+                continue
             detail = cls._unique_sheet_name(f"{target.detail_sheet}-{group_name}", reserved)
             summary = cls._unique_sheet_name(f"{target.summary_sheet}-{group_name}", reserved)
             result[group_name] = (detail, summary)
         return result
+
+    @staticmethod
+    def _reserve_configured_sheet_name(
+        name: str,
+        group_name: str,
+        label: str,
+        reserved: set[str],
+    ) -> str:
+        value = name.strip()
+        if not value:
+            raise AttendanceError(f"考勤组“{group_name}”的{label} Sheet 名不能为空")
+        if len(value) > 31:
+            raise AttendanceError(f"考勤组“{group_name}”的{label} Sheet 名超过 31 字符")
+        if _INVALID_SHEET_CHARS_RE.search(value) or value.startswith("'") or value.endswith("'"):
+            raise AttendanceError(f"考勤组“{group_name}”的{label} Sheet 名包含 Excel 非法字符")
+        if value.casefold() in reserved:
+            raise AttendanceError(f"考勤组“{group_name}”的{label} Sheet 名已存在: {value}")
+        reserved.add(value.casefold())
+        return value
 
     @staticmethod
     def _unique_sheet_name(preferred: str, reserved: set[str]) -> str:
