@@ -155,6 +155,33 @@ def test_unmatched_preview_shows_attendance_group(tab):
     assert tab.ui.table_employee_preview.item(0, 2).text() == "售后组"
 
 
+def test_unmatched_preview_keeps_same_name_moves_separate(tab):
+    preview = AttendancePreview(
+        2,
+        31,
+        0,
+        1,
+        {},
+        (
+            UnmatchedAttendance("张三", 2, "A组异常", "C组", "A组"),
+            UnmatchedAttendance("张三", 3, "B组异常", "C组", "B组"),
+        ),
+        {"C组": 2},
+        {"C组": ("C组明细", "C组汇总")},
+        (
+            EmployeeGroupPreview("张三", "A组", "C组"),
+            EmployeeGroupPreview("张三", "B组", "C组"),
+        ),
+    )
+
+    tab._on_preview_ok(preview)
+
+    assert "A组异常" in tab.ui.table_employee_preview.item(0, 3).text()
+    assert "B组异常" not in tab.ui.table_employee_preview.item(0, 3).text()
+    assert "B组异常" in tab.ui.table_employee_preview.item(1, 3).text()
+    assert "A组异常" not in tab.ui.table_employee_preview.item(1, 3).text()
+
+
 def test_preview_edits_apply_employee_move_and_sheet_names(tab, monkeypatch):
     preview = AttendancePreview(
         2,

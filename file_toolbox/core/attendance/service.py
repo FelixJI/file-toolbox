@@ -269,7 +269,9 @@ class AttendanceService:
             source_group = employee.attendance_group.strip()
             key = (source_group.casefold(), employee.name.strip().casefold())
             target_group = overrides.get(key, source_group)
-            adjusted.append(replace(employee, attendance_group=target_group))
+            adjusted.append(
+                replace(employee, attendance_group=target_group, source_group=source_group)
+            )
             previews.append(EmployeeGroupPreview(employee.name, source_group, target_group))
         return SourceAttendance(tuple(adjusted), source.department), tuple(previews)
 
@@ -306,6 +308,7 @@ class AttendanceService:
                             day,
                             raw,
                             employee.attendance_group.strip(),
+                            employee.source_group.strip(),
                         )
                     )
                     row.append("")

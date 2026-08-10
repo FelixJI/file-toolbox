@@ -144,6 +144,7 @@ class EmployeeAttendance:
     department: str
     records: tuple[str, ...]
     attendance_group: str = ""
+    source_group: str = ""
 
 
 @dataclass(frozen=True)
@@ -158,6 +159,7 @@ class UnmatchedAttendance:
     day: int
     raw: str
     attendance_group: str = ""
+    source_group: str = ""
 
 
 @dataclass(frozen=True)

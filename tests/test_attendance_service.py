@@ -431,6 +431,32 @@ def test_employee_override_rejects_ambiguous_or_missing_employee(
         AttendanceService(FakeExcel(SourceAttendance(employees, "市场部"))).preview(request)
 
 
+def test_unmatched_records_keep_original_group_after_same_name_moves(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        employee_group_overrides=(
+            EmployeeGroupOverride("张三", "A组", "C组"),
+            EmployeeGroupOverride("张三", "B组", "C组"),
+        ),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", ("A组异常",), "A组"),
+            EmployeeAttendance("张三", "市场部", ("B组异常",), "B组"),
+        ),
+        "市场部",
+    )
+
+    preview = AttendanceService(FakeExcel(source)).preview(request)
+
+    assert [item.source_group for item in preview.unmatched] == ["A组", "B组"]
+    assert [item.attendance_group for item in preview.unmatched] == ["C组", "C组"]
+
+
 def test_explicit_sheet_names_win_and_automatic_names_avoid_them(tmp_path):
     request = _request(tmp_path)
     plan = replace(

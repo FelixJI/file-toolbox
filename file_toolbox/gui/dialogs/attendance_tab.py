@@ -581,7 +581,8 @@ class AttendanceTab(QWidget):
         )
         unmatched_by_employee: dict[tuple[str, str], list[str]] = {}
         for item in result.unmatched:
-            key = (item.employee.strip().casefold(), item.attendance_group.strip().casefold())
+            source_group = item.source_group or item.attendance_group
+            key = (item.employee.strip().casefold(), source_group.strip().casefold())
             unmatched_by_employee.setdefault(key, []).append(f"{item.day}日: {item.raw}")
 
         self._loading = True
@@ -598,7 +599,7 @@ class AttendanceTab(QWidget):
             for row, employee in enumerate(result.employees):
                 key = (
                     employee.employee_name.strip().casefold(),
-                    employee.target_group.strip().casefold(),
+                    employee.source_group.strip().casefold(),
                 )
                 unmatched_items = unmatched_by_employee.get(key, [])
                 unmatched_text = "；".join(unmatched_items[:3])
