@@ -15,11 +15,11 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QComboBox, QFormLayout, QGridLayout,
-    QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QPushButton, QSizePolicy, QSpacerItem,
-    QSpinBox, QTabWidget, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout,
+    QGridLayout, QGroupBox, QHBoxLayout, QHeaderView,
+    QLabel, QLineEdit, QPushButton, QSizePolicy,
+    QSpacerItem, QSpinBox, QTabWidget, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget)
 
 class Ui_AttendanceDialog(object):
     def setupUi(self, AttendanceDialog):
@@ -177,15 +177,25 @@ class Ui_AttendanceDialog(object):
 
         self.form_source.setWidget(2, QFormLayout.ItemRole.FieldRole, self.edit_source_department)
 
+        self.label_source_group = QLabel(self.group_source_layout)
+        self.label_source_group.setObjectName(u"label_source_group")
+
+        self.form_source.setWidget(3, QFormLayout.ItemRole.LabelRole, self.label_source_group)
+
+        self.edit_source_group = QLineEdit(self.group_source_layout)
+        self.edit_source_group.setObjectName(u"edit_source_group")
+
+        self.form_source.setWidget(3, QFormLayout.ItemRole.FieldRole, self.edit_source_group)
+
         self.label_source_detail = QLabel(self.group_source_layout)
         self.label_source_detail.setObjectName(u"label_source_detail")
 
-        self.form_source.setWidget(3, QFormLayout.ItemRole.LabelRole, self.label_source_detail)
+        self.form_source.setWidget(4, QFormLayout.ItemRole.LabelRole, self.label_source_detail)
 
         self.edit_source_detail = QLineEdit(self.group_source_layout)
         self.edit_source_detail.setObjectName(u"edit_source_detail")
 
-        self.form_source.setWidget(3, QFormLayout.ItemRole.FieldRole, self.edit_source_detail)
+        self.form_source.setWidget(4, QFormLayout.ItemRole.FieldRole, self.edit_source_detail)
 
 
         self.layout_coordinates.addWidget(self.group_source_layout)
@@ -243,6 +253,11 @@ class Ui_AttendanceDialog(object):
         self.edit_summary_name.setObjectName(u"edit_summary_name")
 
         self.form_target.setWidget(4, QFormLayout.ItemRole.FieldRole, self.edit_summary_name)
+
+        self.chk_split_groups = QCheckBox(self.group_target_layout)
+        self.chk_split_groups.setObjectName(u"chk_split_groups")
+
+        self.form_target.setWidget(5, QFormLayout.ItemRole.SpanningRole, self.chk_split_groups)
 
 
         self.layout_coordinates.addWidget(self.group_target_layout)
@@ -357,16 +372,18 @@ class Ui_AttendanceDialog(object):
         self.layout_preview.addWidget(self.lbl_preview)
 
         self.table_unmatched = QTableWidget(self.tab_preview)
-        if (self.table_unmatched.columnCount() < 3):
-            self.table_unmatched.setColumnCount(3)
+        if (self.table_unmatched.columnCount() < 4):
+            self.table_unmatched.setColumnCount(4)
         __qtablewidgetitem6 = QTableWidgetItem()
         self.table_unmatched.setHorizontalHeaderItem(0, __qtablewidgetitem6)
         __qtablewidgetitem7 = QTableWidgetItem()
         self.table_unmatched.setHorizontalHeaderItem(1, __qtablewidgetitem7)
         __qtablewidgetitem8 = QTableWidgetItem()
         self.table_unmatched.setHorizontalHeaderItem(2, __qtablewidgetitem8)
+        __qtablewidgetitem9 = QTableWidgetItem()
+        self.table_unmatched.setHorizontalHeaderItem(3, __qtablewidgetitem9)
         self.table_unmatched.setObjectName(u"table_unmatched")
-        self.table_unmatched.setColumnCount(3)
+        self.table_unmatched.setColumnCount(4)
         self.table_unmatched.setRowCount(0)
 
         self.layout_preview.addWidget(self.table_unmatched)
@@ -429,6 +446,7 @@ class Ui_AttendanceDialog(object):
         self.label_source_sheet.setText(QCoreApplication.translate("AttendanceDialog", u"Sheet \u540d", None))
         self.label_source_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u59d3\u540d\u8d77\u59cb", None))
         self.label_source_department.setText(QCoreApplication.translate("AttendanceDialog", u"\u90e8\u95e8\u8d77\u59cb", None))
+        self.label_source_group.setText(QCoreApplication.translate("AttendanceDialog", u"\u8003\u52e4\u7ec4\u8d77\u59cb", None))
         self.label_source_detail.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6\u5de6\u4e0a\u89d2", None))
         self.group_target_layout.setTitle(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b\u6a21\u677f", None))
         self.label_detail_sheet.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6 Sheet", None))
@@ -436,8 +454,9 @@ class Ui_AttendanceDialog(object):
         self.label_detail_matrix.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6\u77e9\u9635\u5de6\u4e0a\u89d2", None))
         self.label_summary_sheet.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b Sheet", None))
         self.label_summary_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b\u59d3\u540d\u8d77\u59cb", None))
+        self.chk_split_groups.setText(QCoreApplication.translate("AttendanceDialog", u"\u6309\u8003\u52e4\u7ec4\u62c6\u5206\uff08\u6bcf\u7ec4\u81ea\u52a8\u751f\u6210\u660e\u7ec6/\u6c47\u603b Sheet\uff09", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_layout), QCoreApplication.translate("AttendanceDialog", u"\u5de5\u4f5c\u8868\u4e0e\u5750\u6807", None))
-        self.label_mapping_help.setText(QCoreApplication.translate("AttendanceDialog", u"\u5185\u5bb9\u652f\u6301 {{year}}\u3001{{month}}\u3001{{month_start}}\u3001{{month_end}}\u3001{{department}}", None))
+        self.label_mapping_help.setText(QCoreApplication.translate("AttendanceDialog", u"\u5185\u5bb9\u652f\u6301 {{year}}\u3001{{month}}\u3001{{month_start}}\u3001{{month_end}}\u3001{{department}}\uff1b\u5206\u7ec4\u660e\u7ec6/\u6c47\u603b\u8fd8\u652f\u6301 {{attendance_group}}", None))
         ___qtablewidgetitem = self.table_mappings.horizontalHeaderItem(0)
         ___qtablewidgetitem.setText(QCoreApplication.translate("AttendanceDialog", u"Sheet \u540d", None))
         ___qtablewidgetitem1 = self.table_mappings.horizontalHeaderItem(1)
@@ -463,9 +482,11 @@ class Ui_AttendanceDialog(object):
         ___qtablewidgetitem6 = self.table_unmatched.horizontalHeaderItem(0)
         ___qtablewidgetitem6.setText(QCoreApplication.translate("AttendanceDialog", u"\u59d3\u540d", None))
         ___qtablewidgetitem7 = self.table_unmatched.horizontalHeaderItem(1)
-        ___qtablewidgetitem7.setText(QCoreApplication.translate("AttendanceDialog", u"\u65e5\u671f", None))
+        ___qtablewidgetitem7.setText(QCoreApplication.translate("AttendanceDialog", u"\u8003\u52e4\u7ec4", None))
         ___qtablewidgetitem8 = self.table_unmatched.horizontalHeaderItem(2)
-        ___qtablewidgetitem8.setText(QCoreApplication.translate("AttendanceDialog", u"\u672a\u5339\u914d\u539f\u6587", None))
+        ___qtablewidgetitem8.setText(QCoreApplication.translate("AttendanceDialog", u"\u65e5\u671f", None))
+        ___qtablewidgetitem9 = self.table_unmatched.horizontalHeaderItem(3)
+        ___qtablewidgetitem9.setText(QCoreApplication.translate("AttendanceDialog", u"\u672a\u5339\u914d\u539f\u6587", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_preview), QCoreApplication.translate("AttendanceDialog", u"\u9884\u89c8\u7ed3\u679c", None))
         self.lbl_status.setText(QCoreApplication.translate("AttendanceDialog", u"\u5c31\u7eea", None))
         self.btn_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u9884\u89c8\u5e76\u6821\u9a8c", None))

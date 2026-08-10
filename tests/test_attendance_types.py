@@ -58,8 +58,40 @@ def test_column_letters_rejects_zero():
 
 
 def test_plan_serialization_round_trip():
-    plan = _plan()
+    original = _plan()
+    plan = AttendancePlan(
+        **{
+            **original.__dict__,
+            "source": SourceLayout(
+                original.source.sheet_name,
+                original.source.name_start,
+                original.source.department_start,
+                original.source.detail_start,
+                CellRef.parse("B2"),
+            ),
+            "split_by_group": True,
+        }
+    )
     assert plan_from_dict(plan_to_dict(plan)) == plan
+
+
+def test_plan_from_old_dict_defaults_to_single_group_mode():
+    data = plan_to_dict(_plan())
+    data["schema_version"] = 1
+    data.pop("split_by_group")
+    source = data["source"]
+    assert isinstance(source, dict)
+    source.pop("attendance_group_start")
+
+    plan = plan_from_dict(data)
+
+    assert plan.split_by_group is False
+    assert plan.source.attendance_group_start is None
+    assert plan.schema_version == 2
+
+
+def test_new_plan_serializes_as_v2_so_old_reader_rejects_new_semantics():
+    assert plan_to_dict(_plan())["schema_version"] == 2
 
 
 def test_plan_from_dict_rejects_unknown_version():
@@ -96,6 +128,18 @@ def test_render_content_supports_minimal_variables():
         department="市场部",
     )
     assert value == "市场部 2024/2 2024年2月1日 - 2024年2月29日"
+
+
+def test_render_content_supports_attendance_group():
+    value = render_content(
+        "{{department}}-{{attendance_group}}",
+        year=2026,
+        month=7,
+        last_day=31,
+        department="市场部",
+        attendance_group="售后组",
+    )
+    assert value == "市场部-售后组"
 
 
 def test_render_content_rejects_unknown_variable():

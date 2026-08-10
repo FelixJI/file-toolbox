@@ -48,7 +48,10 @@ def test_defaults_match_given_workbooks(tab):
     assert plan.source.sheet_name == "Sheet1"
     assert plan.source.name_start.address == "A2"
     assert plan.source.department_start.address == "C2"
+    assert plan.source.attendance_group_start is not None
+    assert plan.source.attendance_group_start.address == "B2"
     assert plan.source.detail_start.address == "G2"
+    assert plan.split_by_group is True
     assert plan.target.detail_sheet == "出勤明细"
     assert plan.target.detail_matrix_start.address == "D7"
     assert plan.target.summary_sheet == "考勤汇总表"
@@ -78,6 +81,26 @@ def test_preview_success_enables_generation(tab):
     assert "增加日期列 1" in tab.ui.lbl_preview.text()
 
 
+def test_group_preview_shows_sheet_pairs(tab):
+    preview = AttendancePreview(
+        3,
+        31,
+        0,
+        1,
+        {"√": 90},
+        (),
+        {"售后组": 2, "管理组": 1},
+        {
+            "售后组": ("出勤明细-售后组", "考勤汇总表-售后组"),
+            "管理组": ("出勤明细-管理组", "考勤汇总表-管理组"),
+        },
+    )
+
+    tab._on_preview_ok(preview)
+
+    assert "售后组 2 人→出勤明细-售后组/考勤汇总表-售后组" in tab.ui.lbl_preview.text()
+
+
 def test_unmatched_preview_blocks_generation(tab):
     from file_toolbox.core.attendance import UnmatchedAttendance
 
@@ -94,7 +117,25 @@ def test_unmatched_preview_blocks_generation(tab):
 
     assert tab.ui.btn_generate.isEnabled() is False
     assert tab.ui.table_unmatched.item(0, 0).text() == "张三"
-    assert tab.ui.table_unmatched.item(0, 2).text() == "特殊状态"
+    assert tab.ui.table_unmatched.item(0, 1).text() == ""
+    assert tab.ui.table_unmatched.item(0, 3).text() == "特殊状态"
+
+
+def test_unmatched_preview_shows_attendance_group(tab):
+    from file_toolbox.core.attendance import UnmatchedAttendance
+
+    preview = AttendancePreview(
+        1,
+        31,
+        0,
+        1,
+        {},
+        (UnmatchedAttendance("张三", 2, "特殊状态", "售后组"),),
+    )
+
+    tab._on_preview_ok(preview)
+
+    assert tab.ui.table_unmatched.item(0, 1).text() == "售后组"
 
 
 def test_edit_after_preview_invalidates_generation(tab):

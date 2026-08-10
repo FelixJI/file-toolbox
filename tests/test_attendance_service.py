@@ -1,5 +1,6 @@
 """AttendanceService interface 测试。"""
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -26,20 +27,18 @@ class FakeExcel:
         self.read_calls = []
         self.write_calls = []
         self.write_error = None
+        self.sheet_names = ("出勤明细", "考勤汇总表")
 
     def validate_template(self, template_path, plan):
         self.validated.append((template_path, plan))
+        return self.sheet_names
 
     def read_source(self, source_path, layout, day_count, cancel_check=None):
         self.read_calls.append((source_path, layout, day_count))
         return self.source
 
-    def write_output(
-        self, staging_path, plan, source, symbols, mapping_values, day_count, cancel_check=None
-    ):
-        self.write_calls.append(
-            (staging_path, plan, source, symbols, mapping_values, day_count, cancel_check)
-        )
+    def write_output(self, staging_path, plan, prepared, cancel_check=None):
+        self.write_calls.append((staging_path, plan, prepared, cancel_check))
         if self.write_error is not None:
             raise self.write_error
         staging_path.write_bytes(staging_path.read_bytes() + b"-filled")
@@ -127,7 +126,7 @@ def test_generate_writes_staging_then_promotes_and_records_history(tmp_path):
     assert staging != request.output_path
     assert staging.parent == request.output_path.parent
     assert not staging.exists()
-    mapping_values = excel.write_calls[0][4]
+    mapping_values = excel.write_calls[0][2].groups[0].mapping_values
     assert mapping_values[0][2] == "2026年7月 市场部"
     record = history.get_records("attendance")[0]
     assert record["data"]["employee_count"] == 1
@@ -186,3 +185,174 @@ def test_request_rejects_same_output_as_template(tmp_path):
     )
     with pytest.raises(AttendanceError, match="不能与"):
         AttendanceService(FakeExcel(_source(31))).preview(bad)
+
+
+def test_preview_partitions_attendance_groups_and_allocates_sheet_pairs(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        mappings=(
+            CellMapping(
+                "出勤明细",
+                CellRef.parse("A3"),
+                "{{attendance_group}} {{department}} {{month}}月",
+            ),
+        ),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31)), "管理组"),
+            EmployeeAttendance("王五", "市场部", tuple("正常" for _ in range(31)), "售后组"),
+        ),
+        "市场部",
+    )
+    excel = FakeExcel(source)
+
+    result = AttendanceService(excel).generate(request)
+
+    assert result.group_counts == {"售后组": 2, "管理组": 1}
+    assert result.target_sheets == {
+        "售后组": ("出勤明细-售后组", "考勤汇总表-售后组"),
+        "管理组": ("出勤明细-管理组", "考勤汇总表-管理组"),
+    }
+    prepared = excel.write_calls[0][2]
+    assert [group.source.employees[0].name for group in prepared.groups] == ["张三", "李四"]
+    assert prepared.groups[0].mapping_values[0][2] == "售后组 市场部 7月"
+
+
+def test_preview_rejects_blank_attendance_group(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+    )
+    request = replace(request, plan=plan)
+
+    with pytest.raises(AttendanceError, match="张三1.*缺少考勤组"):
+        AttendanceService(FakeExcel(_source(31))).preview(request)
+
+
+def test_unmatched_records_include_group_for_duplicate_employee_names(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+    )
+    request = replace(request, plan=plan)
+    records = ("未知",) + tuple("正常" for _ in range(30))
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", records, "售后组"),
+            EmployeeAttendance("张三", "市场部", records, "管理组"),
+        ),
+        "市场部",
+    )
+
+    preview = AttendanceService(FakeExcel(source)).preview(request)
+
+    assert [item.attendance_group for item in preview.unmatched] == ["售后组", "管理组"]
+
+
+def test_group_sheet_names_are_sanitized_and_do_not_collide(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "管理/组"),),
+        "市场部",
+    )
+    excel = FakeExcel(source)
+    excel.sheet_names = ("出勤明细", "考勤汇总表", "出勤明细-管理_组")
+
+    preview = AttendanceService(excel).preview(request)
+
+    assert preview.target_sheets["管理/组"] == (
+        "出勤明细-管理_组 (2)",
+        "考勤汇总表-管理_组",
+    )
+
+
+def test_group_sheet_names_do_not_reuse_31_character_base_names(tmp_path):
+    request = _request(tmp_path)
+    detail_base = "D" * 31
+    summary_base = "S" * 31
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        target=replace(
+            request.plan.target,
+            detail_sheet=detail_base,
+            summary_sheet=summary_base,
+        ),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "管理组"),),
+        "市场部",
+    )
+    excel = FakeExcel(source)
+    excel.sheet_names = (detail_base, summary_base)
+
+    preview = AttendanceService(excel).preview(request)
+
+    assert preview.target_sheets["管理组"] == (
+        f"{'D' * 27} (2)",
+        f"{'S' * 27} (2)",
+    )
+
+
+def test_group_mappings_match_base_sheet_names_case_insensitively(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        target=replace(
+            request.plan.target,
+            detail_sheet="Detail",
+            summary_sheet="Summary",
+        ),
+        mappings=(CellMapping("detail", CellRef.parse("A1"), "{{attendance_group}}"),),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "管理组"),),
+        "市场部",
+    )
+    excel = FakeExcel(source)
+    excel.sheet_names = ("Detail", "Summary")
+
+    AttendanceService(excel).generate(request)
+
+    prepared = excel.write_calls[0][2]
+    assert prepared.groups[0].mapping_values == (("Detail-管理组", CellRef.parse("A1"), "管理组"),)
+    assert prepared.global_mapping_values == ()
+
+
+def test_group_mode_rejects_group_variable_on_global_sheet(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(
+        request.plan,
+        split_by_group=True,
+        source=replace(request.plan.source, attendance_group_start=CellRef.parse("B2")),
+        mappings=(CellMapping("封面", CellRef.parse("A1"), "{{attendance_group}}"),),
+    )
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "管理组"),),
+        "市场部",
+    )
+
+    with pytest.raises(AttendanceError, match="非分组工作表"):
+        AttendanceService(FakeExcel(source)).preview(request)

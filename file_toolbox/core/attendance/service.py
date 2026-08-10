@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import os
+import re
 import shutil
 from collections import Counter
 from collections.abc import Callable
@@ -23,12 +24,17 @@ from file_toolbox.core.attendance.types import (
     AttendancePreview,
     AttendanceRequest,
     AttendanceResult,
+    CellMapping,
     CellRef,
+    EmployeeAttendance,
     PreparedAttendance,
+    PreparedGroup,
+    SourceAttendance,
     UnmatchedAttendance,
 )
 
 CancelCheck = Callable[[], bool]
+_INVALID_SHEET_CHARS_RE = re.compile(r"[\\/*?:\[\]]")
 
 
 class AttendanceError(RuntimeError):
@@ -82,10 +88,7 @@ class AttendanceService:
             self._excel.write_output(
                 staging,
                 request.plan,
-                prepared.source,
-                prepared.symbols,
-                prepared.mapping_values,
-                prepared.preview.day_count,
+                prepared,
                 cancel_check,
             )
             if not staging.is_file() or staging.stat().st_size == 0:
@@ -109,6 +112,8 @@ class AttendanceService:
             employee_count=prepared.preview.employee_count,
             day_count=prepared.preview.day_count,
             status_counts=prepared.preview.status_counts,
+            group_counts=prepared.preview.group_counts,
+            target_sheets=prepared.preview.target_sheets,
         )
         if self._history_store is not None:
             try:
@@ -122,6 +127,8 @@ class AttendanceService:
                         "month": request.month,
                         "employee_count": result.employee_count,
                         "status_counts": dict(result.status_counts),
+                        "group_counts": dict(result.group_counts),
+                        "target_sheets": dict(result.target_sheets),
                     },
                 )
             except Exception as exc:  # noqa: BLE001 - 输出已提交，历史只能降级为警告
@@ -130,6 +137,8 @@ class AttendanceService:
                     employee_count=result.employee_count,
                     day_count=result.day_count,
                     status_counts=result.status_counts,
+                    group_counts=result.group_counts,
+                    target_sheets=result.target_sheets,
                     warnings=(f"结果已生成，但历史记录保存失败: {exc}",),
                 )
         return result
@@ -140,7 +149,9 @@ class AttendanceService:
         context = self._validate_request(request)
         try:
             compiled = compile_rules(request.plan.rules)
-            self._excel.validate_template(request.plan.template_path, request.plan)
+            template_sheets = self._excel.validate_template(
+                request.plan.template_path, request.plan
+            )
             self._check_cancel(cancel_check)
             source = self._excel.read_source(
                 request.source_path,
@@ -153,54 +164,215 @@ class AttendanceService:
         except (OSError, ValueError) as exc:
             raise AttendanceError(str(exc)) from exc
 
+        employee_groups = self._partition_employees(source, request.plan.split_by_group)
+        target_sheets = self._allocate_target_sheets(
+            tuple(employee_groups), request, template_sheets
+        )
         unmatched: list[UnmatchedAttendance] = []
-        symbols: list[tuple[str, ...]] = []
         counts: Counter[str] = Counter()
+        prepared_groups: list[PreparedGroup] = []
+        try:
+            for group_name, employees in employee_groups.items():
+                group_source = SourceAttendance(tuple(employees), source.department)
+                symbols = self._classify_group(group_source, compiled, counts, unmatched)
+                detail_sheet, summary_sheet = target_sheets[group_name]
+                mapping_values = self._group_mapping_values(
+                    request,
+                    group_source,
+                    group_name,
+                    detail_sheet,
+                    summary_sheet,
+                    context.day_count,
+                )
+                prepared_groups.append(
+                    PreparedGroup(
+                        attendance_group=group_name,
+                        source=group_source,
+                        symbols=symbols,
+                        detail_sheet=detail_sheet,
+                        summary_sheet=summary_sheet,
+                        mapping_values=mapping_values,
+                    )
+                )
+            global_mapping_values = self._global_mapping_values(request, source, context.day_count)
+        except ValueError as exc:
+            raise AttendanceError(str(exc)) from exc
+
+        group_counts = (
+            {name: len(employees) for name, employees in employee_groups.items()}
+            if request.plan.split_by_group
+            else {}
+        )
+        preview = AttendancePreview(
+            employee_count=len(source.employees),
+            day_count=context.day_count,
+            extra_employee_rows=sum(
+                max(0, len(employees) - BASE_EMPLOYEE_ROWS)
+                for employees in employee_groups.values()
+            ),
+            date_column_delta=context.day_count - BASE_DATE_COLUMNS,
+            status_counts=dict(counts),
+            unmatched=tuple(unmatched),
+            group_counts=group_counts,
+            target_sheets=target_sheets if request.plan.split_by_group else {},
+        )
+        return PreparedAttendance(
+            groups=tuple(prepared_groups),
+            preview=preview,
+            global_mapping_values=global_mapping_values,
+        )
+
+    @staticmethod
+    def _partition_employees(
+        source: SourceAttendance, split_by_group: bool
+    ) -> dict[str, list[EmployeeAttendance]]:
+        if not split_by_group:
+            return {"": list(source.employees)}
+        groups: dict[str, list[EmployeeAttendance]] = {}
+        for employee in source.employees:
+            group_name = employee.attendance_group.strip()
+            if not group_name:
+                raise AttendanceError(f"员工“{employee.name}”缺少考勤组")
+            groups.setdefault(group_name, []).append(employee)
+        return groups
+
+    @staticmethod
+    def _classify_group(
+        source: SourceAttendance,
+        compiled: tuple[tuple[re.Pattern[str], str], ...],
+        counts: Counter[str],
+        unmatched: list[UnmatchedAttendance],
+    ) -> tuple[tuple[str, ...], ...]:
+        symbols: list[tuple[str, ...]] = []
         for employee in source.employees:
             row: list[str] = []
             for day, raw in enumerate(employee.records, start=1):
                 symbol = classify(raw, compiled)
                 if symbol is None:
-                    unmatched.append(UnmatchedAttendance(employee.name, day, raw))
+                    unmatched.append(
+                        UnmatchedAttendance(
+                            employee.name,
+                            day,
+                            raw,
+                            employee.attendance_group.strip(),
+                        )
+                    )
                     row.append("")
                     continue
                 row.append(symbol)
                 counts[symbol or "空白"] += 1
             symbols.append(tuple(row))
+        return tuple(symbols)
 
-        mapping_values: list[tuple[str, CellRef, str]] = []
-        try:
-            for mapping in request.plan.mappings:
-                mapping_values.append(
-                    (
-                        mapping.sheet_name,
-                        mapping.cell,
-                        render_content(
-                            mapping.content_template,
-                            year=request.year,
-                            month=request.month,
-                            last_day=context.day_count,
-                            department=source.department,
-                        ),
-                    )
+    @classmethod
+    def _allocate_target_sheets(
+        cls,
+        group_names: tuple[str, ...],
+        request: AttendanceRequest,
+        template_sheets: tuple[str, ...],
+    ) -> dict[str, tuple[str, str]]:
+        target = request.plan.target
+        if not request.plan.split_by_group:
+            return {"": (target.detail_sheet, target.summary_sheet)}
+        reserved = {name.casefold() for name in template_sheets}
+        result: dict[str, tuple[str, str]] = {}
+        for group_name in group_names:
+            detail = cls._unique_sheet_name(f"{target.detail_sheet}-{group_name}", reserved)
+            summary = cls._unique_sheet_name(f"{target.summary_sheet}-{group_name}", reserved)
+            result[group_name] = (detail, summary)
+        return result
+
+    @staticmethod
+    def _unique_sheet_name(preferred: str, reserved: set[str]) -> str:
+        cleaned = _INVALID_SHEET_CHARS_RE.sub("_", preferred).strip().strip("'") or "未命名组"
+        candidate = cleaned[:31]
+        suffix = 2
+        while candidate.casefold() in reserved:
+            tail = f" ({suffix})"
+            candidate = f"{cleaned[: 31 - len(tail)]}{tail}"
+            suffix += 1
+        reserved.add(candidate.casefold())
+        return candidate
+
+    @staticmethod
+    def _render_mapping(
+        mapping: CellMapping,
+        request: AttendanceRequest,
+        department: str,
+        attendance_group: str,
+        day_count: int,
+        sheet_name: str,
+    ) -> tuple[str, CellRef, str]:
+        return (
+            sheet_name,
+            mapping.cell,
+            render_content(
+                mapping.content_template,
+                year=request.year,
+                month=request.month,
+                last_day=day_count,
+                department=department,
+                attendance_group=attendance_group,
+            ),
+        )
+
+    @classmethod
+    def _group_mapping_values(
+        cls,
+        request: AttendanceRequest,
+        source: SourceAttendance,
+        group_name: str,
+        detail_sheet: str,
+        summary_sheet: str,
+        day_count: int,
+    ) -> tuple[tuple[str, CellRef, str], ...]:
+        base_sheets = {
+            request.plan.target.detail_sheet.casefold(): detail_sheet,
+            request.plan.target.summary_sheet.casefold(): summary_sheet,
+        }
+        values = []
+        for mapping in request.plan.mappings:
+            mapping_sheet = mapping.sheet_name.casefold()
+            if mapping_sheet not in base_sheets:
+                continue
+            sheet_name = base_sheets[mapping_sheet]
+            values.append(
+                cls._render_mapping(
+                    mapping,
+                    request,
+                    source.department,
+                    group_name,
+                    day_count,
+                    sheet_name,
                 )
-        except ValueError as exc:
-            raise AttendanceError(str(exc)) from exc
+            )
+        return tuple(values)
 
-        preview = AttendancePreview(
-            employee_count=len(source.employees),
-            day_count=context.day_count,
-            extra_employee_rows=max(0, len(source.employees) - BASE_EMPLOYEE_ROWS),
-            date_column_delta=context.day_count - BASE_DATE_COLUMNS,
-            status_counts=dict(counts),
-            unmatched=tuple(unmatched),
-        )
-        return PreparedAttendance(
-            source=source,
-            symbols=tuple(symbols),
-            preview=preview,
-            mapping_values=tuple(mapping_values),
-        )
+    @classmethod
+    def _global_mapping_values(
+        cls, request: AttendanceRequest, source: SourceAttendance, day_count: int
+    ) -> tuple[tuple[str, CellRef, str], ...]:
+        base_sheets = {
+            request.plan.target.detail_sheet.casefold(),
+            request.plan.target.summary_sheet.casefold(),
+        }
+        values = []
+        for mapping in request.plan.mappings:
+            if mapping.sheet_name.casefold() in base_sheets:
+                continue
+            if request.plan.split_by_group and "{{attendance_group}}" in mapping.content_template:
+                raise ValueError("非分组工作表的固定映射不能使用 {{attendance_group}}")
+            values.append(
+                cls._render_mapping(
+                    mapping,
+                    request,
+                    source.department,
+                    "",
+                    day_count,
+                    mapping.sheet_name,
+                )
+            )
+        return tuple(values)
 
     @staticmethod
     def _validate_request(request: AttendanceRequest) -> _RunContext:
@@ -229,6 +401,8 @@ class AttendanceService:
         }
         if len(resolved) != 3:
             raise AttendanceError("输出文件不能与原始考勤或模板相同")
+        if request.plan.split_by_group and request.plan.source.attendance_group_start is None:
+            raise AttendanceError("按考勤组拆分时必须配置源考勤组起始单元格")
         return _RunContext(request, day_count)
 
     @staticmethod

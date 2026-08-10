@@ -78,12 +78,14 @@ class AttendanceTab(QWidget):
         self.ui.edit_source_sheet.setText("Sheet1")
         self.ui.edit_source_name.setText("A2")
         self.ui.edit_source_department.setText("C2")
+        self.ui.edit_source_group.setText("B2")
         self.ui.edit_source_detail.setText("G2")
         self.ui.edit_detail_sheet.setText("出勤明细")
         self.ui.edit_detail_name.setText("C7")
         self.ui.edit_detail_matrix.setText("D7")
         self.ui.edit_summary_sheet.setText("考勤汇总表")
         self.ui.edit_summary_name.setText("C8")
+        self.ui.chk_split_groups.setChecked(True)
         self._set_rules(default_rules())
 
     def _connect(self) -> None:
@@ -112,6 +114,7 @@ class AttendanceTab(QWidget):
             self.ui.edit_source_sheet,
             self.ui.edit_source_name,
             self.ui.edit_source_department,
+            self.ui.edit_source_group,
             self.ui.edit_source_detail,
             self.ui.edit_detail_sheet,
             self.ui.edit_detail_name,
@@ -124,6 +127,7 @@ class AttendanceTab(QWidget):
         self.ui.spin_month.valueChanged.connect(self._invalidate_preview)
         self.ui.table_mappings.cellChanged.connect(self._invalidate_preview)
         self.ui.table_rules.cellChanged.connect(self._invalidate_preview)
+        self.ui.chk_split_groups.toggled.connect(self._invalidate_preview)
 
     def _browse_source(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择原始考勤", "", "Excel (*.xlsx)")
@@ -212,12 +216,18 @@ class AttendanceTab(QWidget):
             self.ui.edit_source_sheet.setText(plan.source.sheet_name)
             self.ui.edit_source_name.setText(plan.source.name_start.address)
             self.ui.edit_source_department.setText(plan.source.department_start.address)
+            self.ui.edit_source_group.setText(
+                plan.source.attendance_group_start.address
+                if plan.source.attendance_group_start is not None
+                else "B2"
+            )
             self.ui.edit_source_detail.setText(plan.source.detail_start.address)
             self.ui.edit_detail_sheet.setText(plan.target.detail_sheet)
             self.ui.edit_detail_name.setText(plan.target.detail_name_start.address)
             self.ui.edit_detail_matrix.setText(plan.target.detail_matrix_start.address)
             self.ui.edit_summary_sheet.setText(plan.target.summary_sheet)
             self.ui.edit_summary_name.setText(plan.target.summary_name_start.address)
+            self.ui.chk_split_groups.setChecked(plan.split_by_group)
             self._set_mappings(plan.mappings)
             self._set_rules(plan.rules)
         finally:
@@ -239,6 +249,7 @@ class AttendanceTab(QWidget):
                 CellRef.parse(self.ui.edit_source_name.text()),
                 CellRef.parse(self.ui.edit_source_department.text()),
                 CellRef.parse(self.ui.edit_source_detail.text()),
+                CellRef.parse(self.ui.edit_source_group.text()),
             ),
             target=TargetLayout(
                 self._required_text(self.ui.edit_detail_sheet.text(), "明细 Sheet 名"),
@@ -249,6 +260,7 @@ class AttendanceTab(QWidget):
             ),
             mappings=self._mappings(),
             rules=self._rules(),
+            split_by_group=self.ui.chk_split_groups.isChecked(),
         )
 
     def _build_request(self, *, allow_overwrite: bool = False) -> AttendanceRequest:
@@ -450,17 +462,25 @@ class AttendanceTab(QWidget):
     def _show_preview(self, result: AttendancePreview) -> None:
         direction = "增加" if result.date_column_delta >= 0 else "删除"
         counts = "，".join(f"{key} {value}" for key, value in result.status_counts.items()) or "无"
+        group_text = ""
+        if result.group_counts:
+            groups = "，".join(
+                f"{name} {count} 人→{result.target_sheets[name][0]}/{result.target_sheets[name][1]}"
+                for name, count in result.group_counts.items()
+            )
+            group_text = f"考勤组：{groups}；"
         self.ui.lbl_preview.setText(
             f"员工 {result.employee_count} 人；本月 {result.day_count} 天；"
             f"{direction}日期列 {abs(result.date_column_delta)}；"
             f"新增员工行 {result.extra_employee_rows}；判定：{counts}；"
-            f"未匹配 {len(result.unmatched)} 条。"
+            f"{group_text}未匹配 {len(result.unmatched)} 条。"
         )
         self.ui.table_unmatched.setRowCount(len(result.unmatched))
         for row, item in enumerate(result.unmatched):
             self.ui.table_unmatched.setItem(row, 0, QTableWidgetItem(item.employee))
-            self.ui.table_unmatched.setItem(row, 1, QTableWidgetItem(str(item.day)))
-            self.ui.table_unmatched.setItem(row, 2, QTableWidgetItem(item.raw))
+            self.ui.table_unmatched.setItem(row, 1, QTableWidgetItem(item.attendance_group))
+            self.ui.table_unmatched.setItem(row, 2, QTableWidgetItem(str(item.day)))
+            self.ui.table_unmatched.setItem(row, 3, QTableWidgetItem(item.raw))
 
     def _on_generate_ok(self, result: object) -> None:
         if not isinstance(result, AttendanceResult):

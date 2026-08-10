@@ -17,6 +17,8 @@ from file_toolbox.core.attendance.types import (
     AttendancePlan,
     CellRef,
     EmployeeAttendance,
+    PreparedAttendance,
+    PreparedGroup,
     SourceAttendance,
     SourceLayout,
 )
@@ -31,7 +33,7 @@ MAX_EMPLOYEES = 1000
 class AttendanceExcelAdapter(Protocol):
     """AttendanceService 的内部 Excel seam。"""
 
-    def validate_template(self, template_path: Path, plan: AttendancePlan) -> None: ...
+    def validate_template(self, template_path: Path, plan: AttendancePlan) -> tuple[str, ...]: ...
 
     def read_source(
         self,
@@ -45,10 +47,7 @@ class AttendanceExcelAdapter(Protocol):
         self,
         staging_path: Path,
         plan: AttendancePlan,
-        source: SourceAttendance,
-        symbols: tuple[tuple[str, ...], ...],
-        mapping_values: tuple[tuple[str, CellRef, str], ...],
-        day_count: int,
+        prepared: PreparedAttendance,
         cancel_check: CancelCheck | None = None,
     ) -> None: ...
 
@@ -56,7 +55,7 @@ class AttendanceExcelAdapter(Protocol):
 class ExcelComAdapter:
     """通过隔离 Microsoft Excel COM 会话读源并写模板副本。"""
 
-    def validate_template(self, template_path: Path, plan: AttendancePlan) -> None:
+    def validate_template(self, template_path: Path, plan: AttendancePlan) -> tuple[str, ...]:
         with _excel_workbook(template_path, read_only=True) as (_, workbook):
             detail = workbook.Worksheets(plan.target.detail_sheet)
             summary = workbook.Worksheets(plan.target.summary_sheet)
@@ -72,6 +71,10 @@ class ExcelComAdapter:
             ).Formula
             if not isinstance(formula, str) or not formula.startswith("="):
                 raise ValueError("模板汇总区域结构不符: 姓名右侧第二列应包含汇总公式")
+            return tuple(
+                str(workbook.Worksheets(index).Name)
+                for index in range(1, int(workbook.Worksheets.Count) + 1)
+            )
 
     def read_source(
         self,
@@ -105,7 +108,15 @@ class ExcelComAdapter:
                     )
                     for day in range(day_count)
                 )
-                employees.append(EmployeeAttendance(name, department, records))
+                attendance_group = ""
+                if layout.attendance_group_start is not None:
+                    attendance_group = _cell_text(
+                        sheet.Cells(
+                            layout.attendance_group_start.row + offset,
+                            layout.attendance_group_start.column,
+                        ).Value
+                    )
+                employees.append(EmployeeAttendance(name, department, records, attendance_group))
             else:
                 raise ValueError(f"员工数超过安全上限 {MAX_EMPLOYEES}")
 
@@ -121,38 +132,98 @@ class ExcelComAdapter:
         self,
         staging_path: Path,
         plan: AttendancePlan,
-        source: SourceAttendance,
-        symbols: tuple[tuple[str, ...], ...],
-        mapping_values: tuple[tuple[str, CellRef, str], ...],
-        day_count: int,
+        prepared: PreparedAttendance,
         cancel_check: CancelCheck | None = None,
     ) -> None:
         with _excel_workbook(staging_path, read_only=False) as (app, workbook):
             app.ScreenUpdating = False
             if bool(workbook.ReadOnly):
                 raise ValueError("Excel 以只读方式打开了结果副本")
-            detail = workbook.Worksheets(plan.target.detail_sheet)
-            summary = workbook.Worksheets(plan.target.summary_sheet)
-
             _raise_if_cancelled(cancel_check)
-            _adjust_date_columns(detail, plan.target.detail_matrix_start, day_count)
-            extra_rows = max(0, len(source.employees) - BASE_EMPLOYEE_ROWS)
-            _expand_employee_rows(detail, plan.target.detail_name_start.row, extra_rows)
-            _expand_employee_rows(summary, plan.target.summary_name_start.row, extra_rows)
-
-            _raise_if_cancelled(cancel_check)
-            _write_names(detail, plan.target.detail_name_start, source)
-            _write_names(summary, plan.target.summary_name_start, source)
-            _write_symbols(detail, plan.target.detail_matrix_start, symbols)
-            _write_day_labels(detail, plan.target.detail_matrix_start, day_count)
-            for sheet_name, cell_ref, value in mapping_values:
+            sheets = _prepare_group_sheets(workbook, plan, prepared.groups)
+            for group, detail, summary in sheets:
+                _raise_if_cancelled(cancel_check)
+                _write_group(detail, summary, plan, group, prepared.preview.day_count)
+            for sheet_name, cell_ref, value in prepared.global_mapping_values:
                 sheet = workbook.Worksheets(sheet_name)
                 _write_mapping(sheet, cell_ref, value)
-
-            _verify_summary_formula(summary, plan, day_count)
             _raise_if_cancelled(cancel_check)
             app.CalculateFullRebuild()
             workbook.Save()
+
+
+def _prepare_group_sheets(
+    workbook: Any,
+    plan: AttendancePlan,
+    groups: tuple[PreparedGroup, ...],
+) -> tuple[tuple[PreparedGroup, Any, Any], ...]:
+    base_detail = workbook.Worksheets(plan.target.detail_sheet)
+    base_summary = workbook.Worksheets(plan.target.summary_sheet)
+    if (
+        len(groups) == 1
+        and groups[0].detail_sheet == plan.target.detail_sheet
+        and groups[0].summary_sheet == plan.target.summary_sheet
+    ):
+        return ((groups[0], base_detail, base_summary),)
+
+    result: list[tuple[PreparedGroup, Any, Any]] = []
+    for group in groups:
+        detail = _copy_worksheet(workbook, base_detail, group.detail_sheet)
+        summary = _copy_worksheet(workbook, base_summary, group.summary_sheet)
+        _replace_sheet_references(summary, plan.target.detail_sheet, group.detail_sheet)
+        result.append((group, detail, summary))
+    base_summary.Delete()
+    base_detail.Delete()
+    return tuple(result)
+
+
+def _copy_worksheet(workbook: Any, source: Any, name: str) -> Any:
+    source.Copy(None, workbook.Sheets(workbook.Sheets.Count))
+    copied = workbook.Sheets(workbook.Sheets.Count)
+    copied.Name = name
+    return copied
+
+
+def _replace_sheet_references(sheet: Any, old_name: str, new_name: str) -> None:
+    quoted_old = f"'{old_name.replace(chr(39), chr(39) * 2)}'!"
+    quoted_new = f"'{new_name.replace(chr(39), chr(39) * 2)}'!"
+    for old_reference in (quoted_old, f"{old_name}!"):
+        sheet.Cells.Replace(
+            What=old_reference,
+            Replacement=quoted_new,
+            LookAt=2,
+            SearchOrder=1,
+            MatchCase=False,
+        )
+
+
+def _write_group(
+    detail: Any,
+    summary: Any,
+    plan: AttendancePlan,
+    group: PreparedGroup,
+    day_count: int,
+) -> None:
+    _adjust_date_columns(detail, plan.target.detail_matrix_start, day_count)
+    extra_rows = max(0, len(group.source.employees) - BASE_EMPLOYEE_ROWS)
+    _expand_employee_rows(detail, plan.target.detail_name_start.row, extra_rows)
+    _expand_employee_rows(summary, plan.target.summary_name_start.row, extra_rows)
+    _write_names(detail, plan.target.detail_name_start, group.source)
+    _write_names(summary, plan.target.summary_name_start, group.source)
+    _write_symbols(detail, plan.target.detail_matrix_start, group.symbols)
+    _write_day_labels(detail, plan.target.detail_matrix_start, day_count)
+    for sheet_name, cell_ref, value in group.mapping_values:
+        target = detail if sheet_name == group.detail_sheet else summary
+        if sheet_name not in {group.detail_sheet, group.summary_sheet}:
+            raise ValueError(f"分组映射目标工作表无效: {sheet_name}")
+        _write_mapping(target, cell_ref, value)
+    _verify_summary_formula(
+        summary,
+        group.detail_sheet,
+        plan.target.detail_matrix_start,
+        plan.target.summary_name_start,
+        day_count,
+    )
 
 
 def _open_workbook(app: Any, path: Path, *, read_only: bool) -> Any:
@@ -267,16 +338,22 @@ def _write_mapping(sheet: Any, cell_ref: CellRef, value: str) -> None:
     cell.Value = value
 
 
-def _verify_summary_formula(summary: Any, plan: AttendancePlan, day_count: int) -> None:
+def _verify_summary_formula(
+    summary: Any,
+    detail_sheet_name: str,
+    detail_matrix_start: CellRef,
+    summary_name_start: CellRef,
+    day_count: int,
+) -> None:
     formula = summary.Cells(
-        plan.target.summary_name_start.row,
-        plan.target.summary_name_start.column + 2,
+        summary_name_start.row,
+        summary_name_start.column + 2,
     ).Formula
-    start = plan.target.detail_matrix_start
+    start = detail_matrix_start
     end = start.offset(columns=day_count - 1)
     if not isinstance(formula, str) or not _formula_contains_range(
         formula,
-        plan.target.detail_sheet,
+        detail_sheet_name,
         start.address,
         end.address,
     ):

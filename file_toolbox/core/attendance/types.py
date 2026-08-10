@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
+_PLAN_SCHEMA_VERSION = 2
 
 
 def _column_number(letters: str) -> int:
@@ -60,6 +61,7 @@ class SourceLayout:
     name_start: CellRef
     department_start: CellRef
     detail_start: CellRef
+    attendance_group_start: CellRef | None = None
 
 
 @dataclass(frozen=True)
@@ -106,7 +108,8 @@ class AttendancePlan:
     target: TargetLayout
     mappings: tuple[CellMapping, ...] = ()
     rules: tuple[AttendanceRule, ...] = field(default_factory=default_rules)
-    schema_version: int = 1
+    schema_version: int = _PLAN_SCHEMA_VERSION
+    split_by_group: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,7 @@ class EmployeeAttendance:
     name: str
     department: str
     records: tuple[str, ...]
+    attendance_group: str = ""
 
 
 @dataclass(frozen=True)
@@ -137,6 +141,7 @@ class UnmatchedAttendance:
     employee: str
     day: int
     raw: str
+    attendance_group: str = ""
 
 
 @dataclass(frozen=True)
@@ -147,6 +152,8 @@ class AttendancePreview:
     date_column_delta: int
     status_counts: Mapping[str, int]
     unmatched: tuple[UnmatchedAttendance, ...]
+    group_counts: Mapping[str, int] = field(default_factory=dict)
+    target_sheets: Mapping[str, tuple[str, str]] = field(default_factory=dict)
 
     @property
     def can_generate(self) -> bool:
@@ -160,14 +167,25 @@ class AttendanceResult:
     day_count: int
     status_counts: Mapping[str, int]
     warnings: tuple[str, ...] = ()
+    group_counts: Mapping[str, int] = field(default_factory=dict)
+    target_sheets: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PreparedGroup:
+    attendance_group: str
+    source: SourceAttendance
+    symbols: tuple[tuple[str, ...], ...]
+    detail_sheet: str
+    summary_sheet: str
+    mapping_values: tuple[tuple[str, CellRef, str], ...]
 
 
 @dataclass(frozen=True)
 class PreparedAttendance:
-    source: SourceAttendance
-    symbols: tuple[tuple[str, ...], ...]
+    groups: tuple[PreparedGroup, ...]
     preview: AttendancePreview
-    mapping_values: tuple[tuple[str, CellRef, str], ...]
+    global_mapping_values: tuple[tuple[str, CellRef, str], ...]
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:
@@ -192,7 +210,7 @@ def _text(data: Mapping[str, object], key: str) -> str:
 def plan_to_dict(plan: AttendancePlan) -> dict[str, object]:
     """把方案转换为可 JSON 序列化对象。"""
     return {
-        "schema_version": plan.schema_version,
+        "schema_version": _PLAN_SCHEMA_VERSION,
         "name": plan.name,
         "template_path": str(plan.template_path),
         "source": {
@@ -200,6 +218,11 @@ def plan_to_dict(plan: AttendancePlan) -> dict[str, object]:
             "name_start": plan.source.name_start.address,
             "department_start": plan.source.department_start.address,
             "detail_start": plan.source.detail_start.address,
+            "attendance_group_start": (
+                plan.source.attendance_group_start.address
+                if plan.source.attendance_group_start is not None
+                else None
+            ),
         },
         "target": {
             "detail_sheet": plan.target.detail_sheet,
@@ -220,6 +243,7 @@ def plan_to_dict(plan: AttendancePlan) -> dict[str, object]:
             {"pattern": rule.pattern, "output": rule.output, "enabled": rule.enabled}
             for rule in plan.rules
         ],
+        "split_by_group": plan.split_by_group,
     }
 
 
@@ -227,10 +251,16 @@ def plan_from_dict(value: object) -> AttendancePlan:
     """严格解析持久化方案。"""
     data = _mapping(value, "方案")
     version = data.get("schema_version")
-    if version != 1:
+    if version not in {1, _PLAN_SCHEMA_VERSION}:
         raise ValueError("不支持的考勤方案版本")
     source_data = _mapping(data.get("source"), "source")
     target_data = _mapping(data.get("target"), "target")
+    split_by_group = data.get("split_by_group", False) if version == 2 else False
+    if not isinstance(split_by_group, bool):
+        raise ValueError("split_by_group 必须是布尔值")
+    group_start_value = source_data.get("attendance_group_start") if version == 2 else None
+    if group_start_value is not None and not isinstance(group_start_value, str):
+        raise ValueError("attendance_group_start 必须是单元格地址或 null")
 
     mappings: list[CellMapping] = []
     for item in _sequence(data.get("mappings", []), "mappings"):
@@ -265,6 +295,9 @@ def plan_from_dict(value: object) -> AttendancePlan:
             name_start=CellRef.parse(_text(source_data, "name_start")),
             department_start=CellRef.parse(_text(source_data, "department_start")),
             detail_start=CellRef.parse(_text(source_data, "detail_start")),
+            attendance_group_start=(
+                CellRef.parse(group_start_value) if group_start_value is not None else None
+            ),
         ),
         target=TargetLayout(
             detail_sheet=_text(target_data, "detail_sheet"),
@@ -275,5 +308,6 @@ def plan_from_dict(value: object) -> AttendancePlan:
         ),
         mappings=tuple(mappings),
         rules=tuple(rules),
-        schema_version=1,
+        split_by_group=split_by_group,
+        schema_version=_PLAN_SCHEMA_VERSION,
     )

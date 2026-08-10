@@ -1,16 +1,24 @@
 """Microsoft Excel COM adapter 控制流测试，不启动真实 Excel。"""
 
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from file_toolbox.core.attendance.excel import ExcelComAdapter
+from file_toolbox.core.attendance.excel import (
+    ExcelComAdapter,
+    _copy_worksheet,
+    _prepare_group_sheets,
+)
 from file_toolbox.core.attendance.types import (
     AttendancePlan,
+    AttendancePreview,
     CellMapping,
     CellRef,
     EmployeeAttendance,
+    PreparedAttendance,
+    PreparedGroup,
     SourceAttendance,
     SourceLayout,
     TargetLayout,
@@ -50,6 +58,35 @@ def _patch_excel(monkeypatch, workbook):
     return app
 
 
+def _prepared(
+    source: SourceAttendance,
+    symbols: tuple[tuple[str, ...], ...],
+    day_count: int,
+    mappings: tuple[tuple[str, CellRef, str], ...] = (),
+) -> PreparedAttendance:
+    return PreparedAttendance(
+        groups=(
+            PreparedGroup(
+                "",
+                source,
+                symbols,
+                "出勤明细",
+                "考勤汇总表",
+                mappings,
+            ),
+        ),
+        preview=AttendancePreview(
+            len(source.employees),
+            day_count,
+            max(0, len(source.employees) - 15),
+            day_count - 30,
+            {},
+            (),
+        ),
+        global_mapping_values=(),
+    )
+
+
 def test_validate_template_checks_target_sheets_and_formula(monkeypatch, tmp_path):
     plan = _plan()
     detail = MagicMock()
@@ -57,7 +94,11 @@ def test_validate_template_checks_target_sheets_and_formula(monkeypatch, tmp_pat
     detail.Cells.return_value = _cell(value=1)
     summary.Cells.return_value = _cell(formula='=COUNTIF(出勤明细!D7:AG7,"√")')
     workbook = MagicMock()
-    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    sheets = {"出勤明细": detail, "考勤汇总表": summary, 1: detail, 2: summary}
+    detail.Name = "出勤明细"
+    summary.Name = "考勤汇总表"
+    workbook.Worksheets.Count = 2
+    workbook.Worksheets.side_effect = sheets.__getitem__
     app = _patch_excel(monkeypatch, workbook)
 
     ExcelComAdapter().validate_template(tmp_path / "template.xlsx", plan)
@@ -83,9 +124,13 @@ def test_validate_template_rejects_wrong_date_header(monkeypatch, tmp_path):
 
 
 def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch, tmp_path):
-    plan = _plan()
+    plan = replace(
+        _plan(),
+        source=replace(_plan().source, attendance_group_start=CellRef.parse("B2")),
+    )
     values = {
         (2, 1): "张三",
+        (2, 2): "售后组",
         (2, 3): "市场部",
         (2, 7): "正常",
         (2, 8): "出差",
@@ -101,6 +146,7 @@ def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch
 
     assert source.department == "市场部"
     assert source.employees[0].records == ("正常", "出差")
+    assert source.employees[0].attendance_group == "售后组"
     workbook.Worksheets.assert_called_once_with("Sheet1")
     workbook.Close.assert_called_once_with(SaveChanges=False)
     app.Quit.assert_called_once_with()
@@ -154,14 +200,13 @@ def test_write_output_adjusts_columns_rows_and_saves(
     )
     symbols = tuple(tuple("√" for _ in range(day_count)) for _ in range(16))
 
-    ExcelComAdapter().write_output(
-        tmp_path / "staging.xlsx",
-        plan,
+    prepared = _prepared(
         source,
         symbols,
-        (("出勤明细", CellRef.parse("A3"), "标题"),),
         day_count,
+        (("出勤明细", CellRef.parse("A3"), "标题"),),
     )
+    ExcelComAdapter().write_output(tmp_path / "staging.xlsx", plan, prepared)
 
     target_method = getattr(column_mocks[column], method)
     assert target_method.call_count == calls
@@ -193,10 +238,7 @@ def test_write_output_save_failure_still_closes_excel(monkeypatch, tmp_path):
         ExcelComAdapter().write_output(
             tmp_path / "staging.xlsx",
             plan,
-            source,
-            (tuple("√" for _ in range(30)),),
-            (),
-            30,
+            _prepared(source, (tuple("√" for _ in range(30)),), 30),
         )
 
     workbook.Close.assert_called_once_with(SaveChanges=False)
@@ -228,10 +270,7 @@ def test_write_output_cleanup_failure_is_propagated(monkeypatch, tmp_path, failu
         ExcelComAdapter().write_output(
             tmp_path / "staging.xlsx",
             plan,
-            source,
-            (tuple("√" for _ in range(30)),),
-            (),
-            30,
+            _prepared(source, (tuple("√" for _ in range(30)),), 30),
         )
 
     workbook.Save.assert_called_once_with()
@@ -261,8 +300,68 @@ def test_write_output_rejects_final_column_only_in_unrelated_formula_position(
         ExcelComAdapter().write_output(
             tmp_path / "staging.xlsx",
             plan,
-            source,
-            (tuple("√" for _ in range(31)),),
-            (),
-            31,
+            _prepared(source, (tuple("√" for _ in range(31)),), 31),
         )
+
+
+def test_prepare_group_sheets_copies_pairs_rebinds_formulas_and_deletes_bases(monkeypatch):
+    plan = _plan()
+    base_detail = MagicMock(name="base_detail")
+    base_summary = MagicMock(name="base_summary")
+    group_detail_a = MagicMock(name="group_detail_a")
+    group_summary_a = MagicMock(name="group_summary_a")
+    group_detail_b = MagicMock(name="group_detail_b")
+    group_summary_b = MagicMock(name="group_summary_b")
+    workbook = MagicMock()
+    workbook.Worksheets.side_effect = {
+        "出勤明细": base_detail,
+        "考勤汇总表": base_summary,
+    }.__getitem__
+    copied = {
+        "出勤明细-A": group_detail_a,
+        "考勤汇总表-A": group_summary_a,
+        "出勤明细-B": group_detail_b,
+        "考勤汇总表-B": group_summary_b,
+    }
+    copy_calls = []
+
+    def fake_copy(_workbook, source, name):
+        copy_calls.append((source, name))
+        return copied[name]
+
+    monkeypatch.setattr("file_toolbox.core.attendance.excel._copy_worksheet", fake_copy)
+    source = SourceAttendance((EmployeeAttendance("张三", "市场部", ("正常",), "A"),), "市场部")
+    groups = (
+        PreparedGroup("A", source, (("√",),), "出勤明细-A", "考勤汇总表-A", ()),
+        PreparedGroup("B", source, (("√",),), "出勤明细-B", "考勤汇总表-B", ()),
+    )
+
+    result = _prepare_group_sheets(workbook, plan, groups)
+
+    assert [name for _, name in copy_calls] == [
+        "出勤明细-A",
+        "考勤汇总表-A",
+        "出勤明细-B",
+        "考勤汇总表-B",
+    ]
+    assert result[0] == (groups[0], group_detail_a, group_summary_a)
+    assert group_summary_a.Cells.Replace.call_count == 2
+    assert group_summary_b.Cells.Replace.call_count == 2
+    base_summary.Delete.assert_called_once_with()
+    base_detail.Delete.assert_called_once_with()
+
+
+def test_copy_worksheet_uses_positional_after_argument_for_dynamic_com():
+    workbook = MagicMock()
+    workbook.Sheets.Count = 4
+    last_sheet = MagicMock(name="last_sheet")
+    copied = MagicMock(name="copied")
+    workbook.Sheets.side_effect = {4: last_sheet, 5: copied}.__getitem__
+    source = MagicMock()
+    source.Copy.side_effect = lambda *_args: setattr(workbook.Sheets, "Count", 5)
+
+    result = _copy_worksheet(workbook, source, "分组明细")
+
+    source.Copy.assert_called_once_with(None, last_sheet)
+    assert result is copied
+    assert copied.Name == "分组明细"
