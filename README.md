@@ -1,191 +1,144 @@
+<div align="center">
+
 # File Toolbox
 
-批量文件工具箱,提供 5 个常用文件批处理功能,带命令行(CLI)和图形界面(GUI)。
+**安全、可预览、可追溯的桌面文件批处理工具箱**
 
-| 功能 | 说明 | 平台要求 |
-|---|---|---|
-| **批量重命名** | 前缀/后缀/替换/正则/序号/删除/日期,可组合 | 全平台 |
-| **批量建文件夹** | 从粘贴的 Excel 表格或层级列表批量创建目录结构 | 全平台 |
-| **批量生成 PDF** | Word/Excel/PPT/图片 → PDF,可合并、可转图片型 | Word/Excel/PPT 需 Windows + Office |
-| **批量替换** | Word/Excel/txt 文档内容批量替换(简单+正则),自动备份 | Word/Excel 需 Windows + Office |
-| **发票识别** | 电子发票(PDF/OFD/XML)→ Excel(双 Sheet)/JSON,按发票号码去重 | 需 `pip install 'file-toolbox[invoice]'` |
+[![CI](https://github.com/FelixJI/file-toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/FelixJI/file-toolbox/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/FelixJI/file-toolbox?display_name=tag)](https://github.com/FelixJI/file-toolbox/releases/latest)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![License](https://img.shields.io/github/license/FelixJI/file-toolbox)](LICENSE)
 
-## 安装
+[下载](#下载与使用) · [功能](#主要功能) · [开发](#从源码运行) · [源码导读](SOURCE_READING_GUIDE.md) · [贡献](#参与贡献)
 
-```bash
-git clone <repo-url> file-toolbox
+</div>
+
+File Toolbox 把批量重命名、目录创建、图片转 PDF、文本整理，以及 Windows 上的
+Word / Excel / PowerPoint 转换集中到同一个 CLI 与 PySide6 桌面界面中。所有会修改文件的
+CLI 命令默认只预览计划，只有显式传入 `--yes` 才会执行。
+
+> [!IMPORTANT]
+> Word、Excel 和 PowerPoint 转换依赖 Windows 与对应的 Microsoft Office；其余功能可在
+> Windows、macOS 和 Linux 上使用。
+
+## 主要功能
+
+| 能力 | CLI | GUI | 说明 |
+| --- | :---: | :---: | --- |
+| 批量重命名 | ✓ | ✓ | 规则预览、冲突检测、历史与恢复 |
+| 批量创建目录 | ✓ | ✓ | 从文本或表格生成目录结构 |
+| 图片合并为 PDF | ✓ | ✓ | 支持排序与基础输出设置 |
+| 文本批处理 | ✓ | ✓ | 编码、合并、拆分等常用操作 |
+| Office 格式转换 | ✓ | ✓ | 仅 Windows + Microsoft Office |
+
+## 下载与使用
+
+### 使用发布包
+
+1. 从 [Releases](https://github.com/FelixJI/file-toolbox/releases/latest) 下载最新的
+   `FileToolbox-*-win64.zip` 及对应校验文件。
+2. 校验 SHA-256 后解压 ZIP。
+3. 运行包内桌面程序，或在终端使用随包提供的 CLI。
+
+PowerShell 校验示例：
+
+```powershell
+Get-FileHash .\FileToolbox-*-win64.zip -Algorithm SHA256
+```
+
+### 从源码运行
+
+需要 [uv](https://docs.astral.sh/uv/) 与仓库锁定的 Python 版本：
+
+```powershell
+git clone https://github.com/FelixJI/file-toolbox.git
 cd file-toolbox
-pip install -e .
-# 带 GUI:
-pip install -e ".[gui]"
-# 带发票识别:
-pip install -e ".[invoice]"
+uv sync --frozen --all-extras
+uv run file-toolbox --help
+uv run file-toolbox gui
 ```
 
-> 需要 Python ≥ 3.11。
+先预览，再执行：
 
-## 命令行
-
-```bash
-# 批量重命名(支持多个 --op 组合,默认预览,--yes 执行)
-file-toolbox rename *.docx \
-    --op add_prefix:text="项目_" \
-    --op add_number:start=1,digits=3 \
-    --op replace_text:find="草稿",replace="" \
-    --dir ./docs --recursive --yes
-
-# 批量建文件夹
-file-toolbox mkdir --root ./output \
-    --levels "部门A/项目1" "部门A/项目2" "部门B/项目1"
-# 或从 Tab 分隔的文本文件读结构:
-file-toolbox mkdir --root ./output --from-table structure.txt --on-conflict merge
-
-# 批量生成 PDF(合并模式 + 图片型)
-file-toolbox pdf *.docx *.xlsx *.png \
-    --output-mode merge --merge-name 汇总.pdf \
-    --pdf-type image --dpi 300 --paper A4
-
-# 批量内容替换
-file-toolbox replace *.docx \
-    --op simple_replace:find="旧公司",replace="新公司",case_sensitive=false \
-    --op regex_replace:pattern="20\d{2}",replace="2026" --yes
-
-# 发票识别(默认预览,--yes 导出;支持 zip/xml/ofd/pdf)
-file-toolbox invoice *.zip *.xml *.ofd *.pdf \
-    --format excel --output 发票汇总.xlsx \
-    --dedupe mark --yes
-
-# 启动图形界面
-file-toolbox gui
+```powershell
+uv run file-toolbox rename --dir ./samples --op "add_suffix:text=_done"
+uv run file-toolbox rename --dir ./samples --op "add_suffix:text=_done" --yes
 ```
 
-### `--op` 语法
+具体参数以 `uv run file-toolbox <command> --help` 为准。
 
-```
---op type:key=value,key=value
-```
+## 工作方式
 
-- 一个 `--op` 描述一个操作,可重复多次,**顺序即应用顺序**。
-- `type` 为操作类型,各工具支持的操作见下表。
-- 值会自动识别类型:`true`/`false` → 布尔,数字 → 整数,其余为字符串。
-- 含逗号或等号的值用双引号包裹:`find="a,b"`。
-
-| 工具 | 操作类型 | 关键参数 |
-|---|---|---|
-| rename | `add_prefix` / `add_suffix` | `text` |
-| rename | `replace_text` | `find`, `replace`, `case_sensitive` |
-| rename | `regex_replace` | `pattern`, `replace`, `ignore_case` |
-| rename | `add_number` | `start`, `digits` |
-| rename | `delete_chars` | `delete_type`(prefix/suffix/text), `value` |
-| rename | `add_date` | `format`(如 `%Y%m%d`) |
-| replace | `simple_replace` | `find`, `replace`, `case_sensitive` |
-| replace | `regex_replace` | `pattern`, `replace`, `ignore_case` |
-
-所有命令**默认预览(dry-run)**,加 `--yes` 才真正执行。
-
-## 图形界面
-
-```bash
-file-toolbox gui
+```mermaid
+flowchart LR
+    User["CLI / PySide6 GUI"] --> Command["命令与表单校验"]
+    Command --> Plan["生成操作计划"]
+    Plan --> Preview["预览与冲突检查"]
+    Preview -->|"显式确认"| Core["file_toolbox/core"]
+    Core --> History["历史 / 备份 / 恢复"]
+    Core --> Files["本地文件系统"]
 ```
 
-一个主窗口,5 个 Tab(重命名 / 建文件夹 / 生成PDF / 内容替换 / 发票识别),顶部有「历史」按钮查看操作记录。
+CLI 与 GUI 共享同一套 `file_toolbox/core` 实现。界面层负责收集输入与展示计划，核心层负责
+规则解析、冲突检测和实际文件操作，因此新增能力时应先设计核心接口，再接入两个入口。
 
-## 数据位置
-
-工具箱数据(备份、历史)放在**运行目录**下的 `.file_toolbox/`,跟程序走:
-
-```
-.file_toolbox/
-├── backups/      # 内容替换执行前自动备份(带时间戳)
-└── history/      # 各工具操作历史(.jsonl,支持撤销标记)
-    ├── rename.jsonl
-    ├── replace.jsonl
-    ├── pdf.jsonl
-    └── mkdir.jsonl
-```
-
-## 平台说明
-
-- 重命名、建文件夹、图片转 PDF、文本替换:**全平台**(Windows / macOS / Linux)。
-- Word/Excel/PPT 转 PDF、Word/Excel 内容替换:**仅 Windows**,需已安装 Microsoft Office 或 WPS Office(通过 COM 自动化调用)。
-- 发票识别(PDF/OFD/XML 解析 + Excel/JSON 导出):**全平台**,需额外安装 `pip install 'file-toolbox[invoice]'`(pdfplumber + openpyxl)。扫描版发票(图片型)暂不支持。
-
-## 打包与发版
-
-本项目用 **PyInstaller**(onedir 模式)打包为 Windows 可执行程序,产出免安装便携 zip。
-
-### 本地打包
-
-```bash
-uv run --extra gui --extra invoice --extra dev python scripts/build_exe.py
-# 产物:dist/FileToolbox-{version}-win64.zip
-```
-
-### 版本号管理
-
-`pyproject.toml` 是唯一版本来源，`uv.lock` 是其派生锁文件；`__init__.py` 运行时经
-`importlib.metadata` 读取版本。发布准备命令会同时更新版本、锁文件与 Changelog。
-
-```bash
-# 查看当前版本
-uv run --extra dev python scripts/bump_version.py current
-```
-
-不要手工编辑多个版本文件、创建版本提交或打标签。需要发版时，在 GitHub Actions
-手动选择 `patch`、`minor` 或 `major`；统一自动化会创建或刷新唯一的版本 PR。
-
-### Changelog 与提交约定
-
-统一自动化根据合入 `main` 的 Conventional Commit 生成 `CHANGELOG.md`。
-仓库采用 squash merge，因此 PR 标题就是最终参与发布说明生成的提交标题，CI 会校验其格式：
+## 仓库地图
 
 ```text
-type(scope): description
-type(scope)!: breaking description
+file_toolbox/
+├── cli/                 # Typer 命令、参数模型与终端输出
+├── core/                # 文件操作、计划、历史与恢复
+├── gui/                 # PySide6 窗口、控制器与生成界面
+│   └── generated/       # 由脚本生成，不要手工编辑
+└── gui_entry.py         # GUI 入口
+tests/                   # 单元、集成与 CLI/GUI 回归测试
+scripts/
+├── regen_ui.py          # 生成/检查 Qt UI 代码
+└── automation.py        # CI、构建与发布稳定入口
+.ci/project.json         # 项目质量与发布契约
 ```
 
-- `feat`、`fix`、`perf`、`deps`、`revert` 会进入 Changelog。
-- `docs`、`style`、`chore`、`refactor`、`test`、`build`、`ci` 属于内部维护，默认隐藏。
-- 发布链、安装包或更新体验的用户可感知修复应使用 `fix(release)`，不要误写成纯 `ci`。
-- 仅包含维护类提交时，发布说明会生成一条明确的 Maintenance release 记录。
+第一次阅读建议从 [`SOURCE_READING_GUIDE.md`](SOURCE_READING_GUIDE.md) 开始，沿一条
+“重命名请求”纵向追踪 CLI、核心实现与测试。
 
-### 更新依赖
+## 开发与验证
 
-```bash
-uv run --extra dev python scripts/update_deps.py check    # 检查可升级
-uv run --extra dev python scripts/update_deps.py update   # 全量升级 uv.lock
-uv run --extra dev python scripts/update_deps.py update PySide6  # 单包升级
+```powershell
+uv sync --frozen --all-extras
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy file_toolbox
+uv run pytest
+uv run python scripts/regen_ui.py --check
+uv build
 ```
 
-### GitHub Actions
+完整质量、构建和发布命令由 [`.ci/project.json`](.ci/project.json) 与
+[`scripts/automation.py`](scripts/automation.py) 定义；GitHub PR 上的 `required` check 是最终门禁。
 
-正式发布链路为：
+### 修改 GUI
 
-1. 手动选择 bump，统一自动化基于当前版本、稳定标签和已发布稳定 Release 计算绝对目标版本。
-2. 合并唯一的版本 PR 后，main CI 构建不可变候选，包含 ZIP、校验和、SPDX SBOM、attestation 输入和 release manifest。
-3. CD 仅在候选完整且 source SHA 绑定时直接发布稳定 Release；同 tag、同 source 的不完整 Release 可以修复。
-4. 发布后保留最近 5 个 Release，并按配置镜像。
+`file_toolbox/gui/generated/` 是生成目录。修改 `.ui` 或生成输入后运行：
 
-## 自动更新
+```powershell
+uv run python scripts/regen_ui.py
+uv run python scripts/regen_ui.py --check
+```
 
-便携 exe 版本内置**自动更新**:程序启动时后台静默检查新版本,有更新时状态栏显示
-「🆕 发现新版本 vX.Y.Z · 点击更新」提示。点击后下载(带进度条)、自动校验 SHA256,
-确认后**整目录替换并重启**到新版本。
+不要直接修补生成文件。
 
-- **更新源**:GitHub Release。
-- **仅提示正式版**:预发布版本(a/b/rc/dev)不会通知用户。
-- **强制校验**:下载的 zip 经 SHA256 校验,不匹配则丢弃、不应用。
-- **数据安全**:替换的是程序目录 `FileToolbox/`,用户数据 `.file_toolbox/`(备份/历史)
-  与程序同级、不受影响,更新不丢失。
-- **失败可回退**:替换采用 `.old` 回滚式策略,失败时自动还原旧目录并弹窗提示。
-- pip 安装的源码版**不启用**自动更新(用 `pip install -U file-toolbox` 升级)。
-- **手动检查更新**:关于页提供「检查更新」按钮,所有环境(便携 exe / pip / dev)均可点击核实
-  是否有新版本。便携版发现新版可下载应用;pip/dev 版提示用 `pip install -U file-toolbox` 升级。
-- **GitHub 代理**:关于页「GitHub 代理」输入框可填代理基址(如 `https://ghproxy.com`),
-  用于加速版本检查与更新下载;留空则直连。也可用环境变量 `FILE_TOOLBOX_GH_PROXY` 覆盖。
-  代理需为支持前缀拼接、服务端跟随重定向的服务(如 ghproxy/gh-proxy)。
+## 发布资产
+
+正式 Release 包含 Windows x64 ZIP、对应校验文件、`build-identity.json` 与 SPDX SBOM。
+版本与资产由自动化脚本生成；贡献者不应手改派生版本或手工创建正式 tag。
+
+## 参与贡献
+
+1. 先阅读 [源码阅读指南](SOURCE_READING_GUIDE.md) 和根目录 `AGENTS.md`。
+2. 从 `main` 创建主题分支，保持改动聚焦。
+3. 为行为变化补充相邻测试，并运行相关质量命令。
+4. 使用 Conventional Commit 提交并发起 PR。
 
 ## 许可证
 
-MIT
+本项目基于 [LICENSE](LICENSE) 中的条款发布。
