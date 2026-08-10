@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>AttendanceDialog</class>
+ <widget class="QWidget" name="AttendanceDialog">
+  <property name="windowTitle"><string>考勤汇总</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="leftMargin"><number>10</number></property>
+   <property name="topMargin"><number>8</number></property>
+   <property name="rightMargin"><number>10</number></property>
+   <property name="bottomMargin"><number>8</number></property>
+   <item>
+    <widget class="QGroupBox" name="group_files">
+     <property name="title"><string>文件与月份</string></property>
+     <layout class="QGridLayout" name="grid_files">
+      <item row="0" column="0"><widget class="QLabel" name="label_source"><property name="text"><string>原始考勤</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="edit_source"><property name="placeholderText"><string>选择原始考勤 .xlsx</string></property></widget></item>
+      <item row="0" column="2"><widget class="QPushButton" name="btn_source"><property name="text"><string>浏览…</string></property></widget></item>
+      <item row="0" column="3"><widget class="QLabel" name="label_year"><property name="text"><string>年份</string></property></widget></item>
+      <item row="0" column="4"><widget class="QSpinBox" name="spin_year"><property name="minimum"><number>2000</number></property><property name="maximum"><number>2100</number></property></widget></item>
+      <item row="0" column="5"><widget class="QLabel" name="label_month"><property name="text"><string>月份</string></property></widget></item>
+      <item row="0" column="6"><widget class="QSpinBox" name="spin_month"><property name="minimum"><number>1</number></property><property name="maximum"><number>12</number></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="label_template"><property name="text"><string>汇总模板</string></property></widget></item>
+      <item row="1" column="1" colspan="5"><widget class="QLineEdit" name="edit_template"><property name="placeholderText"><string>选择不会被修改的模板 .xlsx</string></property></widget></item>
+      <item row="1" column="6"><widget class="QPushButton" name="btn_template"><property name="text"><string>浏览…</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="label_output"><property name="text"><string>另存结果</string></property></widget></item>
+      <item row="2" column="1" colspan="5"><widget class="QLineEdit" name="edit_output"><property name="placeholderText"><string>指定新的输出 .xlsx，不能与源文件或模板相同</string></property></widget></item>
+      <item row="2" column="6"><widget class="QPushButton" name="btn_output"><property name="text"><string>浏览…</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="group_plan">
+     <property name="title"><string>方案</string></property>
+     <layout class="QHBoxLayout" name="layout_plan">
+      <item><widget class="QComboBox" name="cmb_plan"><property name="minimumSize"><size><width>180</width><height>0</height></size></property></widget></item>
+      <item><widget class="QLineEdit" name="edit_plan_name"><property name="placeholderText"><string>方案名称</string></property></widget></item>
+      <item><widget class="QPushButton" name="btn_load_plan"><property name="text"><string>加载</string></property></widget></item>
+      <item><widget class="QPushButton" name="btn_save_plan"><property name="text"><string>保存</string></property></widget></item>
+      <item><widget class="QPushButton" name="btn_delete_plan"><property name="text"><string>删除</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTabWidget" name="config_tabs">
+     <widget class="QWidget" name="tab_layout">
+      <attribute name="title"><string>工作表与坐标</string></attribute>
+      <layout class="QHBoxLayout" name="layout_coordinates">
+       <item>
+        <widget class="QGroupBox" name="group_source_layout">
+         <property name="title"><string>原始考勤（员工向下、日期向右）</string></property>
+         <layout class="QFormLayout" name="form_source">
+          <item row="0" column="0"><widget class="QLabel" name="label_source_sheet"><property name="text"><string>Sheet 名</string></property></widget></item>
+          <item row="0" column="1"><widget class="QLineEdit" name="edit_source_sheet"/></item>
+          <item row="1" column="0"><widget class="QLabel" name="label_source_name"><property name="text"><string>姓名起始</string></property></widget></item>
+          <item row="1" column="1"><widget class="QLineEdit" name="edit_source_name"/></item>
+          <item row="2" column="0"><widget class="QLabel" name="label_source_department"><property name="text"><string>部门起始</string></property></widget></item>
+          <item row="2" column="1"><widget class="QLineEdit" name="edit_source_department"/></item>
+          <item row="3" column="0"><widget class="QLabel" name="label_source_detail"><property name="text"><string>明细左上角</string></property></widget></item>
+          <item row="3" column="1"><widget class="QLineEdit" name="edit_source_detail"/></item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="group_target_layout">
+         <property name="title"><string>汇总模板</string></property>
+         <layout class="QFormLayout" name="form_target">
+          <item row="0" column="0"><widget class="QLabel" name="label_detail_sheet"><property name="text"><string>明细 Sheet</string></property></widget></item>
+          <item row="0" column="1"><widget class="QLineEdit" name="edit_detail_sheet"/></item>
+          <item row="1" column="0"><widget class="QLabel" name="label_detail_name"><property name="text"><string>明细姓名起始</string></property></widget></item>
+          <item row="1" column="1"><widget class="QLineEdit" name="edit_detail_name"/></item>
+          <item row="2" column="0"><widget class="QLabel" name="label_detail_matrix"><property name="text"><string>明细矩阵左上角</string></property></widget></item>
+          <item row="2" column="1"><widget class="QLineEdit" name="edit_detail_matrix"/></item>
+          <item row="3" column="0"><widget class="QLabel" name="label_summary_sheet"><property name="text"><string>汇总 Sheet</string></property></widget></item>
+          <item row="3" column="1"><widget class="QLineEdit" name="edit_summary_sheet"/></item>
+          <item row="4" column="0"><widget class="QLabel" name="label_summary_name"><property name="text"><string>汇总姓名起始</string></property></widget></item>
+          <item row="4" column="1"><widget class="QLineEdit" name="edit_summary_name"/></item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_mappings">
+      <attribute name="title"><string>固定单元格</string></attribute>
+      <layout class="QVBoxLayout" name="layout_mappings">
+       <item><widget class="QLabel" name="label_mapping_help"><property name="text"><string>内容支持 {{year}}、{{month}}、{{month_start}}、{{month_end}}、{{department}}</string></property></widget></item>
+       <item><widget class="QTableWidget" name="table_mappings"><property name="columnCount"><number>3</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>Sheet 名</string></property></column><column><property name="text"><string>单元格</string></property></column><column><property name="text"><string>内容</string></property></column></widget></item>
+       <item><layout class="QHBoxLayout" name="layout_mapping_buttons"><item><widget class="QPushButton" name="btn_add_mapping"><property name="text"><string>新增映射</string></property></widget></item><item><widget class="QPushButton" name="btn_remove_mapping"><property name="text"><string>删除选中</string></property></widget></item><item><spacer name="mapping_spacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_rules">
+      <attribute name="title"><string>判定规则</string></attribute>
+      <layout class="QVBoxLayout" name="layout_rules">
+       <item><widget class="QLabel" name="label_rule_help"><property name="text"><string>从上到下首个正则匹配生效；非空且未匹配的记录会阻止生成。</string></property></widget></item>
+       <item><widget class="QTableWidget" name="table_rules"><property name="columnCount"><number>3</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>启用</string></property></column><column><property name="text"><string>正则</string></property></column><column><property name="text"><string>输出</string></property></column></widget></item>
+       <item><layout class="QHBoxLayout" name="layout_rule_buttons"><item><widget class="QPushButton" name="btn_add_rule"><property name="text"><string>新增规则</string></property></widget></item><item><widget class="QPushButton" name="btn_remove_rule"><property name="text"><string>删除选中</string></property></widget></item><item><widget class="QPushButton" name="btn_rule_up"><property name="text"><string>上移</string></property></widget></item><item><widget class="QPushButton" name="btn_rule_down"><property name="text"><string>下移</string></property></widget></item><item><spacer name="rule_spacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_preview">
+      <attribute name="title"><string>预览结果</string></attribute>
+      <layout class="QVBoxLayout" name="layout_preview">
+       <item><widget class="QLabel" name="lbl_preview"><property name="text"><string>尚未预览</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+       <item><widget class="QTableWidget" name="table_unmatched"><property name="columnCount"><number>3</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>姓名</string></property></column><column><property name="text"><string>日期</string></property></column><column><property name="text"><string>未匹配原文</string></property></column></widget></item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="layout_actions">
+     <item><widget class="QLabel" name="lbl_status"><property name="text"><string>就绪</string></property></widget></item>
+     <item><spacer name="action_spacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+     <item><widget class="QPushButton" name="btn_preview"><property name="text"><string>预览并校验</string></property></widget></item>
+     <item><widget class="QPushButton" name="btn_generate"><property name="enabled"><bool>false</bool></property><property name="text"><string>生成并另存</string></property></widget></item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

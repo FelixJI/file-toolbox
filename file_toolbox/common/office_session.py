@@ -81,6 +81,17 @@ def init_office_app(prog_id: str) -> Any:
     return app
 
 
+def init_isolated_office_app(prog_id: str) -> Any:
+    """用 DispatchEx 创建不附着用户现有会话的 Office app。"""
+    import win32com.client
+
+    dispatch_ex: Any = win32com.client.DispatchEx
+    app = dispatch_ex(prog_id)
+    app.Visible = False
+    app.DisplayAlerts = False
+    return app
+
+
 def dispose_office_app(app: Any | None, *, gc_pause: float = 0.0) -> None:
     """安全 Quit 一个 Office app 并触发 gc(批末清理用)。
 

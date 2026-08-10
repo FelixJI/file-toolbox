@@ -89,8 +89,16 @@ def test_history_button_noop_on_tab_without_history(win, monkeypatch):
 
 
 def test_tab_tools_mapping(win):
-    """_tab_tools 前 5 项对应功能工具,末尾(关于)为 None。"""
-    assert win._tab_tools == ["rename", "mkdir", "pdf", "replace", "invoice", None]
+    """_tab_tools 对应 6 个功能工具，末尾（关于）为 None。"""
+    assert win._tab_tools == [
+        "rename",
+        "mkdir",
+        "pdf",
+        "replace",
+        "attendance",
+        "invoice",
+        None,
+    ]
 
 
 # ---------------------------------------------------------------------------

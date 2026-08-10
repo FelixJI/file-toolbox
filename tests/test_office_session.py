@@ -11,7 +11,12 @@ ComSession / init_office_app / dispose_office_app 是纯 COM 基础设施工具,
 
 from unittest.mock import MagicMock
 
-from file_toolbox.common.office_session import ComSession, dispose_office_app, init_office_app
+from file_toolbox.common.office_session import (
+    ComSession,
+    dispose_office_app,
+    init_isolated_office_app,
+    init_office_app,
+)
 
 # ===========================================================================
 # ComSession
@@ -133,6 +138,22 @@ def test_init_office_app_does_not_set_screen_updating(monkeypatch):
     assert app.ScreenUpdating is screen_updating_before, (
         "init_office_app 必须不赋值 ScreenUpdating(那是调用方业务)"
     )
+
+
+def test_init_isolated_office_app_uses_dispatch_ex(monkeypatch):
+    """考勤等一次性任务使用 DispatchEx，不附着用户已有 Office 会话。"""
+    import win32com.client
+
+    app = MagicMock()
+    dispatch_ex = MagicMock(return_value=app)
+    monkeypatch.setattr(win32com.client, "DispatchEx", dispatch_ex)
+
+    result = init_isolated_office_app("Excel.Application")
+
+    assert result is app
+    dispatch_ex.assert_called_once_with("Excel.Application")
+    assert app.Visible is False
+    assert app.DisplayAlerts is False
 
 
 # ===========================================================================
