@@ -32,6 +32,8 @@ from file_toolbox.core.attendance import (
     CellRef,
     EmployeeGroupOverride,
     GroupSheetConfig,
+    RosterConfig,
+    RosterLayout,
     SourceLayout,
     TargetLayout,
     default_rules,
@@ -66,6 +68,7 @@ class AttendanceTab(QWidget):
         self._preview_request: AttendanceRequest | None = None
         self._employee_group_overrides: tuple[EmployeeGroupOverride, ...] = ()
         self._group_sheet_configs: tuple[GroupSheetConfig, ...] = ()
+        self._excluded_employee_ids: tuple[str, ...] = ()
         self._loading = False
         self._setup_tables()
         self._set_defaults()
@@ -85,12 +88,7 @@ class AttendanceTab(QWidget):
         self.ui.table_rules.setColumnWidth(1, 260)
         self.ui.table_mappings.setColumnWidth(0, 150)
         self.ui.table_mappings.setColumnWidth(1, 90)
-        self.ui.table_group_preview.setColumnWidth(0, 150)
-        self.ui.table_group_preview.setColumnWidth(1, 60)
-        self.ui.table_group_preview.setColumnWidth(2, 220)
-        self.ui.table_employee_preview.setColumnWidth(0, 120)
-        self.ui.table_employee_preview.setColumnWidth(1, 140)
-        self.ui.table_employee_preview.setColumnWidth(2, 140)
+        self._configure_preview_tables(False)
 
     @property
     def close_pending(self) -> bool:
@@ -113,10 +111,28 @@ class AttendanceTab(QWidget):
         self.ui.edit_summary_sheet.setText("考勤汇总表")
         self.ui.edit_summary_name.setText("C8")
         self.ui.chk_split_groups.setChecked(True)
+        self._reset_roster_fields()
+        self._set_roster_controls(False)
         self._set_rules(default_rules())
+
+    def _reset_roster_fields(self) -> None:
+        """恢复名单页字段默认值。"""
+        self.ui.edit_roster.clear()
+        self.ui.edit_roster_sheet.setText("Sheet1")
+        self.ui.edit_roster_group.setText("A1")
+        self.ui.edit_roster_department.setText("B1")
+        self.ui.edit_roster_name.setText("C1")
+        self.ui.edit_roster_employee_id.setText("D1")
+        self.ui.chk_fill_serial.setChecked(True)
+        self.ui.chk_fill_employee_id.setChecked(True)
+        self.ui.edit_detail_serial.setText("A7")
+        self.ui.edit_detail_employee_id.setText("B7")
+        self.ui.edit_summary_serial.setText("A8")
+        self.ui.edit_summary_employee_id.setText("B8")
 
     def _connect(self) -> None:
         self.ui.btn_source.clicked.connect(self._browse_source)
+        self.ui.btn_roster.clicked.connect(self._browse_roster)
         self.ui.btn_template.clicked.connect(self._browse_template)
         self.ui.btn_output.clicked.connect(self._browse_output)
         self.ui.btn_output_name.clicked.connect(self._generate_output_name)
@@ -151,6 +167,16 @@ class AttendanceTab(QWidget):
             self.ui.edit_detail_matrix,
             self.ui.edit_summary_sheet,
             self.ui.edit_summary_name,
+            self.ui.edit_roster,
+            self.ui.edit_roster_sheet,
+            self.ui.edit_roster_group,
+            self.ui.edit_roster_department,
+            self.ui.edit_roster_name,
+            self.ui.edit_roster_employee_id,
+            self.ui.edit_detail_serial,
+            self.ui.edit_detail_employee_id,
+            self.ui.edit_summary_serial,
+            self.ui.edit_summary_employee_id,
         ):
             edit.textChanged.connect(self._invalidate_preview)
         self.ui.spin_year.valueChanged.connect(self._invalidate_preview)
@@ -160,6 +186,9 @@ class AttendanceTab(QWidget):
         self.ui.table_group_preview.cellChanged.connect(self._preview_adjustments_changed)
         self.ui.table_employee_preview.cellChanged.connect(self._preview_adjustments_changed)
         self.ui.chk_split_groups.toggled.connect(self._invalidate_preview)
+        self.ui.chk_roster_enabled.toggled.connect(self._roster_mode_changed)
+        self.ui.chk_fill_serial.toggled.connect(self._invalidate_preview)
+        self.ui.chk_fill_employee_id.toggled.connect(self._invalidate_preview)
         self.ui.edit_detail_sheet.textChanged.connect(self._refresh_mapping_sheet_selectors)
         self.ui.edit_summary_sheet.textChanged.connect(self._refresh_mapping_sheet_selectors)
 
@@ -167,6 +196,64 @@ class AttendanceTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "选择原始考勤", "", "Excel (*.xlsx)")
         if path:
             self.ui.edit_source.setText(path)
+
+    def _browse_roster(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "选择人员名单", "", "Excel (*.xlsx)")
+        if path:
+            self.ui.edit_roster.setText(path)
+
+    def _set_roster_controls(self, enabled: bool) -> None:
+        for widget in (
+            self.ui.label_roster_file,
+            self.ui.edit_roster,
+            self.ui.btn_roster,
+            self.ui.group_roster_layout,
+            self.ui.group_roster_output,
+            self.ui.label_roster_help,
+        ):
+            widget.setEnabled(enabled)
+        self.ui.label_source_group.setEnabled(not enabled)
+        self.ui.edit_source_group.setEnabled(not enabled)
+        self.ui.chk_split_groups.setEnabled(not enabled)
+
+    def _roster_mode_changed(self, enabled: bool) -> None:
+        if enabled:
+            self.ui.chk_split_groups.setChecked(True)
+        self._set_roster_controls(enabled)
+        self._configure_preview_tables(enabled)
+        self._invalidate_preview()
+
+    def _configure_preview_tables(self, roster_mode: bool) -> None:
+        self.ui.table_group_preview.setRowCount(0)
+        self.ui.table_employee_preview.setRowCount(0)
+        if roster_mode:
+            self.ui.table_group_preview.setColumnCount(5)
+            self.ui.table_group_preview.setHorizontalHeaderLabels(
+                ["名单分组", "别名", "人数", "明细 Sheet", "汇总 Sheet"]
+            )
+            self.ui.table_employee_preview.setColumnCount(7)
+            self.ui.table_employee_preview.setHorizontalHeaderLabels(
+                ["导出", "工号", "姓名", "部门", "名单分组", "别名", "状态"]
+            )
+            widths: tuple[int, ...] = (58, 130, 110, 110, 130, 100)
+        else:
+            self.ui.table_group_preview.setColumnCount(4)
+            self.ui.table_group_preview.setHorizontalHeaderLabels(
+                ["输出考勤组", "人数", "明细 Sheet", "汇总 Sheet"]
+            )
+            self.ui.table_employee_preview.setColumnCount(4)
+            self.ui.table_employee_preview.setHorizontalHeaderLabels(
+                ["姓名", "原考勤组", "输出考勤组", "未匹配"]
+            )
+            widths = (120, 140, 140)
+        for column, width in enumerate(widths):
+            self.ui.table_employee_preview.setColumnWidth(column, width)
+        self.ui.table_group_preview.setColumnWidth(0, 150)
+        self.ui.table_group_preview.setColumnWidth(1, 100 if roster_mode else 60)
+        self.ui.table_group_preview.setColumnWidth(2, 80 if roster_mode else 220)
+        self.ui.table_group_preview.setColumnWidth(3, 220)
+        if roster_mode:
+            self.ui.table_group_preview.setColumnWidth(4, 220)
 
     def _browse_template(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择汇总模板", "", "Excel (*.xlsx)")
@@ -208,7 +295,11 @@ class AttendanceTab(QWidget):
 
     def _save_plan(self) -> None:
         try:
-            if self.ui.chk_split_groups.isChecked() and self.ui.table_group_preview.rowCount() > 0:
+            has_adjustments = self.ui.table_group_preview.rowCount() > 0 or (
+                self.ui.chk_roster_enabled.isChecked()
+                and self.ui.table_employee_preview.rowCount() > 0
+            )
+            if self.ui.chk_split_groups.isChecked() and has_adjustments:
                 self._capture_preview_adjustments()
                 self._invalidate_preview()
             plan = self._build_plan()
@@ -281,6 +372,33 @@ class AttendanceTab(QWidget):
             self.ui.chk_split_groups.setChecked(plan.split_by_group)
             self._employee_group_overrides = plan.employee_group_overrides
             self._group_sheet_configs = plan.group_sheet_configs
+            self._excluded_employee_ids = (
+                plan.roster.excluded_employee_ids if plan.roster is not None else ()
+            )
+            self.ui.chk_roster_enabled.setChecked(plan.roster is not None)
+            if plan.roster is not None:
+                self.ui.edit_roster.setText(str(plan.roster.workbook_path))
+                self.ui.edit_roster_sheet.setText(plan.roster.layout.sheet_name)
+                self.ui.edit_roster_group.setText(plan.roster.layout.group_start.address)
+                self.ui.edit_roster_department.setText(plan.roster.layout.department_start.address)
+                self.ui.edit_roster_name.setText(plan.roster.layout.name_start.address)
+                self.ui.edit_roster_employee_id.setText(
+                    plan.roster.layout.employee_id_start.address
+                )
+                self.ui.chk_fill_serial.setChecked(plan.roster.fill_serial_numbers)
+                self.ui.chk_fill_employee_id.setChecked(plan.roster.fill_employee_ids)
+                self.ui.edit_detail_serial.setText(plan.roster.detail_serial_start.address)
+                self.ui.edit_detail_employee_id.setText(
+                    plan.roster.detail_employee_id_start.address
+                )
+                self.ui.edit_summary_serial.setText(plan.roster.summary_serial_start.address)
+                self.ui.edit_summary_employee_id.setText(
+                    plan.roster.summary_employee_id_start.address
+                )
+            else:
+                self._reset_roster_fields()
+            self._set_roster_controls(plan.roster is not None)
+            self._configure_preview_tables(plan.roster is not None)
             self._set_mappings(plan.mappings)
             self._set_rules(plan.rules)
             self._clear_preview_tables()
@@ -295,6 +413,26 @@ class AttendanceTab(QWidget):
             raise ValueError("方案名称不能为空")
         if not template:
             raise ValueError("请选择汇总模板")
+        roster: RosterConfig | None = None
+        if self.ui.chk_roster_enabled.isChecked():
+            roster_path = self._required_text(self.ui.edit_roster.text(), "人员名单")
+            roster = RosterConfig(
+                workbook_path=Path(roster_path),
+                layout=RosterLayout(
+                    self._required_text(self.ui.edit_roster_sheet.text(), "名单 Sheet 名"),
+                    CellRef.parse(self.ui.edit_roster_group.text()),
+                    CellRef.parse(self.ui.edit_roster_department.text()),
+                    CellRef.parse(self.ui.edit_roster_name.text()),
+                    CellRef.parse(self.ui.edit_roster_employee_id.text()),
+                ),
+                fill_serial_numbers=self.ui.chk_fill_serial.isChecked(),
+                fill_employee_ids=self.ui.chk_fill_employee_id.isChecked(),
+                detail_serial_start=CellRef.parse(self.ui.edit_detail_serial.text()),
+                detail_employee_id_start=CellRef.parse(self.ui.edit_detail_employee_id.text()),
+                summary_serial_start=CellRef.parse(self.ui.edit_summary_serial.text()),
+                summary_employee_id_start=CellRef.parse(self.ui.edit_summary_employee_id.text()),
+                excluded_employee_ids=self._excluded_employee_ids,
+            )
         return AttendancePlan(
             name=name,
             template_path=Path(template),
@@ -314,9 +452,10 @@ class AttendanceTab(QWidget):
             ),
             mappings=self._mappings(),
             rules=self._rules(),
-            split_by_group=self.ui.chk_split_groups.isChecked(),
-            employee_group_overrides=self._employee_group_overrides,
+            split_by_group=(True if roster is not None else self.ui.chk_split_groups.isChecked()),
+            employee_group_overrides=(() if roster is not None else self._employee_group_overrides),
             group_sheet_configs=self._group_sheet_configs,
+            roster=roster,
         )
 
     def _build_request(self, *, allow_overwrite: bool = False) -> AttendanceRequest:
@@ -502,21 +641,48 @@ class AttendanceTab(QWidget):
         self.ui.btn_apply_adjustments.setEnabled(False)
 
     def _capture_preview_adjustments(self) -> None:
+        roster_mode = self.ui.chk_roster_enabled.isChecked()
         configs: list[GroupSheetConfig] = []
         for row in range(self.ui.table_group_preview.rowCount()):
             group_name = self._required_text(
                 self._item_text(self.ui.table_group_preview, row, 0),
                 f"第 {row + 1} 个输出考勤组",
             )
+            alias = (
+                self._required_text(
+                    self._item_text(self.ui.table_group_preview, row, 1),
+                    f"名单分组“{group_name}”的输出别名",
+                )
+                if roster_mode
+                else ""
+            )
+            detail_column = 3 if roster_mode else 2
+            summary_column = 4 if roster_mode else 3
             detail_sheet = self._required_text(
-                self._item_text(self.ui.table_group_preview, row, 2),
+                self._item_text(self.ui.table_group_preview, row, detail_column),
                 f"考勤组“{group_name}”的明细 Sheet 名",
             )
             summary_sheet = self._required_text(
-                self._item_text(self.ui.table_group_preview, row, 3),
+                self._item_text(self.ui.table_group_preview, row, summary_column),
                 f"考勤组“{group_name}”的汇总 Sheet 名",
             )
-            configs.append(GroupSheetConfig(group_name, detail_sheet, summary_sheet))
+            configs.append(GroupSheetConfig(group_name, detail_sheet, summary_sheet, alias))
+
+        if roster_mode:
+            excluded_employee_ids: list[str] = []
+            for row in range(self.ui.table_employee_preview.rowCount()):
+                export_item = self.ui.table_employee_preview.item(row, 0)
+                employee_id = self._required_text(
+                    self._item_text(self.ui.table_employee_preview, row, 1),
+                    f"第 {row + 1} 名员工工号",
+                )
+                if export_item is None or export_item.checkState() != Qt.CheckState.Checked:
+                    excluded_employee_ids.append(employee_id)
+            if configs:
+                self._group_sheet_configs = tuple(configs)
+            self._employee_group_overrides = ()
+            self._excluded_employee_ids = tuple(excluded_employee_ids)
+            return
 
         overrides: dict[tuple[str, str], EmployeeGroupOverride] = {}
         for row in range(self.ui.table_employee_preview.rowCount()):
@@ -550,10 +716,13 @@ class AttendanceTab(QWidget):
         self._preview_request = None
         self.ui.btn_generate.setEnabled(False)
         self.ui.btn_apply_adjustments.setEnabled(True)
-        self.ui.lbl_status.setText("分组调整已修改，请应用并重新预览")
+        self.ui.lbl_status.setText("名单或分组调整已修改，请应用并重新预览")
 
     def _apply_preview_adjustments(self) -> None:
-        if not self.ui.chk_split_groups.isChecked() or self.ui.table_group_preview.rowCount() == 0:
+        if not self.ui.chk_split_groups.isChecked() or (
+            self.ui.table_group_preview.rowCount() == 0
+            and self.ui.table_employee_preview.rowCount() == 0
+        ):
             return
         try:
             self._capture_preview_adjustments()
@@ -625,7 +794,13 @@ class AttendanceTab(QWidget):
         self.ui.btn_apply_adjustments.setEnabled(
             not busy
             and self.ui.chk_split_groups.isChecked()
-            and self.ui.table_group_preview.rowCount() > 0
+            and (
+                self.ui.table_group_preview.rowCount() > 0
+                or (
+                    self.ui.chk_roster_enabled.isChecked()
+                    and self.ui.table_employee_preview.rowCount() > 0
+                )
+            )
         )
         self.ui.lbl_status.setText(status)
 
@@ -639,11 +814,19 @@ class AttendanceTab(QWidget):
             self._on_failed(str(exc))
             return
         self._show_preview(result)
-        self._set_busy(False, "预览通过" if result.can_generate else "存在未匹配记录")
+        if result.can_generate:
+            status = "预览通过"
+        elif result.errors:
+            status = "存在名单或配置错误"
+        else:
+            status = "存在未匹配记录"
+        self._set_busy(False, status)
         self.ui.btn_generate.setEnabled(result.can_generate)
         self.ui.config_tabs.setCurrentWidget(self.ui.tab_preview)
 
     def _show_preview(self, result: AttendancePreview) -> None:
+        roster_mode = result.roster_path is not None
+        self._configure_preview_tables(roster_mode)
         direction = "增加" if result.date_column_delta >= 0 else "删除"
         counts = "，".join(f"{key} {value}" for key, value in result.status_counts.items()) or "无"
         group_text = ""
@@ -652,12 +835,25 @@ class AttendanceTab(QWidget):
                 f"{name} {count} 人→{result.target_sheets[name][0]}/{result.target_sheets[name][1]}"
                 for name, count in result.group_counts.items()
             )
-            group_text = f"考勤组：{groups}；"
+            group_text = f"输出分组：{groups}；"
+        error_text = ""
+        if result.errors:
+            visible_errors = "；".join(result.errors[:3])
+            if len(result.errors) > 3:
+                visible_errors += f"；另 {len(result.errors) - 3} 项"
+            error_text = f"错误：{visible_errors}；"
+        warning_text = ""
+        if result.warnings:
+            visible_warnings = "；".join(result.warnings[:3])
+            if len(result.warnings) > 3:
+                visible_warnings += f"；另 {len(result.warnings) - 3} 项"
+            warning_text = f"警告：{visible_warnings}；"
         self.ui.lbl_preview.setText(
-            f"员工 {result.employee_count} 人；本月 {result.day_count} 天；"
+            f"导出员工 {result.employee_count} 人；排除 {result.excluded_count} 人；"
+            f"本月 {result.day_count} 天；"
             f"{direction}日期列 {abs(result.date_column_delta)}；"
             f"新增员工行 {result.extra_employee_rows}；判定：{counts}；"
-            f"{group_text}未匹配 {len(result.unmatched)} 条。"
+            f"{group_text}{error_text}{warning_text}未匹配 {len(result.unmatched)} 条。"
         )
         unmatched_by_employee: dict[tuple[str, str], list[str]] = {}
         for item in result.unmatched:
@@ -667,13 +863,36 @@ class AttendanceTab(QWidget):
 
         self._loading = True
         try:
-            self.ui.table_group_preview.setRowCount(len(result.group_counts))
-            for row, (group_name, count) in enumerate(result.group_counts.items()):
-                detail_sheet, summary_sheet = result.target_sheets[group_name]
+            preview_group_counts = dict(result.group_counts)
+            configured_sheets = {
+                config.attendance_group.strip().casefold(): (
+                    config.detail_sheet,
+                    config.summary_sheet,
+                )
+                for config in self._group_sheet_configs
+            }
+            if roster_mode:
+                for employee in result.employees:
+                    preview_group_counts.setdefault(employee.target_group, 0)
+            self.ui.table_group_preview.setRowCount(len(preview_group_counts))
+            aliases = {employee.target_group: employee.group_alias for employee in result.employees}
+            for row, (group_name, count) in enumerate(preview_group_counts.items()):
+                detail_sheet, summary_sheet = result.target_sheets.get(
+                    group_name,
+                    configured_sheets.get(group_name.strip().casefold(), ("", "")),
+                )
                 self.ui.table_group_preview.setItem(row, 0, self._readonly_item(group_name))
-                self.ui.table_group_preview.setItem(row, 1, self._readonly_item(str(count)))
-                self.ui.table_group_preview.setItem(row, 2, QTableWidgetItem(detail_sheet))
-                self.ui.table_group_preview.setItem(row, 3, QTableWidgetItem(summary_sheet))
+                if roster_mode:
+                    self.ui.table_group_preview.setItem(
+                        row, 1, QTableWidgetItem(aliases.get(group_name, ""))
+                    )
+                    self.ui.table_group_preview.setItem(row, 2, self._readonly_item(str(count)))
+                    self.ui.table_group_preview.setItem(row, 3, QTableWidgetItem(detail_sheet))
+                    self.ui.table_group_preview.setItem(row, 4, QTableWidgetItem(summary_sheet))
+                else:
+                    self.ui.table_group_preview.setItem(row, 1, self._readonly_item(str(count)))
+                    self.ui.table_group_preview.setItem(row, 2, QTableWidgetItem(detail_sheet))
+                    self.ui.table_group_preview.setItem(row, 3, QTableWidgetItem(summary_sheet))
 
             self.ui.table_employee_preview.setRowCount(len(result.employees))
             for row, employee in enumerate(result.employees):
@@ -685,22 +904,53 @@ class AttendanceTab(QWidget):
                 unmatched_text = "；".join(unmatched_items[:3])
                 if len(unmatched_items) > 3:
                     unmatched_text += f"；另 {len(unmatched_items) - 3} 条"
-                self.ui.table_employee_preview.setItem(
-                    row, 0, self._readonly_item(employee.employee_name)
-                )
-                self.ui.table_employee_preview.setItem(
-                    row, 1, self._readonly_item(employee.source_group)
-                )
-                target_item = (
-                    QTableWidgetItem(employee.target_group)
-                    if result.group_counts
-                    else self._readonly_item(employee.target_group)
-                )
-                self.ui.table_employee_preview.setItem(row, 2, target_item)
-                self.ui.table_employee_preview.setItem(row, 3, self._readonly_item(unmatched_text))
+                if roster_mode:
+                    export_item = QTableWidgetItem()
+                    export_item.setFlags(
+                        Qt.ItemFlag.ItemIsEnabled
+                        | Qt.ItemFlag.ItemIsSelectable
+                        | Qt.ItemFlag.ItemIsUserCheckable
+                    )
+                    export_item.setCheckState(
+                        Qt.CheckState.Checked if employee.exported else Qt.CheckState.Unchecked
+                    )
+                    self.ui.table_employee_preview.setItem(row, 0, export_item)
+                    values = (
+                        employee.employee_id,
+                        employee.employee_name,
+                        employee.department,
+                        employee.target_group,
+                        employee.group_alias,
+                    )
+                    for column, value in enumerate(values, start=1):
+                        self.ui.table_employee_preview.setItem(
+                            row, column, self._readonly_item(value)
+                        )
+                    status_text = str(employee.match_status)
+                    if unmatched_text:
+                        status_text = f"{status_text}；未识别：{unmatched_text}"
+                    self.ui.table_employee_preview.setItem(row, 6, self._readonly_item(status_text))
+                else:
+                    self.ui.table_employee_preview.setItem(
+                        row, 0, self._readonly_item(employee.employee_name)
+                    )
+                    self.ui.table_employee_preview.setItem(
+                        row, 1, self._readonly_item(employee.source_group)
+                    )
+                    target_item = (
+                        QTableWidgetItem(employee.target_group)
+                        if result.group_counts
+                        else self._readonly_item(employee.target_group)
+                    )
+                    self.ui.table_employee_preview.setItem(row, 2, target_item)
+                    self.ui.table_employee_preview.setItem(
+                        row, 3, self._readonly_item(unmatched_text)
+                    )
         finally:
             self._loading = False
-        self.ui.btn_apply_adjustments.setEnabled(bool(result.group_counts))
+        self.ui.btn_apply_adjustments.setEnabled(
+            bool(result.group_counts) or (roster_mode and bool(result.employees))
+        )
 
     def _on_generate_ok(self, result: object) -> None:
         if not isinstance(result, AttendanceResult):
@@ -724,7 +974,11 @@ class AttendanceTab(QWidget):
         self._set_busy(False, "操作失败")
         self.ui.btn_generate.setEnabled(False)
         self.ui.btn_apply_adjustments.setEnabled(
-            self.ui.chk_split_groups.isChecked() and self.ui.table_employee_preview.rowCount() > 0
+            self.ui.chk_split_groups.isChecked()
+            and (
+                self.ui.table_group_preview.rowCount() > 0
+                or self.ui.table_employee_preview.rowCount() > 0
+            )
         )
         QMessageBox.critical(self, "考勤处理失败", message)
 

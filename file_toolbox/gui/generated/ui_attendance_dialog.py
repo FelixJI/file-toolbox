@@ -278,6 +278,161 @@ class Ui_AttendanceDialog(object):
         self.layout_coordinates.addWidget(self.group_target_layout)
 
         self.config_tabs.addTab(self.tab_layout, "")
+        self.tab_roster = QWidget()
+        self.tab_roster.setObjectName(u"tab_roster")
+        self.layout_roster = QVBoxLayout(self.tab_roster)
+        self.layout_roster.setObjectName(u"layout_roster")
+        self.chk_roster_enabled = QCheckBox(self.tab_roster)
+        self.chk_roster_enabled.setObjectName(u"chk_roster_enabled")
+
+        self.layout_roster.addWidget(self.chk_roster_enabled)
+
+        self.grid_roster_file = QGridLayout()
+        self.grid_roster_file.setObjectName(u"grid_roster_file")
+        self.label_roster_file = QLabel(self.tab_roster)
+        self.label_roster_file.setObjectName(u"label_roster_file")
+
+        self.grid_roster_file.addWidget(self.label_roster_file, 0, 0, 1, 1)
+
+        self.edit_roster = QLineEdit(self.tab_roster)
+        self.edit_roster.setObjectName(u"edit_roster")
+
+        self.grid_roster_file.addWidget(self.edit_roster, 0, 1, 1, 1)
+
+        self.btn_roster = QPushButton(self.tab_roster)
+        self.btn_roster.setObjectName(u"btn_roster")
+
+        self.grid_roster_file.addWidget(self.btn_roster, 0, 2, 1, 1)
+
+
+        self.layout_roster.addLayout(self.grid_roster_file)
+
+        self.layout_roster_settings = QHBoxLayout()
+        self.layout_roster_settings.setObjectName(u"layout_roster_settings")
+        self.group_roster_layout = QGroupBox(self.tab_roster)
+        self.group_roster_layout.setObjectName(u"group_roster_layout")
+        self.form_roster_layout = QFormLayout(self.group_roster_layout)
+        self.form_roster_layout.setObjectName(u"form_roster_layout")
+        self.label_roster_sheet = QLabel(self.group_roster_layout)
+        self.label_roster_sheet.setObjectName(u"label_roster_sheet")
+
+        self.form_roster_layout.setWidget(0, QFormLayout.ItemRole.LabelRole, self.label_roster_sheet)
+
+        self.edit_roster_sheet = QLineEdit(self.group_roster_layout)
+        self.edit_roster_sheet.setObjectName(u"edit_roster_sheet")
+
+        self.form_roster_layout.setWidget(0, QFormLayout.ItemRole.FieldRole, self.edit_roster_sheet)
+
+        self.label_roster_group = QLabel(self.group_roster_layout)
+        self.label_roster_group.setObjectName(u"label_roster_group")
+
+        self.form_roster_layout.setWidget(1, QFormLayout.ItemRole.LabelRole, self.label_roster_group)
+
+        self.edit_roster_group = QLineEdit(self.group_roster_layout)
+        self.edit_roster_group.setObjectName(u"edit_roster_group")
+
+        self.form_roster_layout.setWidget(1, QFormLayout.ItemRole.FieldRole, self.edit_roster_group)
+
+        self.label_roster_department = QLabel(self.group_roster_layout)
+        self.label_roster_department.setObjectName(u"label_roster_department")
+
+        self.form_roster_layout.setWidget(2, QFormLayout.ItemRole.LabelRole, self.label_roster_department)
+
+        self.edit_roster_department = QLineEdit(self.group_roster_layout)
+        self.edit_roster_department.setObjectName(u"edit_roster_department")
+
+        self.form_roster_layout.setWidget(2, QFormLayout.ItemRole.FieldRole, self.edit_roster_department)
+
+        self.label_roster_name = QLabel(self.group_roster_layout)
+        self.label_roster_name.setObjectName(u"label_roster_name")
+
+        self.form_roster_layout.setWidget(3, QFormLayout.ItemRole.LabelRole, self.label_roster_name)
+
+        self.edit_roster_name = QLineEdit(self.group_roster_layout)
+        self.edit_roster_name.setObjectName(u"edit_roster_name")
+
+        self.form_roster_layout.setWidget(3, QFormLayout.ItemRole.FieldRole, self.edit_roster_name)
+
+        self.label_roster_employee_id = QLabel(self.group_roster_layout)
+        self.label_roster_employee_id.setObjectName(u"label_roster_employee_id")
+
+        self.form_roster_layout.setWidget(4, QFormLayout.ItemRole.LabelRole, self.label_roster_employee_id)
+
+        self.edit_roster_employee_id = QLineEdit(self.group_roster_layout)
+        self.edit_roster_employee_id.setObjectName(u"edit_roster_employee_id")
+
+        self.form_roster_layout.setWidget(4, QFormLayout.ItemRole.FieldRole, self.edit_roster_employee_id)
+
+
+        self.layout_roster_settings.addWidget(self.group_roster_layout)
+
+        self.group_roster_output = QGroupBox(self.tab_roster)
+        self.group_roster_output.setObjectName(u"group_roster_output")
+        self.form_roster_output = QFormLayout(self.group_roster_output)
+        self.form_roster_output.setObjectName(u"form_roster_output")
+        self.chk_fill_serial = QCheckBox(self.group_roster_output)
+        self.chk_fill_serial.setObjectName(u"chk_fill_serial")
+
+        self.form_roster_output.setWidget(0, QFormLayout.ItemRole.SpanningRole, self.chk_fill_serial)
+
+        self.label_detail_serial = QLabel(self.group_roster_output)
+        self.label_detail_serial.setObjectName(u"label_detail_serial")
+
+        self.form_roster_output.setWidget(1, QFormLayout.ItemRole.LabelRole, self.label_detail_serial)
+
+        self.edit_detail_serial = QLineEdit(self.group_roster_output)
+        self.edit_detail_serial.setObjectName(u"edit_detail_serial")
+
+        self.form_roster_output.setWidget(1, QFormLayout.ItemRole.FieldRole, self.edit_detail_serial)
+
+        self.label_summary_serial = QLabel(self.group_roster_output)
+        self.label_summary_serial.setObjectName(u"label_summary_serial")
+
+        self.form_roster_output.setWidget(2, QFormLayout.ItemRole.LabelRole, self.label_summary_serial)
+
+        self.edit_summary_serial = QLineEdit(self.group_roster_output)
+        self.edit_summary_serial.setObjectName(u"edit_summary_serial")
+
+        self.form_roster_output.setWidget(2, QFormLayout.ItemRole.FieldRole, self.edit_summary_serial)
+
+        self.chk_fill_employee_id = QCheckBox(self.group_roster_output)
+        self.chk_fill_employee_id.setObjectName(u"chk_fill_employee_id")
+
+        self.form_roster_output.setWidget(3, QFormLayout.ItemRole.SpanningRole, self.chk_fill_employee_id)
+
+        self.label_detail_employee_id = QLabel(self.group_roster_output)
+        self.label_detail_employee_id.setObjectName(u"label_detail_employee_id")
+
+        self.form_roster_output.setWidget(4, QFormLayout.ItemRole.LabelRole, self.label_detail_employee_id)
+
+        self.edit_detail_employee_id = QLineEdit(self.group_roster_output)
+        self.edit_detail_employee_id.setObjectName(u"edit_detail_employee_id")
+
+        self.form_roster_output.setWidget(4, QFormLayout.ItemRole.FieldRole, self.edit_detail_employee_id)
+
+        self.label_summary_employee_id = QLabel(self.group_roster_output)
+        self.label_summary_employee_id.setObjectName(u"label_summary_employee_id")
+
+        self.form_roster_output.setWidget(5, QFormLayout.ItemRole.LabelRole, self.label_summary_employee_id)
+
+        self.edit_summary_employee_id = QLineEdit(self.group_roster_output)
+        self.edit_summary_employee_id.setObjectName(u"edit_summary_employee_id")
+
+        self.form_roster_output.setWidget(5, QFormLayout.ItemRole.FieldRole, self.edit_summary_employee_id)
+
+
+        self.layout_roster_settings.addWidget(self.group_roster_output)
+
+
+        self.layout_roster.addLayout(self.layout_roster_settings)
+
+        self.label_roster_help = QLabel(self.tab_roster)
+        self.label_roster_help.setObjectName(u"label_roster_help")
+        self.label_roster_help.setWordWrap(True)
+
+        self.layout_roster.addWidget(self.label_roster_help)
+
+        self.config_tabs.addTab(self.tab_roster, "")
         self.tab_mappings = QWidget()
         self.tab_mappings.setObjectName(u"tab_mappings")
         self.layout_mappings = QVBoxLayout(self.tab_mappings)
@@ -393,8 +548,8 @@ class Ui_AttendanceDialog(object):
         self.layout_preview.addWidget(self.label_group_preview)
 
         self.table_group_preview = QTableWidget(self.tab_preview)
-        if (self.table_group_preview.columnCount() < 4):
-            self.table_group_preview.setColumnCount(4)
+        if (self.table_group_preview.columnCount() < 5):
+            self.table_group_preview.setColumnCount(5)
         __qtablewidgetitem6 = QTableWidgetItem()
         self.table_group_preview.setHorizontalHeaderItem(0, __qtablewidgetitem6)
         __qtablewidgetitem7 = QTableWidgetItem()
@@ -403,8 +558,10 @@ class Ui_AttendanceDialog(object):
         self.table_group_preview.setHorizontalHeaderItem(2, __qtablewidgetitem8)
         __qtablewidgetitem9 = QTableWidgetItem()
         self.table_group_preview.setHorizontalHeaderItem(3, __qtablewidgetitem9)
+        __qtablewidgetitem10 = QTableWidgetItem()
+        self.table_group_preview.setHorizontalHeaderItem(4, __qtablewidgetitem10)
         self.table_group_preview.setObjectName(u"table_group_preview")
-        self.table_group_preview.setColumnCount(4)
+        self.table_group_preview.setColumnCount(5)
         self.table_group_preview.setRowCount(0)
 
         self.layout_preview.addWidget(self.table_group_preview)
@@ -415,18 +572,24 @@ class Ui_AttendanceDialog(object):
         self.layout_preview.addWidget(self.label_employee_preview)
 
         self.table_employee_preview = QTableWidget(self.tab_preview)
-        if (self.table_employee_preview.columnCount() < 4):
-            self.table_employee_preview.setColumnCount(4)
-        __qtablewidgetitem10 = QTableWidgetItem()
-        self.table_employee_preview.setHorizontalHeaderItem(0, __qtablewidgetitem10)
+        if (self.table_employee_preview.columnCount() < 7):
+            self.table_employee_preview.setColumnCount(7)
         __qtablewidgetitem11 = QTableWidgetItem()
-        self.table_employee_preview.setHorizontalHeaderItem(1, __qtablewidgetitem11)
+        self.table_employee_preview.setHorizontalHeaderItem(0, __qtablewidgetitem11)
         __qtablewidgetitem12 = QTableWidgetItem()
-        self.table_employee_preview.setHorizontalHeaderItem(2, __qtablewidgetitem12)
+        self.table_employee_preview.setHorizontalHeaderItem(1, __qtablewidgetitem12)
         __qtablewidgetitem13 = QTableWidgetItem()
-        self.table_employee_preview.setHorizontalHeaderItem(3, __qtablewidgetitem13)
+        self.table_employee_preview.setHorizontalHeaderItem(2, __qtablewidgetitem13)
+        __qtablewidgetitem14 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(3, __qtablewidgetitem14)
+        __qtablewidgetitem15 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(4, __qtablewidgetitem15)
+        __qtablewidgetitem16 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(5, __qtablewidgetitem16)
+        __qtablewidgetitem17 = QTableWidgetItem()
+        self.table_employee_preview.setHorizontalHeaderItem(6, __qtablewidgetitem17)
         self.table_employee_preview.setObjectName(u"table_employee_preview")
-        self.table_employee_preview.setColumnCount(4)
+        self.table_employee_preview.setColumnCount(7)
         self.table_employee_preview.setRowCount(0)
 
         self.layout_preview.addWidget(self.table_employee_preview)
@@ -517,7 +680,26 @@ class Ui_AttendanceDialog(object):
         self.label_summary_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b\u59d3\u540d\u8d77\u59cb", None))
         self.chk_split_groups.setText(QCoreApplication.translate("AttendanceDialog", u"\u6309\u8003\u52e4\u7ec4\u62c6\u5206\uff08\u6bcf\u7ec4\u81ea\u52a8\u751f\u6210\u660e\u7ec6/\u6c47\u603b Sheet\uff09", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_layout), QCoreApplication.translate("AttendanceDialog", u"\u5de5\u4f5c\u8868\u4e0e\u5750\u6807", None))
-        self.label_mapping_help.setText(QCoreApplication.translate("AttendanceDialog", u"\u4ece\u4e0b\u62c9\u6846\u9009\u62e9\u6a21\u677f\u660e\u7ec6/\u6c47\u603b Sheet\uff1b\u5206\u7ec4\u8f93\u51fa\u65f6\u4f1a\u81ea\u52a8\u5199\u5165\u9884\u89c8\u8868\u6240\u5217\u7684\u6bcf\u7ec4\u5b9e\u9645 Sheet\u3002\u5185\u5bb9\u652f\u6301 {{year}}\u3001{{month}}\u3001{{month_start}}\u3001{{month_end}}\u3001{{department}}\u3001{{attendance_group}}", None))
+        self.chk_roster_enabled.setText(QCoreApplication.translate("AttendanceDialog", u"\u542f\u7528\u4eba\u5458\u540d\u5355\uff08\u540d\u5355\u63a7\u5236\u4eba\u5458\u8303\u56f4\u3001\u5206\u7ec4\u3001\u5de5\u53f7\u548c\u987a\u5e8f\uff09", None))
+        self.label_roster_file.setText(QCoreApplication.translate("AttendanceDialog", u"\u540d\u5355\u6587\u4ef6", None))
+        self.edit_roster.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u9009\u62e9\u4eba\u5458\u540d\u5355 .xlsx", None))
+        self.btn_roster.setText(QCoreApplication.translate("AttendanceDialog", u"\u6d4f\u89c8\u2026", None))
+        self.group_roster_layout.setTitle(QCoreApplication.translate("AttendanceDialog", u"\u540d\u5355\u5750\u6807\uff08\u4eba\u5458\u5411\u4e0b\uff09", None))
+        self.label_roster_sheet.setText(QCoreApplication.translate("AttendanceDialog", u"Sheet \u540d", None))
+        self.label_roster_group.setText(QCoreApplication.translate("AttendanceDialog", u"\u5206\u7ec4\u8d77\u59cb", None))
+        self.label_roster_department.setText(QCoreApplication.translate("AttendanceDialog", u"\u90e8\u95e8\u8d77\u59cb", None))
+        self.label_roster_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u59d3\u540d\u8d77\u59cb", None))
+        self.label_roster_employee_id.setText(QCoreApplication.translate("AttendanceDialog", u"\u5de5\u53f7\u8d77\u59cb", None))
+        self.group_roster_output.setTitle(QCoreApplication.translate("AttendanceDialog", u"\u8f93\u51fa\u586b\u5145", None))
+        self.chk_fill_serial.setText(QCoreApplication.translate("AttendanceDialog", u"\u586b\u5145\u5e8f\u53f7\uff08\u6bcf\u7ec4\u4ece 1 \u5f00\u59cb\uff09", None))
+        self.label_detail_serial.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6\u5e8f\u53f7\u8d77\u59cb", None))
+        self.label_summary_serial.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b\u5e8f\u53f7\u8d77\u59cb", None))
+        self.chk_fill_employee_id.setText(QCoreApplication.translate("AttendanceDialog", u"\u586b\u5145\u5de5\u53f7\uff08\u6309\u6587\u672c\u4fdd\u7559\u524d\u5bfc\u96f6\uff09", None))
+        self.label_detail_employee_id.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6\u5de5\u53f7\u8d77\u59cb", None))
+        self.label_summary_employee_id.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b\u5de5\u53f7\u8d77\u59cb", None))
+        self.label_roster_help.setText(QCoreApplication.translate("AttendanceDialog", u"\u9884\u89c8\u540e\u5728\u201c\u9884\u89c8\u7ed3\u679c\u201d\u9875\u914d\u7f6e\u6bcf\u4e2a\u540d\u5355\u5206\u7ec4\u7684\u522b\u540d\u548c\u6a21\u677f Sheet \u5bf9\uff0c\u5e76\u52fe\u9009\u9700\u8981\u5bfc\u51fa\u7684\u4eba\u5458\u3002", None))
+        self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_roster), QCoreApplication.translate("AttendanceDialog", u"\u4eba\u5458\u540d\u5355", None))
+        self.label_mapping_help.setText(QCoreApplication.translate("AttendanceDialog", u"\u4ece\u4e0b\u62c9\u6846\u9009\u62e9\u6a21\u677f\u660e\u7ec6/\u6c47\u603b Sheet\uff1b\u5206\u7ec4\u8f93\u51fa\u65f6\u4f1a\u81ea\u52a8\u5199\u5165\u9884\u89c8\u8868\u6240\u5217\u7684\u6bcf\u7ec4\u5b9e\u9645 Sheet\u3002\u5185\u5bb9\u652f\u6301 {{year}}\u3001{{month}}\u3001{{month_start}}\u3001{{month_end}}\u3001{{department}}\u3001{{attendance_group}}\u3001{{roster_group}}\u3001{{group_alias}}", None))
         ___qtablewidgetitem = self.table_mappings.horizontalHeaderItem(0)
         ___qtablewidgetitem.setText(QCoreApplication.translate("AttendanceDialog", u"\u76ee\u6807 Sheet", None))
         ___qtablewidgetitem1 = self.table_mappings.horizontalHeaderItem(1)
@@ -540,24 +722,32 @@ class Ui_AttendanceDialog(object):
         self.btn_rule_down.setText(QCoreApplication.translate("AttendanceDialog", u"\u4e0b\u79fb", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_rules), QCoreApplication.translate("AttendanceDialog", u"\u5224\u5b9a\u89c4\u5219", None))
         self.lbl_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u5c1a\u672a\u9884\u89c8", None))
-        self.label_group_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u5206\u7ec4\u8f93\u51fa\uff08\u53ef\u7f16\u8f91\u660e\u7ec6/\u6c47\u603b Sheet \u540d\uff09", None))
+        self.label_group_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u5206\u7ec4\u8f93\u51fa\uff08\u540d\u5355\u6a21\u5f0f\u9700\u914d\u7f6e\u522b\u540d\u548c\u6a21\u677f\u4e2d\u5df2\u6709\u7684 Sheet \u5bf9\uff09", None))
         ___qtablewidgetitem6 = self.table_group_preview.horizontalHeaderItem(0)
-        ___qtablewidgetitem6.setText(QCoreApplication.translate("AttendanceDialog", u"\u8f93\u51fa\u8003\u52e4\u7ec4", None))
+        ___qtablewidgetitem6.setText(QCoreApplication.translate("AttendanceDialog", u"\u8f93\u51fa\u5206\u7ec4", None))
         ___qtablewidgetitem7 = self.table_group_preview.horizontalHeaderItem(1)
-        ___qtablewidgetitem7.setText(QCoreApplication.translate("AttendanceDialog", u"\u4eba\u6570", None))
+        ___qtablewidgetitem7.setText(QCoreApplication.translate("AttendanceDialog", u"\u522b\u540d", None))
         ___qtablewidgetitem8 = self.table_group_preview.horizontalHeaderItem(2)
-        ___qtablewidgetitem8.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6 Sheet", None))
+        ___qtablewidgetitem8.setText(QCoreApplication.translate("AttendanceDialog", u"\u4eba\u6570", None))
         ___qtablewidgetitem9 = self.table_group_preview.horizontalHeaderItem(3)
-        ___qtablewidgetitem9.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b Sheet", None))
-        self.label_employee_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u4eba\u5458\u5206\u7ec4\uff08\u53ef\u7f16\u8f91\u8f93\u51fa\u8003\u52e4\u7ec4\uff1b\u672a\u5339\u914d\u8bb0\u5f55\u4ecd\u4f1a\u963b\u6b62\u751f\u6210\uff09", None))
-        ___qtablewidgetitem10 = self.table_employee_preview.horizontalHeaderItem(0)
-        ___qtablewidgetitem10.setText(QCoreApplication.translate("AttendanceDialog", u"\u59d3\u540d", None))
-        ___qtablewidgetitem11 = self.table_employee_preview.horizontalHeaderItem(1)
-        ___qtablewidgetitem11.setText(QCoreApplication.translate("AttendanceDialog", u"\u539f\u8003\u52e4\u7ec4", None))
-        ___qtablewidgetitem12 = self.table_employee_preview.horizontalHeaderItem(2)
-        ___qtablewidgetitem12.setText(QCoreApplication.translate("AttendanceDialog", u"\u8f93\u51fa\u8003\u52e4\u7ec4", None))
-        ___qtablewidgetitem13 = self.table_employee_preview.horizontalHeaderItem(3)
-        ___qtablewidgetitem13.setText(QCoreApplication.translate("AttendanceDialog", u"\u672a\u5339\u914d", None))
+        ___qtablewidgetitem9.setText(QCoreApplication.translate("AttendanceDialog", u"\u660e\u7ec6 Sheet", None))
+        ___qtablewidgetitem10 = self.table_group_preview.horizontalHeaderItem(4)
+        ___qtablewidgetitem10.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b Sheet", None))
+        self.label_employee_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u4eba\u5458\u9884\u89c8\uff08\u540d\u5355\u6a21\u5f0f\u53ef\u53d6\u6d88\u201c\u5bfc\u51fa\u201d\uff1b\u9519\u8bef\u4f1a\u963b\u6b62\u751f\u6210\uff09", None))
+        ___qtablewidgetitem11 = self.table_employee_preview.horizontalHeaderItem(0)
+        ___qtablewidgetitem11.setText(QCoreApplication.translate("AttendanceDialog", u"\u5bfc\u51fa", None))
+        ___qtablewidgetitem12 = self.table_employee_preview.horizontalHeaderItem(1)
+        ___qtablewidgetitem12.setText(QCoreApplication.translate("AttendanceDialog", u"\u5de5\u53f7", None))
+        ___qtablewidgetitem13 = self.table_employee_preview.horizontalHeaderItem(2)
+        ___qtablewidgetitem13.setText(QCoreApplication.translate("AttendanceDialog", u"\u59d3\u540d", None))
+        ___qtablewidgetitem14 = self.table_employee_preview.horizontalHeaderItem(3)
+        ___qtablewidgetitem14.setText(QCoreApplication.translate("AttendanceDialog", u"\u90e8\u95e8", None))
+        ___qtablewidgetitem15 = self.table_employee_preview.horizontalHeaderItem(4)
+        ___qtablewidgetitem15.setText(QCoreApplication.translate("AttendanceDialog", u"\u540d\u5355\u5206\u7ec4", None))
+        ___qtablewidgetitem16 = self.table_employee_preview.horizontalHeaderItem(5)
+        ___qtablewidgetitem16.setText(QCoreApplication.translate("AttendanceDialog", u"\u522b\u540d", None))
+        ___qtablewidgetitem17 = self.table_employee_preview.horizontalHeaderItem(6)
+        ___qtablewidgetitem17.setText(QCoreApplication.translate("AttendanceDialog", u"\u72b6\u6001", None))
         self.btn_apply_adjustments.setText(QCoreApplication.translate("AttendanceDialog", u"\u5e94\u7528\u8c03\u6574\u5e76\u91cd\u65b0\u9884\u89c8", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_preview), QCoreApplication.translate("AttendanceDialog", u"\u9884\u89c8\u7ed3\u679c", None))
         self.lbl_status.setText(QCoreApplication.translate("AttendanceDialog", u"\u5c31\u7eea", None))

@@ -64,12 +64,17 @@ def test_store_persists_group_output_adjustments(tmp_path):
     assert store.get(plan.name) == plan
     payload = json.loads(store.config_path.read_text(encoding="utf-8"))
     saved_plan = payload["plans"][plan.name]
-    assert saved_plan["schema_version"] == 3
+    assert saved_plan["schema_version"] == 4
     assert saved_plan["employee_group_overrides"] == [
         {"employee_name": "张三", "source_group": "销售组", "target_group": "管理组"}
     ]
     assert saved_plan["group_sheet_configs"] == [
-        {"attendance_group": "管理组", "detail_sheet": "管理明细", "summary_sheet": "管理汇总"}
+        {
+            "attendance_group": "管理组",
+            "detail_sheet": "管理明细",
+            "summary_sheet": "管理汇总",
+            "group_alias": "",
+        }
     ]
 
 

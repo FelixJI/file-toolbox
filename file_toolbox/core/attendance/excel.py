@@ -19,6 +19,9 @@ from file_toolbox.core.attendance.types import (
     EmployeeAttendance,
     PreparedAttendance,
     PreparedGroup,
+    RosterData,
+    RosterEmployee,
+    RosterLayout,
     SourceAttendance,
     SourceLayout,
 )
@@ -43,6 +46,13 @@ class AttendanceExcelAdapter(Protocol):
         cancel_check: CancelCheck | None = None,
     ) -> SourceAttendance: ...
 
+    def read_roster(
+        self,
+        roster_path: Path,
+        layout: RosterLayout,
+        cancel_check: CancelCheck | None = None,
+    ) -> RosterData: ...
+
     def write_output(
         self,
         staging_path: Path,
@@ -52,25 +62,71 @@ class AttendanceExcelAdapter(Protocol):
     ) -> None: ...
 
 
+class _DeletableWorksheet(Protocol):
+    def Delete(self) -> object: ...
+
+
+class _WorksheetCollection(Protocol):
+    def __call__(self, name: str) -> _DeletableWorksheet: ...
+
+
+class _WorkbookWithWorksheets(Protocol):
+    Worksheets: _WorksheetCollection
+
+
+class _MovableWorksheet(Protocol):
+    @property
+    def Index(self) -> int: ...
+
+    def Move(self, before: object) -> object: ...
+
+
+class _WritableRange(Protocol):
+    NumberFormat: object
+    Value: object
+
+
+class _WritableWorksheet(Protocol):
+    def Cells(self, row: int, column: int) -> object: ...
+
+    def Range(self, start: object, end: object) -> _WritableRange: ...
+
+
 class ExcelComAdapter:
     """通过隔离 Microsoft Excel COM 会话读源并写模板副本。"""
 
     def validate_template(self, template_path: Path, plan: AttendancePlan) -> tuple[str, ...]:
         with _excel_workbook(template_path, read_only=True) as (_, workbook):
-            detail = workbook.Worksheets(plan.target.detail_sheet)
-            summary = workbook.Worksheets(plan.target.summary_sheet)
-            header = detail.Cells(
-                plan.target.detail_matrix_start.row - 1,
-                plan.target.detail_matrix_start.column,
-            ).Value
-            if str(header).strip() != "1":
-                raise ValueError("模板日期区域结构不符: 明细矩阵上方首列必须为日期 1")
-            formula = summary.Cells(
-                plan.target.summary_name_start.row,
-                plan.target.summary_name_start.column + 2,
-            ).Formula
-            if not isinstance(formula, str) or not formula.startswith("="):
-                raise ValueError("模板汇总区域结构不符: 姓名右侧第二列应包含汇总公式")
+            pairs = [(plan.target.detail_sheet, plan.target.summary_sheet)]
+            if plan.roster is not None:
+                pairs.extend(
+                    (config.detail_sheet, config.summary_sheet)
+                    for config in plan.group_sheet_configs
+                )
+            checked: set[tuple[str, str]] = set()
+            for detail_name, summary_name in pairs:
+                key = (detail_name.casefold(), summary_name.casefold())
+                if key in checked:
+                    continue
+                checked.add(key)
+                detail = workbook.Worksheets(detail_name)
+                summary = workbook.Worksheets(summary_name)
+                header = detail.Cells(
+                    plan.target.detail_matrix_start.row - 1,
+                    plan.target.detail_matrix_start.column,
+                ).Value
+                if str(header).strip() != "1":
+                    raise ValueError(
+                        f"模板日期区域结构不符: {detail_name} 明细矩阵上方首列必须为日期 1"
+                    )
+                formula = summary.Cells(
+                    plan.target.summary_name_start.row,
+                    plan.target.summary_name_start.column + 2,
+                ).Formula
+                if not isinstance(formula, str) or not formula.startswith("="):
+                    raise ValueError(
+                        f"模板汇总区域结构不符: {summary_name} 姓名右侧第二列应包含汇总公式"
+                    )
             return tuple(
                 str(workbook.Worksheets(index).Name)
                 for index in range(1, int(workbook.Worksheets.Count) + 1)
@@ -123,10 +179,63 @@ class ExcelComAdapter:
         if not employees:
             raise ValueError("源工作表未读取到员工姓名")
         departments = {item.department.strip() for item in employees if item.department.strip()}
-        if len(departments) > 1:
-            raise ValueError("源考勤包含多个部门，首版不支持自动拆分")
         department = next(iter(departments), "")
         return SourceAttendance(tuple(employees), department)
+
+    def read_roster(
+        self,
+        roster_path: Path,
+        layout: RosterLayout,
+        cancel_check: CancelCheck | None = None,
+    ) -> RosterData:
+        employees: list[RosterEmployee] = []
+        starts = (
+            layout.group_start,
+            layout.department_start,
+            layout.name_start,
+            layout.employee_id_start,
+        )
+        with _excel_workbook(roster_path, read_only=True) as (_, workbook):
+            sheet = workbook.Worksheets(layout.sheet_name)
+            used = sheet.UsedRange
+            last_row = int(used.Row) + int(used.Rows.Count) - 1
+            logical_row_count = max(max(0, last_row - cell.row + 1) for cell in starts)
+            for offset in range(logical_row_count):
+                _raise_if_cancelled(cancel_check)
+                source_row = layout.name_start.row + offset
+                group = _cell_text(
+                    sheet.Cells(layout.group_start.row + offset, layout.group_start.column).Value
+                ).strip()
+                department = _cell_text(
+                    sheet.Cells(
+                        layout.department_start.row + offset,
+                        layout.department_start.column,
+                    ).Value
+                ).strip()
+                name = _cell_text(
+                    sheet.Cells(layout.name_start.row + offset, layout.name_start.column).Value
+                ).strip()
+                employee_id = _cell_text(
+                    sheet.Cells(
+                        layout.employee_id_start.row + offset,
+                        layout.employee_id_start.column,
+                    ).Value
+                ).strip()
+                values = (group, department, name, employee_id)
+                if not any(values):
+                    continue
+                labels = ("分组", "部门", "姓名", "工号")
+                missing = [label for label, value in zip(labels, values, strict=True) if not value]
+                if missing:
+                    raise ValueError(f"人员名单第 {source_row} 行缺少字段: {', '.join(missing)}")
+                employees.append(RosterEmployee(employee_id, name, department, group, source_row))
+                if len(employees) > MAX_EMPLOYEES:
+                    raise ValueError(f"名单员工数超过安全上限 {MAX_EMPLOYEES}")
+        if not employees:
+            raise ValueError("人员名单未读取到有效人员")
+        if len(employees) > MAX_EMPLOYEES:
+            raise ValueError(f"名单员工数超过安全上限 {MAX_EMPLOYEES}")
+        return RosterData(tuple(employees))
 
     def write_output(
         self,
@@ -140,7 +249,11 @@ class ExcelComAdapter:
             if bool(workbook.ReadOnly):
                 raise ValueError("Excel 以只读方式打开了结果副本")
             _raise_if_cancelled(cancel_check)
+            if prepared.roster_mode:
+                _remove_roster_sheets(workbook, prepared.remove_sheet_pairs)
             sheets = _prepare_group_sheets(workbook, plan, prepared.groups)
+            if prepared.roster_mode:
+                _order_roster_group_sheets(sheets)
             for group, detail, summary in sheets:
                 _raise_if_cancelled(cancel_check)
                 _write_group(detail, summary, plan, group, prepared.preview.day_count)
@@ -157,6 +270,15 @@ def _prepare_group_sheets(
     plan: AttendancePlan,
     groups: tuple[PreparedGroup, ...],
 ) -> tuple[tuple[PreparedGroup, Any, Any], ...]:
+    if plan.roster is not None:
+        return tuple(
+            (
+                group,
+                workbook.Worksheets(group.detail_sheet),
+                workbook.Worksheets(group.summary_sheet),
+            )
+            for group in groups
+        )
     base_detail = workbook.Worksheets(plan.target.detail_sheet)
     base_summary = workbook.Worksheets(plan.target.summary_sheet)
     if (
@@ -175,6 +297,29 @@ def _prepare_group_sheets(
     base_summary.Delete()
     base_detail.Delete()
     return tuple(result)
+
+
+def _remove_roster_sheets(
+    workbook: _WorkbookWithWorksheets, sheet_pairs: tuple[tuple[str, str], ...]
+) -> None:
+    for detail_name, summary_name in sheet_pairs:
+        workbook.Worksheets(summary_name).Delete()
+        workbook.Worksheets(detail_name).Delete()
+
+
+def _order_roster_group_sheets(
+    sheets: tuple[tuple[PreparedGroup, _MovableWorksheet, _MovableWorksheet], ...],
+) -> None:
+    if len(sheets) < 2:
+        return
+    anchor = min(
+        (sheet for _, detail, summary in sheets for sheet in (detail, summary)),
+        key=lambda sheet: int(sheet.Index),
+    )
+    for _, detail, summary in reversed(sheets):
+        summary.Move(anchor)
+        detail.Move(summary)
+        anchor = detail
 
 
 def _copy_worksheet(workbook: Any, source: Any, name: str) -> Any:
@@ -210,6 +355,17 @@ def _write_group(
     _expand_employee_rows(summary, plan.target.summary_name_start.row, extra_rows)
     _write_names(detail, plan.target.detail_name_start, group.source)
     _write_names(summary, plan.target.summary_name_start, group.source)
+    if plan.roster is not None:
+        if plan.roster.fill_serial_numbers:
+            serials = tuple(range(1, len(group.source.employees) + 1))
+            _write_column(detail, plan.roster.detail_serial_start, serials)
+            _write_column(summary, plan.roster.summary_serial_start, serials)
+        if plan.roster.fill_employee_ids:
+            employee_ids = tuple(employee.employee_id for employee in group.source.employees)
+            _write_column(detail, plan.roster.detail_employee_id_start, employee_ids, as_text=True)
+            _write_column(
+                summary, plan.roster.summary_employee_id_start, employee_ids, as_text=True
+            )
     _write_symbols(detail, plan.target.detail_matrix_start, group.symbols)
     _write_day_labels(detail, plan.target.detail_matrix_start, day_count)
     for sheet_name, cell_ref, value in group.mapping_values:
@@ -310,6 +466,22 @@ def _write_names(sheet: Any, start: CellRef, source: SourceAttendance) -> None:
     sheet.Range(
         sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)
     ).Value = tuple((employee.name,) for employee in source.employees)
+
+
+def _write_column(
+    sheet: _WritableWorksheet,
+    start: CellRef,
+    values: tuple[int, ...] | tuple[str, ...],
+    *,
+    as_text: bool = False,
+) -> None:
+    if not values:
+        return
+    end = start.offset(rows=len(values) - 1)
+    target = sheet.Range(sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column))
+    if as_text:
+        target.NumberFormat = "@"
+    target.Value = tuple((value,) for value in values)
 
 
 def _write_symbols(sheet: Any, start: CellRef, symbols: tuple[tuple[str, ...], ...]) -> None:

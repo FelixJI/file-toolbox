@@ -16,15 +16,23 @@ from file_toolbox.core.attendance import (
     CellRef,
     EmployeeGroupOverride,
     GroupSheetConfig,
+    RosterConfig,
+    RosterLayout,
     SourceLayout,
     TargetLayout,
 )
-from file_toolbox.core.attendance.types import EmployeeAttendance, SourceAttendance
+from file_toolbox.core.attendance.types import (
+    EmployeeAttendance,
+    RosterData,
+    RosterEmployee,
+    SourceAttendance,
+)
 
 
 class FakeExcel:
-    def __init__(self, source: SourceAttendance) -> None:
+    def __init__(self, source: SourceAttendance, roster: RosterData | None = None) -> None:
         self.source = source
+        self.roster = roster
         self.validated = []
         self.read_calls = []
         self.write_calls = []
@@ -38,6 +46,11 @@ class FakeExcel:
     def read_source(self, source_path, layout, day_count, cancel_check=None):
         self.read_calls.append((source_path, layout, day_count))
         return self.source
+
+    def read_roster(self, roster_path, layout, cancel_check=None):
+        if self.roster is None:
+            raise AssertionError("测试未配置人员名单")
+        return self.roster
 
     def write_output(self, staging_path, plan, prepared, cancel_check=None):
         self.write_calls.append((staging_path, plan, prepared, cancel_check))
@@ -87,6 +100,47 @@ def _source(day_count: int, employee_count: int = 1, raw: str = "正常") -> Sou
     )
 
 
+def _roster_plan(request: AttendanceRequest, *, excluded: tuple[str, ...] = ()) -> AttendancePlan:
+    roster_path = request.output_path.parent / "roster.xlsx"
+    roster_path.write_bytes(b"roster")
+    return replace(
+        request.plan,
+        split_by_group=True,
+        roster=RosterConfig(
+            workbook_path=roster_path,
+            layout=RosterLayout(
+                "Sheet1",
+                CellRef.parse("A1"),
+                CellRef.parse("B1"),
+                CellRef.parse("C1"),
+                CellRef.parse("D1"),
+            ),
+            excluded_employee_ids=excluded,
+        ),
+        group_sheet_configs=(
+            GroupSheetConfig("徐州中车", "出勤明细", "考勤汇总表", "正式"),
+            GroupSheetConfig("盛世金源", "出勤明细-劳务", "考勤汇总表-劳务", "劳务"),
+        ),
+        mappings=(
+            CellMapping(
+                "出勤明细",
+                CellRef.parse("A3"),
+                "{{roster_group}}/{{group_alias}}/{{department}}",
+            ),
+        ),
+    )
+
+
+def _roster() -> RosterData:
+    return RosterData(
+        (
+            RosterEmployee("001", "张三", "市场部", "徐州中车", 1),
+            RosterEmployee("002", "李四", "市场部", "盛世金源", 2),
+            RosterEmployee("003", "王五", "市场部", "徐州中车", 3),
+        )
+    )
+
+
 @pytest.mark.parametrize(
     ("year", "month", "days", "delta"),
     [(2026, 2, 28, -2), (2024, 2, 29, -1), (2026, 4, 30, 0), (2026, 7, 31, 1)],
@@ -132,6 +186,111 @@ def test_generate_writes_staging_then_promotes_and_records_history(tmp_path):
     assert mapping_values[0][2] == "2026年7月 市场部"
     record = history.get_records("attendance")[0]
     assert record["data"]["employee_count"] == 1
+
+
+def test_roster_mode_controls_order_groups_exclusions_and_employee_ids(tmp_path):
+    request = _request(tmp_path)
+    request = replace(request, plan=_roster_plan(request, excluded=("002",)))
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("王五", "市场部", tuple("正常" for _ in range(31)), "技管"),
+            EmployeeAttendance("张三", "旧部门", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance("额外人员", "市场部", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31)), "管理组"),
+        ),
+        "市场部",
+    )
+    excel = FakeExcel(source, _roster())
+    excel.sheet_names = ("出勤明细", "考勤汇总表", "出勤明细-劳务", "考勤汇总表-劳务")
+
+    result = AttendanceService(excel).generate(request)
+
+    assert result.group_counts == {"徐州中车": 2}
+    assert result.target_sheets == {"徐州中车": ("出勤明细", "考勤汇总表")}
+    assert any("部门不一致" in warning for warning in result.warnings)
+    assert any("额外人员" in warning for warning in result.warnings)
+    prepared = excel.write_calls[0][2]
+    assert prepared.roster_mode is True
+    assert prepared.remove_sheet_pairs == (("出勤明细-劳务", "考勤汇总表-劳务"),)
+    assert [employee.name for employee in prepared.groups[0].source.employees] == ["张三", "王五"]
+    assert [employee.employee_id for employee in prepared.groups[0].source.employees] == [
+        "001",
+        "003",
+    ]
+    assert prepared.groups[0].mapping_values[0][2] == "徐州中车/正式/市场部"
+    assert prepared.preview.excluded_count == 1
+    assert [employee.exported for employee in prepared.preview.employees] == [True, False, True]
+
+
+def test_roster_preview_returns_editable_errors_for_missing_mapping_and_attendance(tmp_path):
+    request = _request(tmp_path)
+    plan = replace(_roster_plan(request), group_sheet_configs=())
+    request = replace(request, plan=plan)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31))),
+            EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31))),
+        ),
+        "市场部",
+    )
+
+    preview = AttendanceService(FakeExcel(source, _roster())).preview(request)
+
+    assert preview.can_generate is False
+    assert any("缺少 Sheet 映射" in error for error in preview.errors)
+    assert any("王五" in error and "缺少原始考勤" in error for error in preview.errors)
+    assert preview.group_counts == {"徐州中车": 2, "盛世金源": 1}
+    assert preview.target_sheets == {"徐州中车": ("", ""), "盛世金源": ("", "")}
+
+
+def test_roster_preview_rejects_duplicate_employee_ids_and_names(tmp_path):
+    request = _request(tmp_path)
+    request = replace(request, plan=_roster_plan(request))
+    roster = RosterData(
+        (
+            RosterEmployee("001", "张三", "市场部", "徐州中车", 1),
+            RosterEmployee("001", "张三", "市场部", "徐州中车", 2),
+        )
+    )
+
+    preview = AttendanceService(FakeExcel(_source(31), roster)).preview(request)
+
+    assert any("工号重复" in error for error in preview.errors)
+    assert any("姓名重复" in error for error in preview.errors)
+
+
+def test_roster_excluded_employee_may_be_missing_from_raw_attendance(tmp_path):
+    request = _request(tmp_path)
+    request = replace(request, plan=_roster_plan(request, excluded=("002",)))
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31))),
+            EmployeeAttendance("王五", "市场部", tuple("正常" for _ in range(31))),
+        ),
+        "市场部",
+    )
+    excel = FakeExcel(source, _roster())
+    excel.sheet_names = ("出勤明细", "考勤汇总表", "出勤明细-劳务", "考勤汇总表-劳务")
+
+    preview = AttendanceService(excel).preview(request)
+
+    assert preview.can_generate is True
+    assert preview.errors == ()
+    assert preview.employees[1].match_status == "已排除"
+
+
+def test_legacy_mode_still_rejects_multiple_departments(tmp_path):
+    request = _request(tmp_path)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "A", tuple("正常" for _ in range(31))),
+            EmployeeAttendance("李四", "B", tuple("正常" for _ in range(31))),
+        ),
+        "",
+    )
+
+    with pytest.raises(AttendanceError, match="多个部门"):
+        AttendanceService(FakeExcel(source)).preview(request)
 
 
 def test_generate_history_failure_returns_success_with_warning(tmp_path):

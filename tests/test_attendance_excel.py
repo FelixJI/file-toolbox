@@ -9,7 +9,9 @@ import pytest
 from file_toolbox.core.attendance.excel import (
     ExcelComAdapter,
     _copy_worksheet,
+    _order_roster_group_sheets,
     _prepare_group_sheets,
+    _write_column,
 )
 from file_toolbox.core.attendance.types import (
     AttendancePlan,
@@ -17,8 +19,12 @@ from file_toolbox.core.attendance.types import (
     CellMapping,
     CellRef,
     EmployeeAttendance,
+    GroupSheetConfig,
     PreparedAttendance,
     PreparedGroup,
+    RosterConfig,
+    RosterEmployee,
+    RosterLayout,
     SourceAttendance,
     SourceLayout,
     TargetLayout,
@@ -123,6 +129,59 @@ def test_validate_template_rejects_wrong_date_header(monkeypatch, tmp_path):
     workbook.Close.assert_called_once_with(SaveChanges=False)
 
 
+def test_validate_template_checks_each_existing_roster_sheet_pair(monkeypatch, tmp_path):
+    plan = replace(
+        _plan(),
+        roster=RosterConfig(
+            Path("roster.xlsx"),
+            RosterLayout(
+                "Sheet1",
+                CellRef.parse("A1"),
+                CellRef.parse("B1"),
+                CellRef.parse("C1"),
+                CellRef.parse("D1"),
+            ),
+        ),
+        group_sheet_configs=(
+            GroupSheetConfig("盛世金源", "出勤明细-劳务", "考勤汇总表-劳务", "劳务"),
+        ),
+    )
+    base_detail = MagicMock()
+    base_summary = MagicMock()
+    labor_detail = MagicMock()
+    labor_summary = MagicMock()
+    for detail in (base_detail, labor_detail):
+        detail.Cells.return_value = _cell(value=1)
+    for summary in (base_summary, labor_summary):
+        summary.Cells.return_value = _cell(formula="=COUNTIF(A1:A2,1)")
+    sheets = {
+        "出勤明细": base_detail,
+        "考勤汇总表": base_summary,
+        "出勤明细-劳务": labor_detail,
+        "考勤汇总表-劳务": labor_summary,
+        1: base_detail,
+        2: base_summary,
+        3: labor_detail,
+        4: labor_summary,
+    }
+    for name, sheet in (
+        ("出勤明细", base_detail),
+        ("考勤汇总表", base_summary),
+        ("出勤明细-劳务", labor_detail),
+        ("考勤汇总表-劳务", labor_summary),
+    ):
+        sheet.Name = name
+    workbook = MagicMock()
+    workbook.Worksheets.Count = 4
+    workbook.Worksheets.side_effect = sheets.__getitem__
+    _patch_excel(monkeypatch, workbook)
+
+    ExcelComAdapter().validate_template(tmp_path / "template.xlsx", plan)
+
+    labor_detail.Cells.assert_called_once()
+    labor_summary.Cells.assert_called_once()
+
+
 def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch, tmp_path):
     plan = replace(
         _plan(),
@@ -152,7 +211,9 @@ def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch
     app.Quit.assert_called_once_with()
 
 
-def test_read_source_rejects_multiple_departments(monkeypatch, tmp_path):
+def test_read_source_preserves_multiple_departments_for_roster_reconciliation(
+    monkeypatch, tmp_path
+):
     plan = _plan()
     values = {(2, 1): "张三", (2, 3): "A", (3, 1): "李四", (3, 3): "B", (4, 1): ""}
     sheet = MagicMock()
@@ -161,8 +222,90 @@ def test_read_source_rejects_multiple_departments(monkeypatch, tmp_path):
     workbook.Worksheets.return_value = sheet
     _patch_excel(monkeypatch, workbook)
 
-    with pytest.raises(ValueError, match="多个部门"):
-        ExcelComAdapter().read_source(tmp_path / "source.xlsx", plan.source, 1)
+    source = ExcelComAdapter().read_source(tmp_path / "source.xlsx", plan.source, 1)
+
+    assert [employee.department for employee in source.employees] == ["A", "B"]
+
+
+def test_read_roster_skips_fully_blank_rows_and_preserves_source_rows(monkeypatch, tmp_path):
+    layout = RosterLayout(
+        "Sheet1",
+        CellRef.parse("A1"),
+        CellRef.parse("B1"),
+        CellRef.parse("C1"),
+        CellRef.parse("D1"),
+    )
+    values = {
+        (1, 1): "徐州中车",
+        (1, 2): "市场部",
+        (1, 3): "张三",
+        (1, 4): "001",
+        (3, 1): "盛世金源",
+        (3, 2): "市场部",
+        (3, 3): "李四",
+        (3, 4): "wb002",
+    }
+    sheet = MagicMock()
+    sheet.UsedRange.Row = 1
+    sheet.UsedRange.Rows.Count = 3
+    sheet.Cells.side_effect = lambda row, col: _cell(value=values.get((row, col)))
+    workbook = MagicMock()
+    workbook.Worksheets.return_value = sheet
+    _patch_excel(monkeypatch, workbook)
+
+    roster = ExcelComAdapter().read_roster(tmp_path / "roster.xlsx", layout)
+
+    assert [employee.source_row for employee in roster.employees] == [1, 3]
+    assert [employee.employee_id for employee in roster.employees] == ["001", "wb002"]
+
+
+def test_read_roster_reports_partial_row(monkeypatch, tmp_path):
+    layout = RosterLayout(
+        "Sheet1",
+        CellRef.parse("A1"),
+        CellRef.parse("B1"),
+        CellRef.parse("C1"),
+        CellRef.parse("D1"),
+    )
+    sheet = MagicMock()
+    sheet.UsedRange.Row = 1
+    sheet.UsedRange.Rows.Count = 1
+    sheet.Cells.side_effect = lambda row, col: _cell(
+        value={(1, 1): "徐州中车", (1, 2): "市场部", (1, 3): "张三"}.get((row, col))
+    )
+    workbook = MagicMock()
+    workbook.Worksheets.return_value = sheet
+    _patch_excel(monkeypatch, workbook)
+
+    with pytest.raises(ValueError, match="第 1 行缺少字段: 工号"):
+        ExcelComAdapter().read_roster(tmp_path / "roster.xlsx", layout)
+
+
+def test_read_roster_supports_independent_start_rows(monkeypatch, tmp_path):
+    layout = RosterLayout(
+        "Sheet1",
+        CellRef.parse("A1"),
+        CellRef.parse("B2"),
+        CellRef.parse("C3"),
+        CellRef.parse("D4"),
+    )
+    values = {
+        (1, 1): "徐州中车",
+        (2, 2): "市场部",
+        (3, 3): "张三",
+        (4, 4): "001",
+    }
+    sheet = MagicMock()
+    sheet.UsedRange.Row = 1
+    sheet.UsedRange.Rows.Count = 4
+    sheet.Cells.side_effect = lambda row, col: _cell(value=values.get((row, col)))
+    workbook = MagicMock()
+    workbook.Worksheets.return_value = sheet
+    _patch_excel(monkeypatch, workbook)
+
+    roster = ExcelComAdapter().read_roster(tmp_path / "roster.xlsx", layout)
+
+    assert roster.employees == (RosterEmployee("001", "张三", "市场部", "徐州中车", 3),)
 
 
 @pytest.mark.parametrize(
@@ -349,6 +492,73 @@ def test_prepare_group_sheets_copies_pairs_rebinds_formulas_and_deletes_bases(mo
     assert group_summary_b.Cells.Replace.call_count == 2
     base_summary.Delete.assert_called_once_with()
     base_detail.Delete.assert_called_once_with()
+
+
+def test_prepare_group_sheets_uses_existing_pairs_in_roster_mode():
+    plan = replace(
+        _plan(),
+        roster=RosterConfig(
+            Path("roster.xlsx"),
+            RosterLayout(
+                "Sheet1",
+                CellRef.parse("A1"),
+                CellRef.parse("B1"),
+                CellRef.parse("C1"),
+                CellRef.parse("D1"),
+            ),
+        ),
+    )
+    detail = MagicMock()
+    summary = MagicMock()
+    workbook = MagicMock()
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    source = SourceAttendance((EmployeeAttendance("张三", "市场部", ("正常",)),), "市场部")
+    group = PreparedGroup("徐州中车", source, (("√",),), "出勤明细", "考勤汇总表", ())
+
+    result = _prepare_group_sheets(workbook, plan, (group,))
+
+    assert result == ((group, detail, summary),)
+    detail.Copy.assert_not_called()
+    summary.Copy.assert_not_called()
+
+
+def test_write_column_preserves_employee_ids_as_text():
+    sheet = MagicMock()
+    target = MagicMock()
+    sheet.Range.return_value = target
+
+    _write_column(sheet, CellRef.parse("B7"), ("001", "wb002"), as_text=True)
+
+    assert target.NumberFormat == "@"
+    assert target.Value == (("001",), ("wb002",))
+
+
+def test_order_roster_group_sheets_uses_roster_group_order():
+    first_detail = MagicMock()
+    first_summary = MagicMock()
+    second_detail = MagicMock()
+    second_summary = MagicMock()
+    first_detail.Index = 3
+    first_summary.Index = 4
+    second_detail.Index = 1
+    second_summary.Index = 2
+    source = SourceAttendance((EmployeeAttendance("张三", "市场部", ("正常",)),), "市场部")
+    groups = (
+        PreparedGroup("A", source, (("√",),), "明细-A", "汇总-A", ()),
+        PreparedGroup("B", source, (("√",),), "明细-B", "汇总-B", ()),
+    )
+
+    _order_roster_group_sheets(
+        (
+            (groups[0], first_detail, first_summary),
+            (groups[1], second_detail, second_summary),
+        )
+    )
+
+    first_summary.Move.assert_called_once()
+    first_detail.Move.assert_called_once_with(first_summary)
+    second_summary.Move.assert_called_once()
+    second_detail.Move.assert_called_once_with(second_summary)
 
 
 def test_copy_worksheet_uses_positional_after_argument_for_dynamic_com():

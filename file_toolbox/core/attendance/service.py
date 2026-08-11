@@ -19,6 +19,7 @@ from file_toolbox.core.attendance.excel import (
     AttendanceExcelAdapter,
     ExcelComAdapter,
 )
+from file_toolbox.core.attendance.roster import resolve_roster
 from file_toolbox.core.attendance.rules import classify, compile_rules, render_content
 from file_toolbox.core.attendance.types import (
     AttendancePlan,
@@ -74,7 +75,9 @@ class AttendanceService:
         self, request: AttendanceRequest, cancel_check: CancelCheck | None = None
     ) -> AttendanceResult:
         prepared = self._prepare(request, cancel_check)
-        if prepared.preview.unmatched:
+        if not prepared.preview.can_generate:
+            if prepared.preview.errors:
+                raise AttendanceError("；".join(prepared.preview.errors[:3]))
             raise AttendanceError(
                 f"存在 {len(prepared.preview.unmatched)} 条未匹配考勤，不能生成结果"
             )
@@ -117,6 +120,7 @@ class AttendanceService:
             status_counts=prepared.preview.status_counts,
             group_counts=prepared.preview.group_counts,
             target_sheets=prepared.preview.target_sheets,
+            warnings=prepared.preview.warnings,
         )
         if self._history_store is not None:
             try:
@@ -132,6 +136,12 @@ class AttendanceService:
                         "status_counts": dict(result.status_counts),
                         "group_counts": dict(result.group_counts),
                         "target_sheets": dict(result.target_sheets),
+                        "roster": (
+                            str(request.plan.roster.workbook_path)
+                            if request.plan.roster is not None
+                            else None
+                        ),
+                        "excluded_count": prepared.preview.excluded_count,
                     },
                 )
             except Exception as exc:  # noqa: BLE001 - 输出已提交，历史只能降级为警告
@@ -142,7 +152,10 @@ class AttendanceService:
                     status_counts=result.status_counts,
                     group_counts=result.group_counts,
                     target_sheets=result.target_sheets,
-                    warnings=(f"结果已生成，但历史记录保存失败: {exc}",),
+                    warnings=(
+                        *result.warnings,
+                        f"结果已生成，但历史记录保存失败: {exc}",
+                    ),
                 )
         return result
 
@@ -162,22 +175,64 @@ class AttendanceService:
                 context.day_count,
                 cancel_check,
             )
+            if request.plan.roster is None:
+                departments = {
+                    employee.department.strip()
+                    for employee in source.employees
+                    if employee.department.strip()
+                }
+                if len(departments) > 1:
+                    raise ValueError("源考勤包含多个部门，首版不支持自动拆分")
+            roster_data = (
+                self._excel.read_roster(
+                    request.plan.roster.workbook_path,
+                    request.plan.roster.layout,
+                    cancel_check,
+                )
+                if request.plan.roster is not None
+                else None
+            )
         except InterruptedError as exc:
             raise AttendanceCancelled("操作已取消") from exc
         except (OSError, ValueError) as exc:
             raise AttendanceError(str(exc)) from exc
 
-        source, employee_previews = self._apply_employee_group_overrides(source, request.plan)
-        employee_groups = self._partition_employees(source, request.plan.split_by_group)
-        target_sheets = self._allocate_target_sheets(
-            tuple(employee_groups), request, template_sheets
-        )
+        errors: tuple[str, ...] = ()
+        warnings: tuple[str, ...] = ()
+        excluded_count = 0
+        remove_sheet_pairs: tuple[tuple[str, str], ...] = ()
+        group_aliases: dict[str, str] = {}
+        if roster_data is not None:
+            resolution = resolve_roster(
+                source, roster_data, request.plan, template_sheets, context.day_count
+            )
+            source = resolution.source
+            employee_previews = resolution.employees
+            target_sheets = resolution.target_sheets
+            group_aliases = resolution.group_aliases
+            errors = resolution.errors
+            warnings = resolution.warnings
+            excluded_count = resolution.excluded_count
+            remove_sheet_pairs = resolution.remove_sheet_pairs
+            employee_groups = self._partition_employees(source, True)
+        else:
+            source, employee_previews = self._apply_employee_group_overrides(source, request.plan)
+            employee_groups = self._partition_employees(source, request.plan.split_by_group)
+            target_sheets = self._allocate_target_sheets(
+                tuple(employee_groups), request, template_sheets
+            )
         unmatched: list[UnmatchedAttendance] = []
         counts: Counter[str] = Counter()
         prepared_groups: list[PreparedGroup] = []
         try:
             for group_name, employees in employee_groups.items():
-                group_source = SourceAttendance(tuple(employees), source.department)
+                departments = {
+                    employee.department.strip()
+                    for employee in employees
+                    if employee.department.strip()
+                }
+                group_department = next(iter(departments), "") if len(departments) == 1 else ""
+                group_source = SourceAttendance(tuple(employees), group_department)
                 symbols = self._classify_group(group_source, compiled, counts, unmatched)
                 detail_sheet, summary_sheet = target_sheets[group_name]
                 mapping_values = self._group_mapping_values(
@@ -187,6 +242,7 @@ class AttendanceService:
                     detail_sheet,
                     summary_sheet,
                     context.day_count,
+                    group_aliases.get(group_name, ""),
                 )
                 prepared_groups.append(
                     PreparedGroup(
@@ -204,7 +260,7 @@ class AttendanceService:
 
         group_counts = (
             {name: len(employees) for name, employees in employee_groups.items()}
-            if request.plan.split_by_group
+            if request.plan.split_by_group or request.plan.roster is not None
             else {}
         )
         preview = AttendancePreview(
@@ -220,11 +276,19 @@ class AttendanceService:
             group_counts=group_counts,
             target_sheets=target_sheets if request.plan.split_by_group else {},
             employees=employee_previews,
+            errors=errors,
+            warnings=warnings,
+            excluded_count=excluded_count,
+            roster_path=(
+                request.plan.roster.workbook_path if request.plan.roster is not None else None
+            ),
         )
         return PreparedAttendance(
             groups=tuple(prepared_groups),
             preview=preview,
             global_mapping_values=global_mapping_values,
+            remove_sheet_pairs=remove_sheet_pairs,
+            roster_mode=request.plan.roster is not None,
         )
 
     @staticmethod
@@ -396,6 +460,7 @@ class AttendanceService:
         attendance_group: str,
         day_count: int,
         sheet_name: str,
+        group_alias: str = "",
     ) -> tuple[str, CellRef, str]:
         return (
             sheet_name,
@@ -407,6 +472,8 @@ class AttendanceService:
                 last_day=day_count,
                 department=department,
                 attendance_group=attendance_group,
+                roster_group=attendance_group if request.plan.roster is not None else "",
+                group_alias=group_alias,
             ),
         )
 
@@ -419,6 +486,7 @@ class AttendanceService:
         detail_sheet: str,
         summary_sheet: str,
         day_count: int,
+        group_alias: str = "",
     ) -> tuple[tuple[str, CellRef, str], ...]:
         base_sheets = {
             request.plan.target.detail_sheet.casefold(): detail_sheet,
@@ -438,6 +506,7 @@ class AttendanceService:
                     group_name,
                     day_count,
                     sheet_name,
+                    group_alias,
                 )
             )
         return tuple(values)
@@ -454,8 +523,11 @@ class AttendanceService:
         for mapping in request.plan.mappings:
             if mapping.sheet_name.casefold() in base_sheets:
                 continue
-            if request.plan.split_by_group and "{{attendance_group}}" in mapping.content_template:
-                raise ValueError("非分组工作表的固定映射不能使用 {{attendance_group}}")
+            group_tokens = ("{{attendance_group}}", "{{roster_group}}", "{{group_alias}}")
+            if request.plan.split_by_group and any(
+                token in mapping.content_template for token in group_tokens
+            ):
+                raise ValueError("非分组工作表的固定映射不能使用分组变量")
             values.append(
                 cls._render_mapping(
                     mapping,
@@ -484,6 +556,15 @@ class AttendanceService:
             raise AttendanceError("原始考勤必须是 .xlsx")
         if request.plan.template_path.suffix.lower() != ".xlsx":
             raise AttendanceError("模板必须是 .xlsx")
+        if request.plan.roster is not None:
+            if not request.plan.roster.workbook_path.is_file():
+                raise AttendanceError(f"人员名单不存在: {request.plan.roster.workbook_path}")
+            if request.plan.roster.workbook_path.suffix.lower() != ".xlsx":
+                raise AttendanceError("人员名单必须是 .xlsx")
+            if not request.plan.split_by_group:
+                raise AttendanceError("启用人员名单时必须按名单分组输出")
+            if request.plan.employee_group_overrides:
+                raise AttendanceError("名单模式不能使用原始考勤人员调组")
         if request.output_path.suffix.lower() != ".xlsx":
             raise AttendanceError("输出文件必须是 .xlsx")
         if not request.output_path.parent.is_dir():
@@ -493,9 +574,16 @@ class AttendanceService:
             request.plan.template_path.resolve(),
             request.output_path.resolve(),
         }
-        if len(resolved) != 3:
+        if request.plan.roster is not None:
+            resolved.add(request.plan.roster.workbook_path.resolve())
+        expected_paths = 4 if request.plan.roster is not None else 3
+        if len(resolved) != expected_paths:
             raise AttendanceError("输出文件不能与原始考勤或模板相同")
-        if request.plan.split_by_group and request.plan.source.attendance_group_start is None:
+        if (
+            request.plan.roster is None
+            and request.plan.split_by_group
+            and request.plan.source.attendance_group_start is None
+        ):
             raise AttendanceError("按考勤组拆分时必须配置源考勤组起始单元格")
         return _RunContext(request, day_count)
 
