@@ -1,4 +1,4 @@
-"""File Toolbox 主窗口:QMainWindow + 4 Tab。"""
+"""File Toolbox 主窗口：QMainWindow + 6 个功能 Tab。"""
 
 import contextlib
 
@@ -21,6 +21,7 @@ from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.metadata import VERSION
 from file_toolbox.gui.dialogs import (
     AboutTab,
+    AttendanceTab,
     BatchFolderCreatorDialog,
     ContentReplaceDialog,
     FileRenamerDialog,
@@ -33,7 +34,7 @@ from file_toolbox.updater.versions import RemoteRelease
 
 
 class MainWindow(QMainWindow):
-    """工具箱主窗口,4 个功能 Tab。"""
+    """工具箱主窗口，6 个功能 Tab。"""
 
     def __init__(self) -> None:
         super().__init__()
@@ -58,18 +59,20 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
-        # 5 Tab
+        # 6 个功能 Tab + 关于
         tabs = QTabWidget()
         self._tabs = tabs
         self._rename_tab = FileRenamerDialog()
         self._mkdir_tab = BatchFolderCreatorDialog()
         self._pdf_tab = PDFGeneratorDialog()
         self._replace_tab = ContentReplaceDialog()
+        self._attendance_tab = AttendanceTab()
         self._invoice_tab = InvoiceTab()
         tabs.addTab(self._rename_tab, "重命名")
         tabs.addTab(self._mkdir_tab, "建文件夹")
         tabs.addTab(self._pdf_tab, "生成PDF")
         tabs.addTab(self._replace_tab, "内容替换")
+        tabs.addTab(self._attendance_tab, "考勤汇总")
         tabs.addTab(self._invoice_tab, "发票识别")
         self._about_tab = AboutTab()
         tabs.addTab(self._about_tab, "关于")
@@ -79,6 +82,7 @@ class MainWindow(QMainWindow):
             "mkdir",
             "pdf",
             "replace",
+            "attendance",
             "invoice",
             None,
         ]
@@ -278,6 +282,7 @@ class MainWindow(QMainWindow):
             self._mkdir_tab,
             self._pdf_tab,
             self._replace_tab,
+            self._attendance_tab,
             self._invoice_tab,
             self._about_tab,
         ):
@@ -285,6 +290,9 @@ class MainWindow(QMainWindow):
                 # 触发各 tab 的清理(吞掉异常避免一个 tab 清理失败影响其余)
                 with contextlib.suppress(Exception):
                     tab.closeEvent(event)
+        if self._attendance_tab.close_pending:
+            event.ignore()
+            return
         super().closeEvent(event)
 
 

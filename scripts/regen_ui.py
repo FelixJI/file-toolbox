@@ -59,6 +59,10 @@ class UiMapping:
 # 该映射即生效(否则 _FORMS_DIR 下找不到该 .ui,该模块按手维护处理)。
 UI_SOURCES: list[UiMapping] = [
     UiMapping(
+        ui_module="ui_attendance_dialog.py",
+        ui_file="attendance_dialog.ui",
+    ),
+    UiMapping(
         ui_module="ui_mkdir_dialog.py",
         ui_file="batch_folder_creator_dialog.ui",
     ),
@@ -144,6 +148,10 @@ def _run_uic(ui_path: Path, output_path: Path) -> None:
         raise RuntimeError(
             f"pyside6-uic 失败({proc.returncode})处理 {ui_path}:\n{proc.stdout}\n{proc.stderr}"
         )
+    # uic 当前会在文件末尾写入一个额外空行，统一为单个换行，避免新生成文件
+    # 触发 `git diff --check` 的 blank line at EOF；内容仍完全由 .ui 再生。
+    generated = output_path.read_text(encoding="utf-8")
+    output_path.write_text(generated.rstrip() + "\n", encoding="utf-8")
 
 
 def _active_mappings() -> list[tuple[UiMapping, Path]]:

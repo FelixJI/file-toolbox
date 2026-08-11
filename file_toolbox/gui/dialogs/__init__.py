@@ -1,6 +1,7 @@
 """GUI 对话框/Tab。"""
 
 from .about_tab import AboutTab
+from .attendance_tab import AttendanceTab
 from .history_dialog import HistoryDialog
 from .invoice_tab import InvoiceTab
 from .mkdir_tab import BatchFolderCreatorDialog
@@ -16,4 +17,5 @@ __all__ = [
     "HistoryDialog",
     "InvoiceTab",
     "AboutTab",
+    "AttendanceTab",
 ]

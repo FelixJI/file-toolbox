@@ -81,11 +81,24 @@ def init_office_app(prog_id: str) -> Any:
     return app
 
 
-def dispose_office_app(app: Any | None, *, gc_pause: float = 0.0) -> None:
+def init_isolated_office_app(prog_id: str) -> Any:
+    """用 DispatchEx 创建不附着用户现有会话的 Office app。"""
+    import win32com.client
+
+    dispatch_ex: Any = win32com.client.DispatchEx
+    app = dispatch_ex(prog_id)
+    app.Visible = False
+    app.DisplayAlerts = False
+    return app
+
+
+def dispose_office_app(
+    app: Any | None, *, gc_pause: float = 0.0, raise_on_error: bool = False
+) -> None:
     """安全 Quit 一个 Office app 并触发 gc(批末清理用)。
 
     - app 为 None 时 no-op。
-    - Quit 失败被吞(COM 进程可能已退出/无响应)。
+    - 默认吞掉 Quit 失败；``raise_on_error=True`` 时完成 gc 后抛出。
     - 始终 ``gc.collect()`` 释放 COM 对象;``gc_pause > 0`` 时 gc 后再 sleep,用于
       批间彻底释放(与原 ``Quit→gc.collect→time.sleep`` 时序一致:gc 在前,sleep 在后)。
 
@@ -94,8 +107,13 @@ def dispose_office_app(app: Any | None, *, gc_pause: float = 0.0) -> None:
     """
     if app is None:
         return
-    with contextlib.suppress(Exception):
+    quit_error: Exception | None = None
+    try:
         app.Quit()
+    except Exception as exc:  # COM 已断开/进程已退出
+        quit_error = exc
     gc.collect()
     if gc_pause > 0:
         time.sleep(gc_pause)
+    if quit_error is not None and raise_on_error:
+        raise RuntimeError(f"关闭 Office 应用失败: {quit_error}") from quit_error

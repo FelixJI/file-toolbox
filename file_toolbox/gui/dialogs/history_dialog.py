@@ -1,7 +1,7 @@
 """历史记录对话框:查看各工具操作历史(基于 JsonHistoryStore)。
 
 rename 历史额外提供「撤销」按钮:把 rename_map 反转后执行反向重命名。
-其余工具(PDF/文件夹/发票)操作不可逆,仅展示记录。
+其余工具(PDF/文件夹/发票/考勤)操作不可逆，仅展示记录。
 """
 
 from pathlib import Path
@@ -45,6 +45,12 @@ def _summary_label(tool: str, data: dict[str, Any]) -> str:
         files = data.get("file_count", 0)
         fmt = data.get("fmt", "?")
         return f"{inv} 张发票 / {files} 文件 [{fmt}]"
+    if tool == "attendance":
+        employees = data.get("employee_count", 0)
+        year = data.get("year", "?")
+        month = data.get("month", "?")
+        output = Path(str(data.get("output", ""))).name
+        return f"{year}-{month} / {employees} 人 → {output}"
     return str(data)[:40]
 
 
