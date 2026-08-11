@@ -22,9 +22,12 @@
       <item row="1" column="0"><widget class="QLabel" name="label_template"><property name="text"><string>汇总模板</string></property></widget></item>
       <item row="1" column="1" colspan="5"><widget class="QLineEdit" name="edit_template"><property name="placeholderText"><string>选择不会被修改的模板 .xlsx</string></property></widget></item>
       <item row="1" column="6"><widget class="QPushButton" name="btn_template"><property name="text"><string>浏览…</string></property></widget></item>
-      <item row="2" column="0"><widget class="QLabel" name="label_output"><property name="text"><string>另存结果</string></property></widget></item>
-      <item row="2" column="1" colspan="5"><widget class="QLineEdit" name="edit_output"><property name="placeholderText"><string>指定新的输出 .xlsx，不能与源文件或模板相同</string></property></widget></item>
-      <item row="2" column="6"><widget class="QPushButton" name="btn_output"><property name="text"><string>浏览…</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="label_output_dir"><property name="text"><string>保存目录</string></property></widget></item>
+      <item row="2" column="1" colspan="5"><widget class="QLineEdit" name="edit_output_dir"><property name="placeholderText"><string>选择结果保存位置</string></property></widget></item>
+      <item row="2" column="6"><widget class="QPushButton" name="btn_output"><property name="text"><string>选择目录…</string></property></widget></item>
+      <item row="3" column="0"><widget class="QLabel" name="label_output_name"><property name="text"><string>文件名</string></property></widget></item>
+      <item row="3" column="1" colspan="5"><widget class="QLineEdit" name="edit_output_name"><property name="placeholderText"><string>自定义结果文件名（自动补 .xlsx）</string></property></widget></item>
+      <item row="3" column="6"><widget class="QPushButton" name="btn_output_name"><property name="text"><string>自动命名</string></property></widget></item>
      </layout>
     </widget>
    </item>
@@ -85,8 +88,8 @@
      <widget class="QWidget" name="tab_mappings">
       <attribute name="title"><string>固定单元格</string></attribute>
       <layout class="QVBoxLayout" name="layout_mappings">
-       <item><widget class="QLabel" name="label_mapping_help"><property name="text"><string>内容支持 {{year}}、{{month}}、{{month_start}}、{{month_end}}、{{department}}；分组明细/汇总还支持 {{attendance_group}}</string></property></widget></item>
-       <item><widget class="QTableWidget" name="table_mappings"><property name="columnCount"><number>3</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>Sheet 名</string></property></column><column><property name="text"><string>单元格</string></property></column><column><property name="text"><string>内容</string></property></column></widget></item>
+       <item><widget class="QLabel" name="label_mapping_help"><property name="text"><string>从下拉框选择模板明细/汇总 Sheet；分组输出时会自动写入预览表所列的每组实际 Sheet。内容支持 {{year}}、{{month}}、{{month_start}}、{{month_end}}、{{department}}、{{attendance_group}}</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+       <item><widget class="QTableWidget" name="table_mappings"><property name="columnCount"><number>3</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>目标 Sheet</string></property></column><column><property name="text"><string>单元格</string></property></column><column><property name="text"><string>内容</string></property></column></widget></item>
        <item><layout class="QHBoxLayout" name="layout_mapping_buttons"><item><widget class="QPushButton" name="btn_add_mapping"><property name="text"><string>新增映射</string></property></widget></item><item><widget class="QPushButton" name="btn_remove_mapping"><property name="text"><string>删除选中</string></property></widget></item><item><spacer name="mapping_spacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
       </layout>
      </widget>

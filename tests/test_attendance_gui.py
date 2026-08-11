@@ -16,6 +16,8 @@ from file_toolbox.core.attendance import (  # noqa: E402
     AttendancePlanStore,
     AttendancePreview,
     AttendanceResult,
+    CellMapping,
+    CellRef,
     EmployeeGroupOverride,
     EmployeeGroupPreview,
     GroupSheetConfig,
@@ -42,7 +44,8 @@ def tab(app, tmp_path):
     template.write_bytes(b"template")
     widget.ui.edit_source.setText(str(source))
     widget.ui.edit_template.setText(str(template))
-    widget.ui.edit_output.setText(str(tmp_path / "out.xlsx"))
+    widget.ui.edit_output_dir.setText(str(tmp_path))
+    widget.ui.edit_output_name.setText("out.xlsx")
     widget.ui.spin_year.setValue(2026)
     widget.ui.spin_month.setValue(7)
     return widget
@@ -342,3 +345,90 @@ def test_worker_finished_cleanup_runs_on_gui_thread(tab, app, monkeypatch):
     assert tab._worker is None
     assert callback_threads == [app.thread()]
     tab._close_pending = False
+
+
+def test_output_picker_selects_directory_and_generates_editable_filename(
+    tab, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.attendance_tab.QFileDialog.getExistingDirectory",
+        lambda *args: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.attendance_tab.QFileDialog.getSaveFileName",
+        lambda *args: (_ for _ in ()).throw(AssertionError("不应选择尚未生成的具体文件")),
+    )
+    tab.ui.edit_plan_name.setText("市场部")
+    tab.ui.spin_year.setValue(2026)
+    tab.ui.spin_month.setValue(7)
+    tab.ui.edit_output_name.clear()
+
+    tab._browse_output()
+
+    assert tab.ui.edit_output_dir.text() == str(tmp_path)
+    assert tab.ui.edit_output_name.text() == "市场部-2026年07月考勤汇总.xlsx"
+    assert tab._build_request().output_path == tmp_path / "市场部-2026年07月考勤汇总.xlsx"
+
+
+def test_output_picker_preserves_custom_filename(tab, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.attendance_tab.QFileDialog.getExistingDirectory",
+        lambda *args: str(tmp_path),
+    )
+    tab.ui.edit_output_name.setText("自定义名称.xlsx")
+
+    tab._browse_output()
+
+    assert tab.ui.edit_output_name.text() == "自定义名称.xlsx"
+
+
+def test_custom_output_filename_is_normalized_and_rejects_paths(tab, tmp_path):
+    tab.ui.edit_output_dir.setText(str(tmp_path))
+    tab.ui.edit_output_name.setText("自定义结果.xls")
+
+    assert tab._build_request().output_path == tmp_path / "自定义结果.xlsx"
+
+    tab.ui.edit_output_name.setText("子目录/结果.xlsx")
+    with pytest.raises(ValueError, match="不能包含路径"):
+        tab._build_request()
+
+
+def test_fixed_mapping_sheet_uses_controlled_target_selector(tab):
+    tab._add_mapping()
+
+    selector = tab.ui.table_mappings.cellWidget(0, 0)
+
+    assert selector is not None
+    assert [selector.itemText(index) for index in range(selector.count())] == [
+        "出勤明细",
+        "考勤汇总表",
+    ]
+
+
+def test_fixed_mapping_selector_follows_target_sheet_rename(tab):
+    tab._add_mapping()
+    selector = tab.ui.table_mappings.cellWidget(0, 0)
+    selector.setCurrentIndex(1)
+    tab.ui.table_mappings.item(0, 1).setText("A1")
+    tab.ui.table_mappings.item(0, 2).setText("{{month}}月")
+
+    tab.ui.edit_summary_sheet.setText("自定义汇总基准")
+
+    assert selector.currentText() == "自定义汇总基准"
+    assert tab._build_plan().mappings == (
+        CellMapping("自定义汇总基准", CellRef.parse("A1"), "{{month}}月"),
+    )
+
+
+def test_fixed_mapping_selector_preserves_legacy_sheet_from_saved_plan(tab):
+    tab._set_mappings((CellMapping("封面", CellRef.parse("B2"), "{{month_start}}"),))
+
+    selector = tab.ui.table_mappings.cellWidget(0, 0)
+
+    assert [selector.itemText(index) for index in range(selector.count())] == [
+        "出勤明细",
+        "考勤汇总表",
+        "封面",
+    ]
+    assert selector.currentText() == "封面"
+    assert tab._build_plan().mappings[0].sheet_name == "封面"

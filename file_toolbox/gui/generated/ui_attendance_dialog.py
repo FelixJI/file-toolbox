@@ -86,20 +86,35 @@ class Ui_AttendanceDialog(object):
 
         self.grid_files.addWidget(self.btn_template, 1, 6, 1, 1)
 
-        self.label_output = QLabel(self.group_files)
-        self.label_output.setObjectName(u"label_output")
+        self.label_output_dir = QLabel(self.group_files)
+        self.label_output_dir.setObjectName(u"label_output_dir")
 
-        self.grid_files.addWidget(self.label_output, 2, 0, 1, 1)
+        self.grid_files.addWidget(self.label_output_dir, 2, 0, 1, 1)
 
-        self.edit_output = QLineEdit(self.group_files)
-        self.edit_output.setObjectName(u"edit_output")
+        self.edit_output_dir = QLineEdit(self.group_files)
+        self.edit_output_dir.setObjectName(u"edit_output_dir")
 
-        self.grid_files.addWidget(self.edit_output, 2, 1, 1, 5)
+        self.grid_files.addWidget(self.edit_output_dir, 2, 1, 1, 5)
 
         self.btn_output = QPushButton(self.group_files)
         self.btn_output.setObjectName(u"btn_output")
 
         self.grid_files.addWidget(self.btn_output, 2, 6, 1, 1)
+
+        self.label_output_name = QLabel(self.group_files)
+        self.label_output_name.setObjectName(u"label_output_name")
+
+        self.grid_files.addWidget(self.label_output_name, 3, 0, 1, 1)
+
+        self.edit_output_name = QLineEdit(self.group_files)
+        self.edit_output_name.setObjectName(u"edit_output_name")
+
+        self.grid_files.addWidget(self.edit_output_name, 3, 1, 1, 5)
+
+        self.btn_output_name = QPushButton(self.group_files)
+        self.btn_output_name.setObjectName(u"btn_output_name")
+
+        self.grid_files.addWidget(self.btn_output_name, 3, 6, 1, 1)
 
 
         self.verticalLayout.addWidget(self.group_files)
@@ -269,6 +284,7 @@ class Ui_AttendanceDialog(object):
         self.layout_mappings.setObjectName(u"layout_mappings")
         self.label_mapping_help = QLabel(self.tab_mappings)
         self.label_mapping_help.setObjectName(u"label_mapping_help")
+        self.label_mapping_help.setWordWrap(True)
 
         self.layout_mappings.addWidget(self.label_mapping_help)
 
@@ -476,9 +492,12 @@ class Ui_AttendanceDialog(object):
         self.label_template.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b\u6a21\u677f", None))
         self.edit_template.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u9009\u62e9\u4e0d\u4f1a\u88ab\u4fee\u6539\u7684\u6a21\u677f .xlsx", None))
         self.btn_template.setText(QCoreApplication.translate("AttendanceDialog", u"\u6d4f\u89c8\u2026", None))
-        self.label_output.setText(QCoreApplication.translate("AttendanceDialog", u"\u53e6\u5b58\u7ed3\u679c", None))
-        self.edit_output.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u6307\u5b9a\u65b0\u7684\u8f93\u51fa .xlsx\uff0c\u4e0d\u80fd\u4e0e\u6e90\u6587\u4ef6\u6216\u6a21\u677f\u76f8\u540c", None))
-        self.btn_output.setText(QCoreApplication.translate("AttendanceDialog", u"\u6d4f\u89c8\u2026", None))
+        self.label_output_dir.setText(QCoreApplication.translate("AttendanceDialog", u"\u4fdd\u5b58\u76ee\u5f55", None))
+        self.edit_output_dir.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u9009\u62e9\u7ed3\u679c\u4fdd\u5b58\u4f4d\u7f6e", None))
+        self.btn_output.setText(QCoreApplication.translate("AttendanceDialog", u"\u9009\u62e9\u76ee\u5f55\u2026", None))
+        self.label_output_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u6587\u4ef6\u540d", None))
+        self.edit_output_name.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u81ea\u5b9a\u4e49\u7ed3\u679c\u6587\u4ef6\u540d\uff08\u81ea\u52a8\u8865 .xlsx\uff09", None))
+        self.btn_output_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u81ea\u52a8\u547d\u540d", None))
         self.group_plan.setTitle(QCoreApplication.translate("AttendanceDialog", u"\u65b9\u6848", None))
         self.edit_plan_name.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u65b9\u6848\u540d\u79f0", None))
         self.btn_load_plan.setText(QCoreApplication.translate("AttendanceDialog", u"\u52a0\u8f7d", None))
@@ -498,9 +517,9 @@ class Ui_AttendanceDialog(object):
         self.label_summary_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u6c47\u603b\u59d3\u540d\u8d77\u59cb", None))
         self.chk_split_groups.setText(QCoreApplication.translate("AttendanceDialog", u"\u6309\u8003\u52e4\u7ec4\u62c6\u5206\uff08\u6bcf\u7ec4\u81ea\u52a8\u751f\u6210\u660e\u7ec6/\u6c47\u603b Sheet\uff09", None))
         self.config_tabs.setTabText(self.config_tabs.indexOf(self.tab_layout), QCoreApplication.translate("AttendanceDialog", u"\u5de5\u4f5c\u8868\u4e0e\u5750\u6807", None))
-        self.label_mapping_help.setText(QCoreApplication.translate("AttendanceDialog", u"\u5185\u5bb9\u652f\u6301 {{year}}\u3001{{month}}\u3001{{month_start}}\u3001{{month_end}}\u3001{{department}}\uff1b\u5206\u7ec4\u660e\u7ec6/\u6c47\u603b\u8fd8\u652f\u6301 {{attendance_group}}", None))
+        self.label_mapping_help.setText(QCoreApplication.translate("AttendanceDialog", u"\u4ece\u4e0b\u62c9\u6846\u9009\u62e9\u6a21\u677f\u660e\u7ec6/\u6c47\u603b Sheet\uff1b\u5206\u7ec4\u8f93\u51fa\u65f6\u4f1a\u81ea\u52a8\u5199\u5165\u9884\u89c8\u8868\u6240\u5217\u7684\u6bcf\u7ec4\u5b9e\u9645 Sheet\u3002\u5185\u5bb9\u652f\u6301 {{year}}\u3001{{month}}\u3001{{month_start}}\u3001{{month_end}}\u3001{{department}}\u3001{{attendance_group}}", None))
         ___qtablewidgetitem = self.table_mappings.horizontalHeaderItem(0)
-        ___qtablewidgetitem.setText(QCoreApplication.translate("AttendanceDialog", u"Sheet \u540d", None))
+        ___qtablewidgetitem.setText(QCoreApplication.translate("AttendanceDialog", u"\u76ee\u6807 Sheet", None))
         ___qtablewidgetitem1 = self.table_mappings.horizontalHeaderItem(1)
         ___qtablewidgetitem1.setText(QCoreApplication.translate("AttendanceDialog", u"\u5355\u5143\u683c", None))
         ___qtablewidgetitem2 = self.table_mappings.horizontalHeaderItem(2)

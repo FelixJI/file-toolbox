@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -9,7 +10,14 @@ from typing import Literal
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QMessageBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QWidget,
+)
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.attendance import (
@@ -32,6 +40,10 @@ from file_toolbox.gui.generated.ui_attendance_dialog import Ui_AttendanceDialog
 from file_toolbox.gui.workers import AttendanceWorker
 
 _WORKER_CLOSE_WAIT_MS = 5000
+_INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_MAPPING_DETAIL_ROLE = "detail"
+_MAPPING_SUMMARY_ROLE = "summary"
+_MAPPING_LEGACY_ROLE = "legacy"
 
 
 class AttendanceTab(QWidget):
@@ -107,6 +119,7 @@ class AttendanceTab(QWidget):
         self.ui.btn_source.clicked.connect(self._browse_source)
         self.ui.btn_template.clicked.connect(self._browse_template)
         self.ui.btn_output.clicked.connect(self._browse_output)
+        self.ui.btn_output_name.clicked.connect(self._generate_output_name)
         self.ui.btn_load_plan.clicked.connect(self._load_plan)
         self.ui.btn_save_plan.clicked.connect(self._save_plan)
         self.ui.btn_delete_plan.clicked.connect(self._delete_plan)
@@ -125,7 +138,8 @@ class AttendanceTab(QWidget):
         for edit in (
             self.ui.edit_source,
             self.ui.edit_template,
-            self.ui.edit_output,
+            self.ui.edit_output_dir,
+            self.ui.edit_output_name,
             self.ui.edit_plan_name,
             self.ui.edit_source_sheet,
             self.ui.edit_source_name,
@@ -146,6 +160,8 @@ class AttendanceTab(QWidget):
         self.ui.table_group_preview.cellChanged.connect(self._preview_adjustments_changed)
         self.ui.table_employee_preview.cellChanged.connect(self._preview_adjustments_changed)
         self.ui.chk_split_groups.toggled.connect(self._invalidate_preview)
+        self.ui.edit_detail_sheet.textChanged.connect(self._refresh_mapping_sheet_selectors)
+        self.ui.edit_summary_sheet.textChanged.connect(self._refresh_mapping_sheet_selectors)
 
     def _browse_source(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择原始考勤", "", "Excel (*.xlsx)")
@@ -158,9 +174,23 @@ class AttendanceTab(QWidget):
             self.ui.edit_template.setText(path)
 
     def _browse_output(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "另存考勤汇总", "", "Excel (*.xlsx)")
-        if path:
-            self.ui.edit_output.setText(str(Path(path).with_suffix(".xlsx")))
+        current = self.ui.edit_output_dir.text().strip()
+        initial = current if Path(current).is_dir() else ""
+        path = QFileDialog.getExistingDirectory(self, "选择考勤汇总保存目录", initial)
+        if not path:
+            return
+        self.ui.edit_output_dir.setText(path)
+        if not self.ui.edit_output_name.text().strip():
+            self._generate_output_name()
+
+    def _generate_output_name(self) -> None:
+        plan_name = _INVALID_FILENAME_CHARS_RE.sub(
+            "_", self.ui.edit_plan_name.text().strip()
+        ).strip(" .")
+        prefix = plan_name or "考勤汇总"
+        self.ui.edit_output_name.setText(
+            f"{prefix}-{self.ui.spin_year.value()}年{self.ui.spin_month.value():02d}月考勤汇总.xlsx"
+        )
 
     def _refresh_plans(self, selected: str = "") -> None:
         self.ui.cmb_plan.clear()
@@ -291,15 +321,21 @@ class AttendanceTab(QWidget):
 
     def _build_request(self, *, allow_overwrite: bool = False) -> AttendanceRequest:
         source = self.ui.edit_source.text().strip()
-        output = self.ui.edit_output.text().strip()
+        output_dir = self.ui.edit_output_dir.text().strip()
+        output_name = self.ui.edit_output_name.text().strip()
         if not source:
             raise ValueError("请选择原始考勤")
-        if not output:
-            raise ValueError("请指定另存结果")
+        if not output_dir:
+            raise ValueError("请选择结果保存目录")
+        if not output_name:
+            raise ValueError("请指定结果文件名")
+        if Path(output_name).name != output_name or _INVALID_FILENAME_CHARS_RE.search(output_name):
+            raise ValueError("结果文件名不能包含路径或 Windows 非法字符")
+        normalized_name = Path(output_name).with_suffix(".xlsx").name
         return AttendanceRequest(
             plan=self._build_plan(),
             source_path=Path(source),
-            output_path=Path(output),
+            output_path=Path(output_dir) / normalized_name,
             year=self.ui.spin_year.value(),
             month=self.ui.spin_month.value(),
             allow_overwrite=allow_overwrite,
@@ -314,10 +350,10 @@ class AttendanceTab(QWidget):
     def _mappings(self) -> tuple[CellMapping, ...]:
         result: list[CellMapping] = []
         for row in range(self.ui.table_mappings.rowCount()):
-            sheet = self._item_text(self.ui.table_mappings, row, 0)
+            sheet = self._mapping_sheet_name(row)
             cell = self._item_text(self.ui.table_mappings, row, 1)
             content = self._item_text(self.ui.table_mappings, row, 2)
-            if not sheet and not cell and not content:
+            if not cell and not content:
                 continue
             result.append(
                 CellMapping(
@@ -354,9 +390,52 @@ class AttendanceTab(QWidget):
         for mapping in mappings:
             row = self.ui.table_mappings.rowCount()
             self.ui.table_mappings.insertRow(row)
-            self.ui.table_mappings.setItem(row, 0, QTableWidgetItem(mapping.sheet_name))
+            self.ui.table_mappings.setCellWidget(
+                row, 0, self._mapping_sheet_selector(mapping.sheet_name)
+            )
             self.ui.table_mappings.setItem(row, 1, QTableWidgetItem(mapping.cell.address))
             self.ui.table_mappings.setItem(row, 2, QTableWidgetItem(mapping.content_template))
+
+    def _mapping_sheet_selector(self, selected: str = "") -> QComboBox:
+        selector = QComboBox(self.ui.table_mappings)
+        detail_sheet = self.ui.edit_detail_sheet.text().strip()
+        summary_sheet = self.ui.edit_summary_sheet.text().strip()
+        selector.addItem(detail_sheet or "明细 Sheet", _MAPPING_DETAIL_ROLE)
+        selector.addItem(summary_sheet or "汇总 Sheet", _MAPPING_SUMMARY_ROLE)
+
+        selected_key = selected.strip().casefold()
+        if selected_key == summary_sheet.casefold():
+            selector.setCurrentIndex(1)
+        elif selected_key and selected_key != detail_sheet.casefold():
+            selector.addItem(selected.strip(), _MAPPING_LEGACY_ROLE)
+            selector.setCurrentIndex(2)
+        selector.currentIndexChanged.connect(self._invalidate_preview)
+        return selector
+
+    def _mapping_sheet_name(self, row: int) -> str:
+        selector = self.ui.table_mappings.cellWidget(row, 0)
+        if not isinstance(selector, QComboBox):
+            return self._item_text(self.ui.table_mappings, row, 0)
+        role = selector.currentData()
+        if role == _MAPPING_DETAIL_ROLE:
+            return self.ui.edit_detail_sheet.text().strip()
+        if role == _MAPPING_SUMMARY_ROLE:
+            return self.ui.edit_summary_sheet.text().strip()
+        return selector.currentText().strip()
+
+    def _refresh_mapping_sheet_selectors(self, *_args: object) -> None:
+        detail_sheet = self.ui.edit_detail_sheet.text().strip() or "明细 Sheet"
+        summary_sheet = self.ui.edit_summary_sheet.text().strip() or "汇总 Sheet"
+        for row in range(self.ui.table_mappings.rowCount()):
+            selector = self.ui.table_mappings.cellWidget(row, 0)
+            if not isinstance(selector, QComboBox):
+                continue
+            detail_index = selector.findData(_MAPPING_DETAIL_ROLE)
+            summary_index = selector.findData(_MAPPING_SUMMARY_ROLE)
+            if detail_index >= 0:
+                selector.setItemText(detail_index, detail_sheet)
+            if summary_index >= 0:
+                selector.setItemText(summary_index, summary_sheet)
 
     def _set_rules(self, rules: tuple[AttendanceRule, ...]) -> None:
         self.ui.table_rules.setRowCount(0)
@@ -376,9 +455,10 @@ class AttendanceTab(QWidget):
     def _add_mapping(self) -> None:
         row = self.ui.table_mappings.rowCount()
         self.ui.table_mappings.insertRow(row)
-        for column in range(3):
-            self.ui.table_mappings.setItem(row, column, QTableWidgetItem())
-        self.ui.table_mappings.setCurrentCell(row, 0)
+        self.ui.table_mappings.setCellWidget(row, 0, self._mapping_sheet_selector())
+        self.ui.table_mappings.setItem(row, 1, QTableWidgetItem())
+        self.ui.table_mappings.setItem(row, 2, QTableWidgetItem())
+        self.ui.table_mappings.setCurrentCell(row, 1)
         self._invalidate_preview()
 
     def _add_rule(self) -> None:
