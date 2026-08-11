@@ -163,14 +163,17 @@ class TestDefaultProxies:
         实测(2026-08):这些镜像对 github.com 下载资源有效;ghps.cc 已 DNS 失效被移除。
         运行时配合 get_fetch_candidates() 末尾直连兜底,单个镜像失效自动回退。
         """
-        assert "https://ghproxy.com" in proxy.DEFAULT_PROXIES
-        assert "https://gh-proxy.com" in proxy.DEFAULT_PROXIES
-        assert "https://ghfast.top" in proxy.DEFAULT_PROXIES
-        assert "https://ghproxy.net" in proxy.DEFAULT_PROXIES
+        # 用完整元组相等断言(而非 4 个 `in`),既锁顺序又是更强的契约。
+        assert proxy.DEFAULT_PROXIES == (
+            "https://ghproxy.com",
+            "https://gh-proxy.com",
+            "https://ghfast.top",
+            "https://ghproxy.net",
+        )
 
     def test_default_proxies_drops_dead_ghps_cc(self):
         """ghps.cc 实测 DNS 失效,不应保留在默认列表误导用户。"""
-        assert "https://ghps.cc" not in proxy.DEFAULT_PROXIES
+        assert proxy.DEFAULT_PROXIES.count("https://ghps.cc") == 0
 
 
 class TestGetEnabledProxies:
