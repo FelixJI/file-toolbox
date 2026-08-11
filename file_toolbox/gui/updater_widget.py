@@ -9,14 +9,17 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Slot
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QLabel, QWidget
 
 from file_toolbox.updater.errors import UpdateError
 from file_toolbox.updater.versions import RemoteRelease
+
+_logger = logging.getLogger(__name__)
 
 
 class UpdateBanner(QLabel):
@@ -73,17 +76,23 @@ class UpdateWorker(QThread):
         """启动事件循环,等待方法投递(do_check / do_download)。"""
         self.exec()
 
+    @Slot()
     def do_check(self) -> None:
         """检查更新(在 worker 线程执行)。
 
         始终 emit checked 反馈结果(供手动检查 UI);有新版额外 emit ready。
         自动检查场景只消费 ready(忽略 checked),行为不变。
+
+        必须加 @Slot():主窗口用 QMetaObject.invokeMethod(worker, "do_check",
+        QueuedConnection) 按名跨线程投递,PySide6 meta-object 系统只能识别
+        被装饰为槽的方法;不加装饰器时投递事件会被静默丢弃,表现为"检查无反应"。
         """
         from file_toolbox import updater as updater_pkg
 
         try:
             rel = updater_pkg.check_update()
-        except Exception:
+        except Exception as e:
+            _logger.warning("检查更新失败: %s", e)
             self.checked.emit(None, "failed")
             return
         if rel is not None:
@@ -92,6 +101,7 @@ class UpdateWorker(QThread):
         else:
             self.checked.emit(None, "latest")
 
+    @Slot(RemoteRelease)
     def do_download(self, release: RemoteRelease) -> None:
         """下载并校验(在 worker 线程执行)。
 

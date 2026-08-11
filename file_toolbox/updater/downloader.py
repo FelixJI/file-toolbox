@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import logging
 import re
 import tempfile
 import urllib.request
@@ -17,6 +18,8 @@ from pathlib import Path
 from file_toolbox.updater.errors import ChecksumMismatchError, NetworkError
 from file_toolbox.updater.proxy import apply_proxy, get_fetch_candidates
 from file_toolbox.updater.versions import RemoteRelease
+
+_logger = logging.getLogger(__name__)
 
 # 下载超时(秒):便携包几十 MB,给足
 _DOWNLOAD_TIMEOUT = 60
@@ -110,8 +113,9 @@ def _fetch_checksum(release: RemoteRelease, proxy: str = "") -> tuple[str, str] 
         sha = parse_checksums(text, zip_name)
         if sha:
             return (sha, zip_name)
-    except Exception:
-        pass
+    except Exception as e:
+        # 记录便于排错(此前静默 pass);checksums 拉取失败会尝试下一个候选
+        _logger.debug("拉取 checksums 失败 proxy=%s: %s", proxy or "(直连)", e)
     return None
 
 
@@ -150,6 +154,7 @@ def download_and_verify(
             with contextlib.suppress(OSError):
                 dest.unlink(missing_ok=True)
             last_error = f"下载失败: {e}"
+            _logger.debug("下载 zip 失败 proxy=%s: %s", proxy or "(直连)", e)
             continue  # 此候选下载失败 → 换下一个候选
         # checksums 与 zip 均成功 → 校验
         actual_sha = sha256_file(dest)
@@ -159,7 +164,9 @@ def download_and_verify(
             raise ChecksumMismatchError(
                 f"SHA256 校验不匹配: expected {expected_sha}, got {actual_sha}"
             )
+        _logger.debug("下载并校验成功 via %s", proxy or "(直连)")
         return dest
 
     # 所有候选都失败
+    _logger.warning("下载失败:已尝试所有代理与直连,最后错误: %s", last_error)
     raise NetworkError(f"无法获取 checksums 或下载失败(已尝试所有代理与直连): {last_error}")

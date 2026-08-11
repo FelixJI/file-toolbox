@@ -157,6 +157,24 @@ class TestDefaultProxies:
             assert p.startswith("https://")
             assert not p.endswith("/")  # 归一化无尾斜杠
 
+    def test_default_proxies_contains_current_mirrors(self):
+        """锁定当前主流可用的 GitHub 加速镜像,防止回退。
+
+        实测(2026-08):这些镜像对 github.com 下载资源有效;ghps.cc 已 DNS 失效被移除。
+        运行时配合 get_fetch_candidates() 末尾直连兜底,单个镜像失效自动回退。
+        """
+        # 用完整元组相等断言(而非 4 个 `in`),既锁顺序又是更强的契约。
+        assert proxy.DEFAULT_PROXIES == (
+            "https://ghproxy.com",
+            "https://gh-proxy.com",
+            "https://ghfast.top",
+            "https://ghproxy.net",
+        )
+
+    def test_default_proxies_drops_dead_ghps_cc(self):
+        """ghps.cc 实测 DNS 失效,不应保留在默认列表误导用户。"""
+        assert proxy.DEFAULT_PROXIES.count("https://ghps.cc") == 0
+
 
 class TestGetEnabledProxies:
     """get_enabled_proxies:读 gh_proxies 列表 + 旧 gh_proxy 迁移 + 归一化去重。"""
