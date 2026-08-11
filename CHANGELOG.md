@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+### Features
+
+- **attendance:** 增加人员名单导入与分组输出 (#26) (9783867)
+
+### Bug Fixes
+
+- **updater:** 修复检查更新无反应并扩充主流代理镜像 (#25) (cf7ae52)
+
 ## 0.2.0
 
 ### Features
