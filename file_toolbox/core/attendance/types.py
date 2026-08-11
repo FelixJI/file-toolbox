@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
@@ -187,6 +188,15 @@ class RosterData:
     employees: tuple[RosterEmployee, ...]
 
 
+class RosterMatchStatus(StrEnum):
+    """名单人员与原始考勤的匹配结果。"""
+
+    UNKNOWN = ""
+    MATCHED = "已匹配"
+    EXCLUDED = "已排除"
+    MISSING_ATTENDANCE = "名单有、考勤无"
+
+
 @dataclass(frozen=True)
 class SourceAttendance:
     employees: tuple[EmployeeAttendance, ...]
@@ -211,7 +221,7 @@ class EmployeeGroupPreview:
     department: str = ""
     group_alias: str = ""
     exported: bool = True
-    match_status: str = ""
+    match_status: RosterMatchStatus = RosterMatchStatus.UNKNOWN
 
 
 @dataclass(frozen=True)

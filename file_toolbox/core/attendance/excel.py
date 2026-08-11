@@ -62,6 +62,36 @@ class AttendanceExcelAdapter(Protocol):
     ) -> None: ...
 
 
+class _DeletableWorksheet(Protocol):
+    def Delete(self) -> object: ...
+
+
+class _WorksheetCollection(Protocol):
+    def __call__(self, name: str) -> _DeletableWorksheet: ...
+
+
+class _WorkbookWithWorksheets(Protocol):
+    Worksheets: _WorksheetCollection
+
+
+class _MovableWorksheet(Protocol):
+    @property
+    def Index(self) -> int: ...
+
+    def Move(self, before: object) -> object: ...
+
+
+class _WritableRange(Protocol):
+    NumberFormat: object
+    Value: object
+
+
+class _WritableWorksheet(Protocol):
+    def Cells(self, row: int, column: int) -> object: ...
+
+    def Range(self, start: object, end: object) -> _WritableRange: ...
+
+
 class ExcelComAdapter:
     """通过隔离 Microsoft Excel COM 会话读源并写模板副本。"""
 
@@ -149,8 +179,6 @@ class ExcelComAdapter:
         if not employees:
             raise ValueError("源工作表未读取到员工姓名")
         departments = {item.department.strip() for item in employees if item.department.strip()}
-        if len(departments) > 1:
-            raise ValueError("源考勤包含多个部门，首版不支持自动拆分")
         department = next(iter(departments), "")
         return SourceAttendance(tuple(employees), department)
 
@@ -167,17 +195,14 @@ class ExcelComAdapter:
             layout.name_start,
             layout.employee_id_start,
         )
-        start_rows = {cell.row for cell in starts}
-        if len(start_rows) != 1:
-            raise ValueError("名单的分组、部门、姓名和工号必须从同一行开始")
-        start_row = next(iter(start_rows))
         with _excel_workbook(roster_path, read_only=True) as (_, workbook):
             sheet = workbook.Worksheets(layout.sheet_name)
             used = sheet.UsedRange
             last_row = int(used.Row) + int(used.Rows.Count) - 1
-            for source_row in range(start_row, last_row + 1):
+            logical_row_count = max(max(0, last_row - cell.row + 1) for cell in starts)
+            for offset in range(logical_row_count):
                 _raise_if_cancelled(cancel_check)
-                offset = source_row - start_row
+                source_row = layout.name_start.row + offset
                 group = _cell_text(
                     sheet.Cells(layout.group_start.row + offset, layout.group_start.column).Value
                 ).strip()
@@ -204,6 +229,8 @@ class ExcelComAdapter:
                 if missing:
                     raise ValueError(f"人员名单第 {source_row} 行缺少字段: {', '.join(missing)}")
                 employees.append(RosterEmployee(employee_id, name, department, group, source_row))
+                if len(employees) > MAX_EMPLOYEES:
+                    raise ValueError(f"名单员工数超过安全上限 {MAX_EMPLOYEES}")
         if not employees:
             raise ValueError("人员名单未读取到有效人员")
         if len(employees) > MAX_EMPLOYEES:
@@ -272,13 +299,17 @@ def _prepare_group_sheets(
     return tuple(result)
 
 
-def _remove_roster_sheets(workbook: Any, sheet_pairs: tuple[tuple[str, str], ...]) -> None:
+def _remove_roster_sheets(
+    workbook: _WorkbookWithWorksheets, sheet_pairs: tuple[tuple[str, str], ...]
+) -> None:
     for detail_name, summary_name in sheet_pairs:
         workbook.Worksheets(summary_name).Delete()
         workbook.Worksheets(detail_name).Delete()
 
 
-def _order_roster_group_sheets(sheets: tuple[tuple[PreparedGroup, Any, Any], ...]) -> None:
+def _order_roster_group_sheets(
+    sheets: tuple[tuple[PreparedGroup, _MovableWorksheet, _MovableWorksheet], ...],
+) -> None:
     if len(sheets) < 2:
         return
     anchor = min(
@@ -438,7 +469,7 @@ def _write_names(sheet: Any, start: CellRef, source: SourceAttendance) -> None:
 
 
 def _write_column(
-    sheet: Any,
+    sheet: _WritableWorksheet,
     start: CellRef,
     values: tuple[int, ...] | tuple[str, ...],
     *,

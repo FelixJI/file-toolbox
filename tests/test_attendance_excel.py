@@ -23,6 +23,7 @@ from file_toolbox.core.attendance.types import (
     PreparedAttendance,
     PreparedGroup,
     RosterConfig,
+    RosterEmployee,
     RosterLayout,
     SourceAttendance,
     SourceLayout,
@@ -210,7 +211,9 @@ def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch
     app.Quit.assert_called_once_with()
 
 
-def test_read_source_rejects_multiple_departments(monkeypatch, tmp_path):
+def test_read_source_preserves_multiple_departments_for_roster_reconciliation(
+    monkeypatch, tmp_path
+):
     plan = _plan()
     values = {(2, 1): "张三", (2, 3): "A", (3, 1): "李四", (3, 3): "B", (4, 1): ""}
     sheet = MagicMock()
@@ -219,8 +222,9 @@ def test_read_source_rejects_multiple_departments(monkeypatch, tmp_path):
     workbook.Worksheets.return_value = sheet
     _patch_excel(monkeypatch, workbook)
 
-    with pytest.raises(ValueError, match="多个部门"):
-        ExcelComAdapter().read_source(tmp_path / "source.xlsx", plan.source, 1)
+    source = ExcelComAdapter().read_source(tmp_path / "source.xlsx", plan.source, 1)
+
+    assert [employee.department for employee in source.employees] == ["A", "B"]
 
 
 def test_read_roster_skips_fully_blank_rows_and_preserves_source_rows(monkeypatch, tmp_path):
@@ -275,6 +279,33 @@ def test_read_roster_reports_partial_row(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="第 1 行缺少字段: 工号"):
         ExcelComAdapter().read_roster(tmp_path / "roster.xlsx", layout)
+
+
+def test_read_roster_supports_independent_start_rows(monkeypatch, tmp_path):
+    layout = RosterLayout(
+        "Sheet1",
+        CellRef.parse("A1"),
+        CellRef.parse("B2"),
+        CellRef.parse("C3"),
+        CellRef.parse("D4"),
+    )
+    values = {
+        (1, 1): "徐州中车",
+        (2, 2): "市场部",
+        (3, 3): "张三",
+        (4, 4): "001",
+    }
+    sheet = MagicMock()
+    sheet.UsedRange.Row = 1
+    sheet.UsedRange.Rows.Count = 4
+    sheet.Cells.side_effect = lambda row, col: _cell(value=values.get((row, col)))
+    workbook = MagicMock()
+    workbook.Worksheets.return_value = sheet
+    _patch_excel(monkeypatch, workbook)
+
+    roster = ExcelComAdapter().read_roster(tmp_path / "roster.xlsx", layout)
+
+    assert roster.employees == (RosterEmployee("001", "张三", "市场部", "徐州中车", 3),)
 
 
 @pytest.mark.parametrize(

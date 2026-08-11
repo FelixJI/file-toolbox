@@ -259,6 +259,40 @@ def test_roster_preview_rejects_duplicate_employee_ids_and_names(tmp_path):
     assert any("姓名重复" in error for error in preview.errors)
 
 
+def test_roster_excluded_employee_may_be_missing_from_raw_attendance(tmp_path):
+    request = _request(tmp_path)
+    request = replace(request, plan=_roster_plan(request, excluded=("002",)))
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31))),
+            EmployeeAttendance("王五", "市场部", tuple("正常" for _ in range(31))),
+        ),
+        "市场部",
+    )
+    excel = FakeExcel(source, _roster())
+    excel.sheet_names = ("出勤明细", "考勤汇总表", "出勤明细-劳务", "考勤汇总表-劳务")
+
+    preview = AttendanceService(excel).preview(request)
+
+    assert preview.can_generate is True
+    assert preview.errors == ()
+    assert preview.employees[1].match_status == "已排除"
+
+
+def test_legacy_mode_still_rejects_multiple_departments(tmp_path):
+    request = _request(tmp_path)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "A", tuple("正常" for _ in range(31))),
+            EmployeeAttendance("李四", "B", tuple("正常" for _ in range(31))),
+        ),
+        "",
+    )
+
+    with pytest.raises(AttendanceError, match="多个部门"):
+        AttendanceService(FakeExcel(source)).preview(request)
+
+
 def test_generate_history_failure_returns_success_with_warning(tmp_path):
     request = _request(tmp_path)
     history = MagicMock()

@@ -177,6 +177,49 @@ def test_roster_preview_captures_sheet_mapping_and_exclusions(tab, tmp_path, mon
     )
 
 
+def test_roster_preview_keeps_mapping_for_fully_excluded_group(tab, tmp_path, monkeypatch):
+    roster_path = tmp_path / "roster.xlsx"
+    roster_path.write_bytes(b"roster")
+    tab.ui.chk_roster_enabled.setChecked(True)
+    tab.ui.edit_roster.setText(str(roster_path))
+    tab._group_sheet_configs = (
+        GroupSheetConfig("徐州中车", "出勤明细", "考勤汇总表", "正式"),
+        GroupSheetConfig("盛世金源", "出勤明细-劳务", "考勤汇总表-劳务", "劳务"),
+    )
+    preview = AttendancePreview(
+        employee_count=1,
+        day_count=31,
+        extra_employee_rows=0,
+        date_column_delta=1,
+        status_counts={"√": 31},
+        unmatched=(),
+        group_counts={"徐州中车": 1},
+        target_sheets={"徐州中车": ("出勤明细", "考勤汇总表")},
+        employees=(
+            EmployeeGroupPreview(
+                "张三", "售后组", "徐州中车", "001", "市场部", "正式", True, "已匹配"
+            ),
+            EmployeeGroupPreview(
+                "李四", "管理组", "盛世金源", "wb002", "市场部", "劳务", False, "已排除"
+            ),
+        ),
+        excluded_count=1,
+        roster_path=roster_path,
+    )
+
+    tab._on_preview_ok(preview)
+
+    assert tab.ui.table_group_preview.rowCount() == 2
+    assert tab.ui.table_group_preview.item(1, 2).text() == "0"
+    assert tab.ui.table_group_preview.item(1, 3).text() == "出勤明细-劳务"
+    monkeypatch.setattr(tab, "_preview", lambda: None)
+    tab._apply_preview_adjustments()
+    assert tab._build_plan().group_sheet_configs == (
+        GroupSheetConfig("徐州中车", "出勤明细", "考勤汇总表", "正式"),
+        GroupSheetConfig("盛世金源", "出勤明细-劳务", "考勤汇总表-劳务", "劳务"),
+    )
+
+
 def test_roster_preview_errors_block_generation(tab, tmp_path):
     roster_path = tmp_path / "roster.xlsx"
     roster_path.write_bytes(b"roster")

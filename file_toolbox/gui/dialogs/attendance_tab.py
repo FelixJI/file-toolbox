@@ -111,6 +111,13 @@ class AttendanceTab(QWidget):
         self.ui.edit_summary_sheet.setText("考勤汇总表")
         self.ui.edit_summary_name.setText("C8")
         self.ui.chk_split_groups.setChecked(True)
+        self._reset_roster_fields()
+        self._set_roster_controls(False)
+        self._set_rules(default_rules())
+
+    def _reset_roster_fields(self) -> None:
+        """恢复名单页字段默认值。"""
+        self.ui.edit_roster.clear()
         self.ui.edit_roster_sheet.setText("Sheet1")
         self.ui.edit_roster_group.setText("A1")
         self.ui.edit_roster_department.setText("B1")
@@ -122,8 +129,6 @@ class AttendanceTab(QWidget):
         self.ui.edit_detail_employee_id.setText("B7")
         self.ui.edit_summary_serial.setText("A8")
         self.ui.edit_summary_employee_id.setText("B8")
-        self._set_roster_controls(False)
-        self._set_rules(default_rules())
 
     def _connect(self) -> None:
         self.ui.btn_source.clicked.connect(self._browse_source)
@@ -391,18 +396,7 @@ class AttendanceTab(QWidget):
                     plan.roster.summary_employee_id_start.address
                 )
             else:
-                self.ui.edit_roster.clear()
-                self.ui.edit_roster_sheet.setText("Sheet1")
-                self.ui.edit_roster_group.setText("A1")
-                self.ui.edit_roster_department.setText("B1")
-                self.ui.edit_roster_name.setText("C1")
-                self.ui.edit_roster_employee_id.setText("D1")
-                self.ui.chk_fill_serial.setChecked(True)
-                self.ui.chk_fill_employee_id.setChecked(True)
-                self.ui.edit_detail_serial.setText("A7")
-                self.ui.edit_detail_employee_id.setText("B7")
-                self.ui.edit_summary_serial.setText("A8")
-                self.ui.edit_summary_employee_id.setText("B8")
+                self._reset_roster_fields()
             self._set_roster_controls(plan.roster is not None)
             self._configure_preview_tables(plan.roster is not None)
             self._set_mappings(plan.mappings)
@@ -869,10 +863,24 @@ class AttendanceTab(QWidget):
 
         self._loading = True
         try:
-            self.ui.table_group_preview.setRowCount(len(result.group_counts))
+            preview_group_counts = dict(result.group_counts)
+            configured_sheets = {
+                config.attendance_group.strip().casefold(): (
+                    config.detail_sheet,
+                    config.summary_sheet,
+                )
+                for config in self._group_sheet_configs
+            }
+            if roster_mode:
+                for employee in result.employees:
+                    preview_group_counts.setdefault(employee.target_group, 0)
+            self.ui.table_group_preview.setRowCount(len(preview_group_counts))
             aliases = {employee.target_group: employee.group_alias for employee in result.employees}
-            for row, (group_name, count) in enumerate(result.group_counts.items()):
-                detail_sheet, summary_sheet = result.target_sheets[group_name]
+            for row, (group_name, count) in enumerate(preview_group_counts.items()):
+                detail_sheet, summary_sheet = result.target_sheets.get(
+                    group_name,
+                    configured_sheets.get(group_name.strip().casefold(), ("", "")),
+                )
                 self.ui.table_group_preview.setItem(row, 0, self._readonly_item(group_name))
                 if roster_mode:
                     self.ui.table_group_preview.setItem(
@@ -918,7 +926,7 @@ class AttendanceTab(QWidget):
                         self.ui.table_employee_preview.setItem(
                             row, column, self._readonly_item(value)
                         )
-                    status_text = employee.match_status
+                    status_text = str(employee.match_status)
                     if unmatched_text:
                         status_text = f"{status_text}；未识别：{unmatched_text}"
                     self.ui.table_employee_preview.setItem(row, 6, self._readonly_item(status_text))
