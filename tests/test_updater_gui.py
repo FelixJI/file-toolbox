@@ -135,6 +135,61 @@ class TestUpdateWorker:
         assert checked == [(None, "failed")]
         w.deleteLater()
 
+    def test_do_check_registered_as_slot(self, app):
+        """do_check 必须被 @Slot() 装饰并注册到 metaObject。
+
+        回归契约:主窗口用 QMetaObject.invokeMethod(worker, "do_check",
+        QueuedConnection) 按名跨线程投递,PySide6 只能找到注册为槽的方法。
+        未加 @Slot() 时投递事件被静默丢弃,表现为"检查更新无反应"(按钮永远卡在
+        "检查中…")。此断言确保装饰器不被误删。
+        """
+        meta = UpdateWorker.staticMetaObject
+        names = {bytes(meta.method(i).name()).decode() for i in range(meta.methodCount())}
+        assert "do_check" in names
+        assert hasattr(UpdateWorker.do_check, "_slots")
+
+    def test_do_download_registered_as_slot(self, app):
+        """do_download 必须被 @Slot(RemoteRelease) 装饰并注册到 metaObject。
+
+        同 do_check:主窗口按名 invokeMethod 投递,缺装饰器会导致下载投递静默失败。
+        """
+        meta = UpdateWorker.staticMetaObject
+        names = {bytes(meta.method(i).name()).decode() for i in range(meta.methodCount())}
+        assert "do_download" in names
+        assert hasattr(UpdateWorker.do_download, "_slots")
+
+    def test_check_works_via_real_invoke_method(self, app, monkeypatch):
+        """真实跨线程 invokeMethod 投递 do_check → checked 信号必须收到。
+
+        这是"检查更新无反应"bug 的核心回归契约:直接调用 worker.do_check()(同步)
+        在未加 @Slot() 时也能工作,但生产路径是 QMetaObject.invokeMethod(worker,
+        "do_check", QueuedConnection)。本测试走真实跨线程路径,未加 @Slot() 时
+        checked 信号永远不会到达(超时失败),加装饰器后通过。
+        """
+        import file_toolbox.updater as upkg
+
+        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
+        monkeypatch.setattr(upkg, "check_update", lambda: rel)
+
+        from PySide6.QtCore import QEventLoop, QMetaObject, Qt, QTimer
+
+        w = UpdateWorker()
+        checked: list = []
+        w.checked.connect(lambda r, s: checked.append((r, s)))
+        w.start()  # 启动 worker 线程 + 事件循环
+        try:
+            loop = QEventLoop()
+            w.checked.connect(loop.quit)  # 信号到达 → 退出等待循环
+            QTimer.singleShot(3000, loop.quit)  # 超时兜底(3s;正常 <100ms)
+            QMetaObject.invokeMethod(w, "do_check", Qt.ConnectionType.QueuedConnection)
+            loop.exec()
+            assert checked, "checked 信号未到达(do_check 可能未加 @Slot 装饰器)"
+            assert checked[0][1] == "available"
+        finally:
+            w.quit()
+            w.wait(2000)
+            w.deleteLater()
+
 
 from file_toolbox.gui.main_window import MainWindow  # noqa: E402
 

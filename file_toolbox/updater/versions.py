@@ -8,11 +8,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from urllib import request as urlrequest
 
 from file_toolbox.updater.proxy import apply_proxy, get_fetch_candidates
+
+_logger = logging.getLogger(__name__)
 
 # owner/repo 硬编码常量(与 git remote 一致,不引入配置真相源)
 GITHUB_REPO = ("FelixJI", "file-toolbox")
@@ -137,8 +140,9 @@ def _fetch(platform: str, proxy: str = "") -> RemoteRelease | None:
     try:
         with _urlopen(req, timeout=_FETCH_TIMEOUT) as resp:
             payload = resp.read()
-    except Exception:
-        # 网络/超时/HTTP 错误统一视为该源无结果
+    except Exception as e:
+        # 网络/超时/HTTP 错误统一视为该源无结果;记录便于排错(此前静默吞掉)
+        _logger.debug("GitHub 取版本失败 proxy=%s: %s", proxy or "(直连)", e)
         return None
     return _parse_release(payload, platform)
 
@@ -153,5 +157,7 @@ def fetch_latest() -> RemoteRelease | None:
     for proxy in get_fetch_candidates():
         rel = _fetch("github", proxy=proxy)
         if rel and not _is_prerelease(rel.version):
+            _logger.debug("取得最新版本 %s via %s", rel.version, proxy or "(直连)")
             return rel
+    _logger.debug("所有代理候选与直连均未取得有效版本")
     return None

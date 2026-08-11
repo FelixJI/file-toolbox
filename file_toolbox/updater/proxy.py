@@ -41,10 +41,16 @@ _GITHUB_HOSTS = frozenset(
 # 预置的公共 GitHub 加速代理候选(关于页"默认"项来源)。
 # 这些代理可用性不稳定,故仅作候选;运行时配合 get_fetch_candidates() 末尾的
 # 直连兜底自动回退,单个代理不可用不影响功能。
+#
+# 实测行为(2026-08):多数公共镜像只代理 github.com 下载资源,不代理 api.github.com。
+# 故这些镜像主要在"下载 zip/checksums"阶段生效;检查更新(API 端点)多由末尾直连兜底。
+# ghfast.top / ghproxy.net 实测对下载资源有效但对 API 返回 403 —— 属预期,
+# get_fetch_candidates() 会自动跳过失败候选继续尝试下一个 + 直连。
 DEFAULT_PROXIES: tuple[str, ...] = (
     "https://ghproxy.com",
     "https://gh-proxy.com",
-    "https://ghps.cc",
+    "https://ghfast.top",
+    "https://ghproxy.net",
 )
 
 
