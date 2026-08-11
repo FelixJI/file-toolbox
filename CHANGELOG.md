@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.0
+
+### Features
+
+- **attendance:** 新增可配置考勤汇总与分组导出 (#23) (41b7dbe)
+- **gui:** 历史按钮跟随标签页并整合更新与代理回退 (#19) (d577523)
+- **ci:** 统一自动化发布流程 (#9) (c99a9c4)
+
+### Bug Fixes
+
+- **ci:** 修复镜像标签同步并完善六仓治理 (#18) (0b18aaa)
+- **release:** 统一候选派生资产归属 (#14) (9648251)
+- **test:** 修复 CodeQL URL 子串校验告警 (#13) (94c72b9)
+- **ci:** 修复发布 tag 推送认证 (#12) (35eb484)
+- **rename-template:** 校验导入模板 operations 键 + 补强覆盖率与边缘测试至 100% (#7) (6fcac0a)
+- **release:** 收敛发布与 Changelog 工作流 (#6) (39c813d)
+
+### Performance
+
+- **ci:** 支持统一分片门禁与取消过时 PR 运行 (#15) (4ffa958)
+
+### Dependencies
+
+- **deps:** bump pypdf from 6.14.2 to 6.15.0 (#20) (da9f50e)
+- **deps:** bump cryptography from 49.0.0 to 50.0.0 (#16) (c312e39)
+
 ## [0.1.15](https://github.com/FelixJI/file-toolbox/compare/v0.1.14...v0.1.15) (2026-08-02)
 
 
