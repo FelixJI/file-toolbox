@@ -8,7 +8,16 @@ from datetime import date
 from file_toolbox.core.attendance.types import AttendanceRule
 
 _TOKEN_RE = re.compile(r"{{([a-z_]+)}}")
-_TOKENS = {"year", "month", "month_start", "month_end", "department", "attendance_group"}
+_TOKENS = {
+    "year",
+    "month",
+    "month_start",
+    "month_end",
+    "department",
+    "attendance_group",
+    "roster_group",
+    "group_alias",
+}
 
 
 def compile_rules(rules: tuple[AttendanceRule, ...]) -> tuple[tuple[re.Pattern[str], str], ...]:
@@ -42,6 +51,8 @@ def render_content(
     last_day: int,
     department: str,
     attendance_group: str = "",
+    roster_group: str = "",
+    group_alias: str = "",
 ) -> str:
     unknown = set(_TOKEN_RE.findall(template)) - _TOKENS
     if unknown:
@@ -53,6 +64,8 @@ def render_content(
         "month_end": _format_date(date(year, month, last_day)),
         "department": department,
         "attendance_group": attendance_group,
+        "roster_group": roster_group,
+        "group_alias": group_alias,
     }
     return _TOKEN_RE.sub(lambda match: values[match.group(1)], template)
 

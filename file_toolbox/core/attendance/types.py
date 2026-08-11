@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
-_PLAN_SCHEMA_VERSION = 3
+_PLAN_SCHEMA_VERSION = 4
 
 
 def _column_number(letters: str) -> int:
@@ -74,6 +74,28 @@ class TargetLayout:
 
 
 @dataclass(frozen=True)
+class RosterLayout:
+    sheet_name: str
+    group_start: CellRef
+    department_start: CellRef
+    name_start: CellRef
+    employee_id_start: CellRef
+
+
+@dataclass(frozen=True)
+class RosterConfig:
+    workbook_path: Path
+    layout: RosterLayout
+    fill_serial_numbers: bool = True
+    fill_employee_ids: bool = True
+    detail_serial_start: CellRef = CellRef(7, 1)
+    detail_employee_id_start: CellRef = CellRef(7, 2)
+    summary_serial_start: CellRef = CellRef(8, 1)
+    summary_employee_id_start: CellRef = CellRef(8, 2)
+    excluded_employee_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CellMapping:
     sheet_name: str
     cell: CellRef
@@ -99,6 +121,7 @@ class GroupSheetConfig:
     attendance_group: str
     detail_sheet: str
     summary_sheet: str
+    group_alias: str = ""
 
 
 def default_rules() -> tuple[AttendanceRule, ...]:
@@ -126,6 +149,7 @@ class AttendancePlan:
     split_by_group: bool = False
     employee_group_overrides: tuple[EmployeeGroupOverride, ...] = ()
     group_sheet_configs: tuple[GroupSheetConfig, ...] = ()
+    roster: RosterConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +169,22 @@ class EmployeeAttendance:
     records: tuple[str, ...]
     attendance_group: str = ""
     source_group: str = ""
+    employee_id: str = ""
+    group_alias: str = ""
+
+
+@dataclass(frozen=True)
+class RosterEmployee:
+    employee_id: str
+    name: str
+    department: str
+    roster_group: str
+    source_row: int
+
+
+@dataclass(frozen=True)
+class RosterData:
+    employees: tuple[RosterEmployee, ...]
 
 
 @dataclass(frozen=True)
@@ -167,6 +207,11 @@ class EmployeeGroupPreview:
     employee_name: str
     source_group: str
     target_group: str
+    employee_id: str = ""
+    department: str = ""
+    group_alias: str = ""
+    exported: bool = True
+    match_status: str = ""
 
 
 @dataclass(frozen=True)
@@ -180,10 +225,14 @@ class AttendancePreview:
     group_counts: Mapping[str, int] = field(default_factory=dict)
     target_sheets: Mapping[str, tuple[str, str]] = field(default_factory=dict)
     employees: tuple[EmployeeGroupPreview, ...] = ()
+    errors: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    excluded_count: int = 0
+    roster_path: Path | None = None
 
     @property
     def can_generate(self) -> bool:
-        return not self.unmatched
+        return not self.unmatched and not self.errors
 
 
 @dataclass(frozen=True)
@@ -212,6 +261,8 @@ class PreparedAttendance:
     groups: tuple[PreparedGroup, ...]
     preview: AttendancePreview
     global_mapping_values: tuple[tuple[str, CellRef, str], ...]
+    remove_sheet_pairs: tuple[tuple[str, str], ...] = ()
+    roster_mode: bool = False
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:
@@ -283,9 +334,31 @@ def plan_to_dict(plan: AttendancePlan) -> dict[str, object]:
                 "attendance_group": config.attendance_group,
                 "detail_sheet": config.detail_sheet,
                 "summary_sheet": config.summary_sheet,
+                "group_alias": config.group_alias,
             }
             for config in plan.group_sheet_configs
         ],
+        "roster": (
+            {
+                "workbook_path": str(plan.roster.workbook_path),
+                "layout": {
+                    "sheet_name": plan.roster.layout.sheet_name,
+                    "group_start": plan.roster.layout.group_start.address,
+                    "department_start": plan.roster.layout.department_start.address,
+                    "name_start": plan.roster.layout.name_start.address,
+                    "employee_id_start": plan.roster.layout.employee_id_start.address,
+                },
+                "fill_serial_numbers": plan.roster.fill_serial_numbers,
+                "fill_employee_ids": plan.roster.fill_employee_ids,
+                "detail_serial_start": plan.roster.detail_serial_start.address,
+                "detail_employee_id_start": plan.roster.detail_employee_id_start.address,
+                "summary_serial_start": plan.roster.summary_serial_start.address,
+                "summary_employee_id_start": plan.roster.summary_employee_id_start.address,
+                "excluded_employee_ids": list(plan.roster.excluded_employee_ids),
+            }
+            if plan.roster is not None
+            else None
+        ),
     }
 
 
@@ -293,14 +366,14 @@ def plan_from_dict(value: object) -> AttendancePlan:
     """严格解析持久化方案。"""
     data = _mapping(value, "方案")
     version = data.get("schema_version")
-    if version not in {1, 2, _PLAN_SCHEMA_VERSION}:
+    if version not in {1, 2, 3, _PLAN_SCHEMA_VERSION}:
         raise ValueError("不支持的考勤方案版本")
     source_data = _mapping(data.get("source"), "source")
     target_data = _mapping(data.get("target"), "target")
-    split_by_group = data.get("split_by_group", False) if version in {2, 3} else False
+    split_by_group = data.get("split_by_group", False) if version in {2, 3, 4} else False
     if not isinstance(split_by_group, bool):
         raise ValueError("split_by_group 必须是布尔值")
-    group_start_value = source_data.get("attendance_group_start") if version in {2, 3} else None
+    group_start_value = source_data.get("attendance_group_start") if version in {2, 3, 4} else None
     if group_start_value is not None and not isinstance(group_start_value, str):
         raise ValueError("attendance_group_start 必须是单元格地址或 null")
 
@@ -331,7 +404,7 @@ def plan_from_dict(value: object) -> AttendancePlan:
 
     employee_group_overrides: list[EmployeeGroupOverride] = []
     group_sheet_configs: list[GroupSheetConfig] = []
-    if version == 3:
+    if version in {3, 4}:
         for item in _sequence(data.get("employee_group_overrides", []), "employee_group_overrides"):
             override = _mapping(item, "employee_group_override")
             employee_group_overrides.append(
@@ -348,8 +421,49 @@ def plan_from_dict(value: object) -> AttendancePlan:
                     attendance_group=_text(config, "attendance_group"),
                     detail_sheet=_text(config, "detail_sheet"),
                     summary_sheet=_text(config, "summary_sheet"),
+                    group_alias=(
+                        str(config.get("group_alias", "")).strip() if version == 4 else ""
+                    ),
                 )
             )
+
+    roster: RosterConfig | None = None
+    roster_value = data.get("roster") if version == 4 else None
+    if roster_value is not None:
+        roster_data = _mapping(roster_value, "roster")
+        roster_layout = _mapping(roster_data.get("layout"), "roster.layout")
+        fill_serial_numbers = roster_data.get("fill_serial_numbers", True)
+        fill_employee_ids = roster_data.get("fill_employee_ids", True)
+        if not isinstance(fill_serial_numbers, bool):
+            raise ValueError("roster.fill_serial_numbers 必须是布尔值")
+        if not isinstance(fill_employee_ids, bool):
+            raise ValueError("roster.fill_employee_ids 必须是布尔值")
+        excluded_employee_ids = tuple(
+            str(item).strip()
+            for item in _sequence(
+                roster_data.get("excluded_employee_ids", []), "roster.excluded_employee_ids"
+            )
+            if str(item).strip()
+        )
+        roster = RosterConfig(
+            workbook_path=Path(_text(roster_data, "workbook_path")),
+            layout=RosterLayout(
+                sheet_name=_text(roster_layout, "sheet_name"),
+                group_start=CellRef.parse(_text(roster_layout, "group_start")),
+                department_start=CellRef.parse(_text(roster_layout, "department_start")),
+                name_start=CellRef.parse(_text(roster_layout, "name_start")),
+                employee_id_start=CellRef.parse(_text(roster_layout, "employee_id_start")),
+            ),
+            fill_serial_numbers=fill_serial_numbers,
+            fill_employee_ids=fill_employee_ids,
+            detail_serial_start=CellRef.parse(_text(roster_data, "detail_serial_start")),
+            detail_employee_id_start=CellRef.parse(_text(roster_data, "detail_employee_id_start")),
+            summary_serial_start=CellRef.parse(_text(roster_data, "summary_serial_start")),
+            summary_employee_id_start=CellRef.parse(
+                _text(roster_data, "summary_employee_id_start")
+            ),
+            excluded_employee_ids=excluded_employee_ids,
+        )
 
     return AttendancePlan(
         name=_text(data, "name"),
@@ -375,5 +489,6 @@ def plan_from_dict(value: object) -> AttendancePlan:
         split_by_group=split_by_group,
         employee_group_overrides=tuple(employee_group_overrides),
         group_sheet_configs=tuple(group_sheet_configs),
+        roster=roster,
         schema_version=_PLAN_SCHEMA_VERSION,
     )

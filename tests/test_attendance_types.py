@@ -1,5 +1,7 @@
 """考勤领域类型、规则与变量测试。"""
 
+from pathlib import Path
+
 import pytest
 
 from file_toolbox.core.attendance.rules import classify, compile_rules, render_content
@@ -10,6 +12,8 @@ from file_toolbox.core.attendance.types import (
     CellRef,
     EmployeeGroupOverride,
     GroupSheetConfig,
+    RosterConfig,
+    RosterLayout,
     SourceLayout,
     TargetLayout,
     column_letters,
@@ -22,7 +26,7 @@ from file_toolbox.core.attendance.types import (
 def _plan() -> AttendancePlan:
     return AttendancePlan(
         name="市场部",
-        template_path=__import__("pathlib").Path("template.xlsx"),
+        template_path=Path("template.xlsx"),
         source=SourceLayout(
             "Sheet1", CellRef.parse("A2"), CellRef.parse("C2"), CellRef.parse("G2")
         ),
@@ -73,7 +77,18 @@ def test_plan_serialization_round_trip():
             ),
             "split_by_group": True,
             "employee_group_overrides": (EmployeeGroupOverride("张三", "售后组", "管理组"),),
-            "group_sheet_configs": (GroupSheetConfig("管理组", "管理明细", "管理汇总"),),
+            "group_sheet_configs": (GroupSheetConfig("管理组", "管理明细", "管理汇总", "正式"),),
+            "roster": RosterConfig(
+                workbook_path=Path("roster.xlsx"),
+                layout=RosterLayout(
+                    "Sheet1",
+                    CellRef.parse("A1"),
+                    CellRef.parse("B1"),
+                    CellRef.parse("C1"),
+                    CellRef.parse("D1"),
+                ),
+                excluded_employee_ids=("001",),
+            ),
         }
     )
     assert plan_from_dict(plan_to_dict(plan)) == plan
@@ -91,7 +106,8 @@ def test_plan_from_old_dict_defaults_to_single_group_mode():
 
     assert plan.split_by_group is False
     assert plan.source.attendance_group_start is None
-    assert plan.schema_version == 3
+    assert plan.schema_version == 4
+    assert plan.roster is None
 
 
 def test_v2_plan_migrates_without_manual_adjustments():
@@ -120,11 +136,25 @@ def test_v2_plan_migrates_without_manual_adjustments():
     assert migrated.source.attendance_group_start == CellRef.parse("B2")
     assert migrated.employee_group_overrides == ()
     assert migrated.group_sheet_configs == ()
-    assert migrated.schema_version == 3
+    assert migrated.schema_version == 4
+    assert migrated.roster is None
 
 
-def test_new_plan_serializes_as_v3_so_old_reader_rejects_new_semantics():
-    assert plan_to_dict(_plan())["schema_version"] == 3
+def test_v3_plan_migrates_without_roster_configuration():
+    data = plan_to_dict(_plan())
+    data["schema_version"] = 3
+    data.pop("roster")
+    for config in data["group_sheet_configs"]:
+        config.pop("group_alias")
+
+    migrated = plan_from_dict(data)
+
+    assert migrated.schema_version == 4
+    assert migrated.roster is None
+
+
+def test_new_plan_serializes_as_v4_so_old_reader_rejects_new_semantics():
+    assert plan_to_dict(_plan())["schema_version"] == 4
 
 
 def test_plan_from_dict_rejects_unknown_version():
@@ -173,6 +203,20 @@ def test_render_content_supports_attendance_group():
         attendance_group="售后组",
     )
     assert value == "市场部-售后组"
+
+
+def test_render_content_supports_roster_group_and_alias():
+    value = render_content(
+        "{{roster_group}}/{{group_alias}}",
+        year=2026,
+        month=7,
+        last_day=31,
+        department="市场部",
+        roster_group="徐州中车",
+        group_alias="正式",
+    )
+
+    assert value == "徐州中车/正式"
 
 
 def test_render_content_rejects_unknown_variable():
