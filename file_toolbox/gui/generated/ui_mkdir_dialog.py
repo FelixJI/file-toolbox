@@ -171,4 +171,3 @@ class Ui_BatchFolderCreatorDialog(object):
         self.btn_clear.setText(QCoreApplication.translate("BatchFolderCreatorDialog", u"\u6e05\u7a7a", None))
         self.btn_cancel.setText(QCoreApplication.translate("BatchFolderCreatorDialog", u"\u53d6\u6d88", None))
     # retranslateUi
-

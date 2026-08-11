@@ -55,6 +55,14 @@ def test_summary_label_invoice():
     assert "3 张发票" in label and "5 文件" in label and "excel" in label
 
 
+def test_summary_label_attendance():
+    label = _summary_label(
+        "attendance",
+        {"employee_count": 8, "year": 2026, "month": 7, "output": "C:/out/汇总.xlsx"},
+    )
+    assert label == "2026-7 / 8 人 → 汇总.xlsx"
+
+
 def test_summary_label_unknown_tool():
     """未知工具 → str(data)[:40]。"""
     data = {"key": "value"}

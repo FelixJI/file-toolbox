@@ -89,8 +89,16 @@ def test_history_button_noop_on_tab_without_history(win, monkeypatch):
 
 
 def test_tab_tools_mapping(win):
-    """_tab_tools 前 5 项对应功能工具,末尾(关于)为 None。"""
-    assert win._tab_tools == ["rename", "mkdir", "pdf", "replace", "invoice", None]
+    """_tab_tools 对应 6 个功能工具，末尾（关于）为 None。"""
+    assert win._tab_tools == [
+        "rename",
+        "mkdir",
+        "pdf",
+        "replace",
+        "attendance",
+        "invoice",
+        None,
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +413,29 @@ def test_close_event_worker_exception_swallowed(win, monkeypatch):
     for tab in (win._rename_tab, win._mkdir_tab, win._pdf_tab, win._replace_tab):
         monkeypatch.setattr(type(tab), "closeEvent", lambda self, e: None, raising=False)
     win.closeEvent(QCloseEvent())  # 不应抛
+
+
+def test_close_event_waits_for_attendance_com_worker(win, monkeypatch):
+    """考勤 COM worker 未退出时，主窗口必须尊重延迟关闭状态。"""
+    from PySide6.QtGui import QCloseEvent
+
+    for tab in (
+        win._rename_tab,
+        win._mkdir_tab,
+        win._pdf_tab,
+        win._replace_tab,
+        win._invoice_tab,
+        win._about_tab,
+    ):
+        monkeypatch.setattr(type(tab), "closeEvent", lambda self, e: None, raising=False)
+    monkeypatch.setattr(type(win._attendance_tab), "closeEvent", lambda self, e: None)
+    win._attendance_tab._close_pending = True
+    event = QCloseEvent()
+
+    win.closeEvent(event)
+
+    assert event.isAccepted() is False
+    win._attendance_tab._close_pending = False
 
 
 # ---------------------------------------------------------------------------
