@@ -67,6 +67,15 @@ uv run file-toolbox rename --dir ./samples --op "add_suffix:text=_done" --yes
 
 具体参数以 `uv run file-toolbox <command> --help` 为准。
 
+### 日志与故障排查
+
+CLI 与 GUI 启动后都会把运行信息写入程序目录下的
+`.file_toolbox/logs/file-toolbox.log`。日志按 5 MiB 自动轮转并保留最近 5 份；“关于”页可直接
+打开日志目录。界面出现“错误编号”时，请在反馈问题时附上该编号和对应时段的日志。
+
+日志会记录操作类型、文件路径、异常调用栈和运行环境，不记录文档单元格、正文或发票内容。
+分享日志前仍建议检查路径中是否包含不便公开的人员或项目名称。
+
 ## 工作方式
 
 ```mermaid

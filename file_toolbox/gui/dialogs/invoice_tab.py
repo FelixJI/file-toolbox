@@ -5,6 +5,7 @@ UI 布局由 generated/ui_invoice_dialog.py 的 Ui_InvoiceDialog(setupUi) 构建
 本类只做信号连接 + 业务编排(与其他 Tab 一致)。
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from file_toolbox.gui.workers.invoice_worker import InvoiceParseWorker
 _DUP_COLOR = QColor(255, 242, 204)  # 浅黄(重复)
 _PDF_COLOR = QColor(230, 230, 230)  # 浅灰(PDF 弱解析)
 _INVOICE_EXTS = (".zip", ".xml", ".ofd", ".pdf")
+_logger = logging.getLogger(__name__)
 
 
 class InvoiceTab(QWidget):
@@ -208,6 +210,7 @@ class InvoiceTab(QWidget):
                 invoice_count=len(self._result.invoices),
             )
         except Exception as e:  # noqa: BLE001
+            _logger.exception("发票导出失败 output_dir=%s format=%s", outdir_path, self._format())
             QMessageBox.critical(self, "导出失败", str(e))
             return
         # 历史记录已下沉 InvoiceService.export(注入了 history_store)

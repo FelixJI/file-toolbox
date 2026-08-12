@@ -82,6 +82,23 @@ def test_about_tab_has_four_shortcut_buttons(app):
     assert sum(1 for t in texts if "移除" in t) >= 2
 
 
+def test_about_tab_opens_log_directory(app, monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+
+    opened: list[QUrl] = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", opened.append)
+    tab = AboutTab()
+
+    button = next(b for b in tab.findChildren(QPushButton) if "日志目录" in b.text())
+    button.click()
+
+    assert len(opened) == 1
+    assert opened[0].isLocalFile()
+    assert opened[0].toLocalFile().endswith(".file_toolbox/logs")
+
+
 from PySide6.QtWidgets import QLineEdit  # noqa: E402
 
 

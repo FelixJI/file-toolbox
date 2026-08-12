@@ -451,9 +451,12 @@ def test_run_gui_creates_window(monkeypatch):
     import sys
 
     monkeypatch.setattr(mw_mod.updater_pkg, "is_portable_exe", lambda: False)
+    modes = []
+    monkeypatch.setattr(mw_mod, "configure_logging", lambda *, mode: modes.append(mode))
     real_app = QApplication.instance() or QApplication([])
     monkeypatch.setattr(real_app, "exec", lambda: 0)
     exited = []
     monkeypatch.setattr(sys, "exit", lambda code=0: exited.append(code))
     mw_mod.run_gui()
     assert exited
+    assert modes == ["gui"]

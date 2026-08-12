@@ -1,5 +1,6 @@
 """InvoiceService:编排 解析 -> 去重 -> 导出。"""
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from file_toolbox.core.invoice.dedupe import (
 )
 from file_toolbox.core.invoice.parsers.base import UnsupportedFormatError, parse_invoice
 from file_toolbox.core.invoice.types import FailedFile, Invoice, ParseResult
+
+_logger = logging.getLogger(__name__)
 
 
 class InvoiceService:
@@ -57,6 +60,7 @@ class InvoiceService:
             except UnsupportedFormatError as e:
                 failed.append(FailedFile(file=Path(fp).name, reason=str(e)))
             except Exception as e:  # noqa: BLE001 - 解析意外错误也记为失败
+                _logger.exception("发票文件解析异常 file=%s", fp)
                 failed.append(FailedFile(file=Path(fp).name, reason=f"{type(e).__name__}: {e}"))
             if progress_callback is not None:
                 progress_callback(idx + 1, total)

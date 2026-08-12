@@ -91,8 +91,8 @@ class UpdateWorker(QThread):
 
         try:
             rel = updater_pkg.check_update()
-        except Exception as e:
-            _logger.warning("检查更新失败: %s", e)
+        except Exception:
+            _logger.warning("检查更新失败", exc_info=True)
             self.checked.emit(None, "failed")
             return
         if rel is not None:
@@ -115,6 +115,8 @@ class UpdateWorker(QThread):
             )
             self.verified.emit(zip_path)
         except UpdateError as e:
+            _logger.warning("更新下载或校验失败: %s", e)
             self.failed.emit(str(e))
         except Exception as e:
+            _logger.exception("更新下载出现未知异常 version=%s", release.version)
             self.failed.emit(f"下载失败: {e}")

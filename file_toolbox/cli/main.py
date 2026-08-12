@@ -1,5 +1,7 @@
 """file-toolbox 命令行总入口。"""
 
+import logging
+
 import typer
 
 from file_toolbox import __version__
@@ -9,6 +11,7 @@ from file_toolbox.cli.op_parser import OpParseError
 from file_toolbox.cli.pdf_cmd import pdf
 from file_toolbox.cli.rename_cmd import rename
 from file_toolbox.cli.replace_cmd import replace
+from file_toolbox.common.logging_config import configure_logging
 
 # OpParseError 属于用户输入错误,不应以 Python traceback 暴露给终端用户。
 # pretty_exceptions_enable=False 关闭 Typer 对它的彩色堆栈包装,改由这里统一处理。
@@ -62,9 +65,12 @@ def main() -> None:
     `python -m file_toolbox` 两条路径都经此入口。
     standalone_mode=False 使 typer.Exit 以异常抛出,便于在此统一处理。
     """
+    configure_logging(mode="cli")
+    logger = logging.getLogger(__name__)
     try:
         app(standalone_mode=False)
     except OpParseError as e:
+        logger.warning("CLI 参数文件解析失败: %s", e)
         typer.secho(f"错误:{e}", fg=typer.colors.RED, err=True)
         raise SystemExit(1) from e
     except typer.Exit as e:

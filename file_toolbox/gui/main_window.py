@@ -1,6 +1,6 @@
 """File Toolbox 主窗口：QMainWindow + 6 个功能 Tab。"""
 
-import contextlib
+import logging
 
 from PySide6.QtCore import QMetaObject, Qt, QTimer
 from PySide6.QtGui import QCloseEvent
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from file_toolbox import updater as updater_pkg
 from file_toolbox.common.history import JsonHistoryStore
+from file_toolbox.common.logging_config import configure_logging
 from file_toolbox.common.metadata import VERSION
 from file_toolbox.gui.dialogs import (
     AboutTab,
@@ -31,6 +32,8 @@ from file_toolbox.gui.dialogs import (
 )
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
 from file_toolbox.updater.versions import RemoteRelease
+
+_logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -262,6 +265,7 @@ class MainWindow(QMainWindow):
             replace_dir(_Path(zip_path), exe_path=_Path(sys.executable))
         except UpdateError as e:
             # 替换准备失败(如 zip 结构异常)→ 友好提示,原程序未受影响
+            _logger.warning("更新替换准备失败: %s", e, exc_info=True)
             QMessageBox.warning(self, "更新失败", f"{e}\n\n原程序未受影响,可稍后重试。")
             return
         # helper 已启动,本程序退出
@@ -276,7 +280,7 @@ class MainWindow(QMainWindow):
                 self._update_worker.quit()
                 self._update_worker.wait(2000)
         except Exception:
-            pass
+            _logger.exception("关闭更新 worker 失败")
         for tab in (
             self._rename_tab,
             self._mkdir_tab,
@@ -288,8 +292,10 @@ class MainWindow(QMainWindow):
         ):
             if hasattr(tab, "closeEvent"):
                 # 触发各 tab 的清理(吞掉异常避免一个 tab 清理失败影响其余)
-                with contextlib.suppress(Exception):
+                try:
                     tab.closeEvent(event)
+                except Exception:
+                    _logger.exception("关闭 Tab 失败 tab=%s", type(tab).__name__)
         if self._attendance_tab.close_pending:
             event.ignore()
             return
@@ -302,6 +308,8 @@ def run_gui() -> None:
 
     from PySide6.QtWidgets import QApplication
 
+    configure_logging(mode="gui")
+    _logger.info("GUI 初始化")
     app = QApplication.instance() or QApplication(sys.argv)
     win = MainWindow()
     win.show()

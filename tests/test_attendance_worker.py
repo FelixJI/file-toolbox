@@ -69,13 +69,26 @@ def test_worker_dispatches_generate(tmp_path):
     service.generate.assert_called_once()
 
 
-def test_worker_emits_failure(tmp_path):
+def test_worker_logs_traceback_and_emits_traceable_failure(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common.logging_config import configure_logging, get_log_file
+
+    configure_logging(mode="test")
     service = MagicMock()
-    service.preview.side_effect = RuntimeError("Excel 不可用")
+    raw_com_message = "(-2147352567, '发生意外。', (0, None, None, None, 0, -2147352565), None)"
+    service.preview.side_effect = RuntimeError(raw_com_message)
     received = []
     worker = AttendanceWorker(service, _request(tmp_path), "preview")
     worker.failed.connect(received.append)
 
     worker.run()
 
-    assert received == ["Excel 不可用"]
+    assert len(received) == 1
+    assert "考勤预览失败" in received[0]
+    assert "错误编号" in received[0]
+    assert str(get_log_file()) in received[0]
+    assert raw_com_message not in received[0]
+    log_content = get_log_file().read_text(encoding="utf-8")
+    assert raw_com_message in log_content
+    assert "Traceback" in log_content
+    assert str(tmp_path / "source.xlsx") in log_content

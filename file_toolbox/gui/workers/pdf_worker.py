@@ -71,15 +71,16 @@ class PdfGenerateWorker(QThread, LoggableMixin):
         # CoUninitialize 之前——与原手写顺序一致。
         with ComSession():
             try:
+                self.logger.info("PDF 生成 worker 开始 files=%d", len(self._files))
                 # 首次引擎兑现:注册表说有 → 真 Dispatch 验证一次
                 # (force_refresh=True 才走真 Dispatch;失败则修正缓存,转换单元内会尝试另一引擎)
                 try:
                     from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
                     EngineManager()._detect_available_engines(force_refresh=True)
-                except Exception as e:
+                except Exception:
                     # 兑现失败不致命:auto 引擎下转换单元会逐个 ProgID 尝试
-                    self.logger.warning(f"引擎兑现检测失败(继续生成): {e}")
+                    self.logger.warning("引擎兑现检测失败（继续生成）", exc_info=True)
 
                 results = self._svc.batch_generate(
                     self._files,
@@ -87,9 +88,10 @@ class PdfGenerateWorker(QThread, LoggableMixin):
                     progress_callback=lambda c, t, m: self.progress.emit(c, t, m),
                     cancel_check=self._cancel_check,
                 )
+                self.logger.info("PDF 生成 worker 完成 files=%d", len(self._files))
                 self.finished_ok.emit(results)
             except Exception as e:
-                self.logger.error(f"PDF 生成 worker 异常: {e}")
+                self.logger.exception("PDF 生成 worker 异常 files=%d", len(self._files))
                 self.failed.emit(str(e))
             finally:
                 with contextlib.suppress(Exception):

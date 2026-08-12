@@ -58,13 +58,15 @@ class InvoiceParseWorker(QThread, LoggableMixin):
     def run(self) -> None:  # noqa: D401 (QThread 命名)
         """worker 入口(在后台线程执行)。"""
         try:
+            self.logger.info("发票解析 worker 开始 files=%d", len(self._files))
             result = self._svc.parse_files(
                 self._files,
                 dedupe_strategy=self._dedupe_strategy,
                 progress_callback=lambda c, t: self.progress.emit(c, t),
                 cancel_check=self._cancel_check,
             )
+            self.logger.info("发票解析 worker 完成 files=%d", len(self._files))
             self.finished_ok.emit(result)
         except Exception as e:  # noqa: BLE001 - 任意异常转 failed 信号
-            self.logger.error(f"发票解析 worker 异常: {e}")
+            self.logger.exception("发票解析 worker 异常 files=%d", len(self._files))
             self.failed.emit(str(e))

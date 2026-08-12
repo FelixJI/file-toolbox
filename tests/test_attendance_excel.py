@@ -117,11 +117,19 @@ def test_validate_template_checks_target_sheets_and_formula(monkeypatch, tmp_pat
 def test_validate_template_rejects_wrong_date_header(monkeypatch, tmp_path):
     plan = _plan()
     detail = MagicMock()
+    detail.Name = "出勤明细"
     summary = MagicMock()
+    summary.Name = "考勤汇总表"
     detail.Cells.return_value = _cell(value="日期")
     summary.Cells.return_value = _cell(formula="=COUNTIF(A1:A2,1)")
     workbook = MagicMock()
-    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    workbook.Worksheets.Count = 2
+    workbook.Worksheets.side_effect = {
+        "出勤明细": detail,
+        "考勤汇总表": summary,
+        1: detail,
+        2: summary,
+    }.__getitem__
     _patch_excel(monkeypatch, workbook)
 
     with pytest.raises(ValueError, match="日期区域"):
@@ -180,6 +188,52 @@ def test_validate_template_checks_each_existing_roster_sheet_pair(monkeypatch, t
 
     labor_detail.Cells.assert_called_once()
     labor_summary.Cells.assert_called_once()
+
+
+def test_validate_template_reports_missing_roster_sheets_instead_of_raw_com_error(
+    monkeypatch, tmp_path
+):
+    plan = replace(
+        _plan(),
+        roster=RosterConfig(
+            Path("roster.xlsx"),
+            RosterLayout(
+                "Sheet1",
+                CellRef.parse("A1"),
+                CellRef.parse("B1"),
+                CellRef.parse("C1"),
+                CellRef.parse("D1"),
+            ),
+        ),
+        group_sheet_configs=(
+            GroupSheetConfig("盛世金源", "出勤明细-劳务", "考勤汇总表-劳务", "劳务"),
+        ),
+    )
+    detail = MagicMock()
+    detail.Name = "出勤明细"
+    detail.Cells.return_value = _cell(value=1)
+    summary = MagicMock()
+    summary.Name = "考勤汇总表"
+    summary.Cells.return_value = _cell(formula="=COUNTIF(A1:A2,1)")
+    sheets = {1: detail, 2: summary, "出勤明细": detail, "考勤汇总表": summary}
+    raw_com_message = "(-2147352567, '发生意外。', (0, None, None, None, 0, -2147352565), None)"
+
+    def get_sheet(name):
+        if name in sheets:
+            return sheets[name]
+        raise RuntimeError(raw_com_message)
+
+    workbook = MagicMock()
+    workbook.Worksheets.Count = 2
+    workbook.Worksheets.side_effect = get_sheet
+    _patch_excel(monkeypatch, workbook)
+
+    with pytest.raises(ValueError, match="模板缺少工作表") as error:
+        ExcelComAdapter().validate_template(tmp_path / "template.xlsx", plan)
+
+    assert "出勤明细-劳务" in str(error.value)
+    assert "考勤汇总表-劳务" in str(error.value)
+    assert raw_com_message not in str(error.value)
 
 
 def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch, tmp_path):
