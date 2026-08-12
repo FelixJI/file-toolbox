@@ -240,6 +240,9 @@ def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch
         (2, 1): "张三",
         (2, 2): "售后组",
         (2, 3): "市场部",
+        (2, 4): 1.5,
+        (2, 5): 2,
+        (2, 6): None,
         (2, 7): "正常",
         (2, 8): "出差",
         (3, 1): "",
@@ -254,6 +257,7 @@ def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch
 
     assert source.department == "市场部"
     assert source.employees[0].records == ("正常", "出差")
+    assert source.employees[0].overtime_hours == (1.5, 2, "")
     assert source.employees[0].attendance_group == "售后组"
     workbook.Worksheets.assert_called_once_with("Sheet1")
     workbook.Close.assert_called_once_with(SaveChanges=False)
@@ -409,6 +413,60 @@ def test_write_output_adjusts_columns_rows_and_saves(
     workbook.Save.assert_called_once_with()
     workbook.Close.assert_called_once_with(SaveChanges=False)
     app.Quit.assert_called_once_with()
+
+
+def test_write_output_writes_overtime_and_removes_unused_tail_rows(monkeypatch, tmp_path):
+    plan = _plan()
+    detail = MagicMock()
+    summary = MagicMock()
+    detail_cells = {}
+    summary_cells = {}
+    detail.Cells.side_effect = lambda row, col: detail_cells.setdefault((row, col), _cell())
+
+    def summary_cell(row, col):
+        return summary_cells.setdefault(
+            (row, col),
+            _cell(formula='=COUNTIF(出勤明细!D7:AG7,"√")'),
+        )
+
+    summary.Cells.side_effect = summary_cell
+    overtime_range = MagicMock()
+
+    def summary_range(start, end):
+        if start is summary_cells.get((8, 18)) and end is summary_cells.get((8, 20)):
+            return overtime_range
+        return MagicMock()
+
+    summary.Range.side_effect = summary_range
+    detail_rows = {}
+    summary_rows = {}
+    detail.Rows.side_effect = lambda row: detail_rows.setdefault(row, MagicMock())
+    summary.Rows.side_effect = lambda row: summary_rows.setdefault(row, MagicMock())
+    workbook = MagicMock()
+    workbook.ReadOnly = False
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    _patch_excel(monkeypatch, workbook)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance(
+                "张三",
+                "市场部",
+                tuple("正常" for _ in range(30)),
+                overtime_hours=(1.5, 2, ""),
+            ),
+        ),
+        "市场部",
+    )
+
+    ExcelComAdapter().write_output(
+        tmp_path / "staging.xlsx",
+        plan,
+        _prepared(source, (tuple("√" for _ in range(30)),), 30),
+    )
+
+    assert overtime_range.Value == ((1.5, 2, ""),)
+    assert {row for row, mock in detail_rows.items() if mock.Delete.called} == set(range(8, 22))
+    assert {row for row, mock in summary_rows.items() if mock.Delete.called} == set(range(9, 23))
 
 
 def test_write_output_save_failure_still_closes_excel(monkeypatch, tmp_path):

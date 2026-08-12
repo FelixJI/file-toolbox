@@ -194,7 +194,13 @@ def test_roster_mode_controls_order_groups_exclusions_and_employee_ids(tmp_path)
     source = SourceAttendance(
         (
             EmployeeAttendance("王五", "市场部", tuple("正常" for _ in range(31)), "技管"),
-            EmployeeAttendance("张三", "旧部门", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance(
+                "张三",
+                "旧部门",
+                tuple("正常" for _ in range(31)),
+                "售后组",
+                overtime_hours=(1.5, 2, 3),
+            ),
             EmployeeAttendance("额外人员", "市场部", tuple("正常" for _ in range(31)), "售后组"),
             EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31)), "管理组"),
         ),
@@ -217,6 +223,7 @@ def test_roster_mode_controls_order_groups_exclusions_and_employee_ids(tmp_path)
         "001",
         "003",
     ]
+    assert prepared.groups[0].source.employees[0].overtime_hours == (1.5, 2, 3)
     assert prepared.groups[0].mapping_values[0][2] == "徐州中车/正式/市场部"
     assert prepared.preview.excluded_count == 1
     assert [employee.exported for employee in prepared.preview.employees] == [True, False, True]

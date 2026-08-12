@@ -206,6 +206,9 @@ def resolve_roster(
                 source_group=raw_employee.attendance_group.strip() if raw_employee else "",
                 employee_id=roster_employee.employee_id,
                 group_alias=alias,
+                overtime_hours=(
+                    raw_employee.overtime_hours if raw_employee is not None else ("", "", "")
+                ),
             )
         )
         exported_group_keys.add(group_key)
