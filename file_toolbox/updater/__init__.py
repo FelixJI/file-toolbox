@@ -22,11 +22,19 @@ __all__ = ["check_update", "is_portable_exe", "apply_proxy", "RemoteRelease"]
 def is_portable_exe() -> bool:
     """检测当前是否以便携 exe(PyInstaller onedir)形态运行。
 
-    判据:可执行名 == FileToolbox.exe 且同目录存在 python3.dll
-    (PyInstaller onedir 产物的运行时标记;Python 运行时 DLL 放在 exe 同级)。
+    PyInstaller 会设置 ``sys.frozen`` 与 ``sys._MEIPASS``。onedir 模式下 bundle
+    目录位于 exe 同目录或其子目录(当前 PyInstaller 6 默认是 ``_internal``)；
+    onefile 模式的临时 bundle 位于安装目录之外,不能使用整目录替换更新。
     """
-    exe = Path(sys.executable)
-    return exe.name == "FileToolbox.exe" and (exe.parent / "python3.dll").exists()
+    exe = Path(sys.executable).resolve()
+    if exe.name.casefold() != "filetoolbox.exe" or not getattr(sys, "frozen", False):
+        return False
+
+    bundle_path = getattr(sys, "_MEIPASS", None)
+    if not bundle_path:
+        return False
+    bundle_dir = Path(bundle_path).resolve()
+    return bundle_dir == exe.parent or exe.parent in bundle_dir.parents
 
 
 def check_update() -> RemoteRelease | None:
