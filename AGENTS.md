@@ -23,7 +23,7 @@
 
 ### CI/CD 架构保护
 
-- 六仓默认只保留 `.github/workflows/ci.yml` 与 `.github/workflows/cd.yml`；`scripts/automation.py` 与 `scripts/automation_core.py` 是公共深模块，公共 core 变更必须六仓协调并保持提交后的 Git blob/字节一致。workflow 共享稳定 CLI、`required` 门禁、候选交接和发布状态机等不变量，但不要求字节一致；VibeTable 可按其多栈构建和 E2E 瓶颈调整 job、lane、缓存及产物交接。
+- 六仓默认只保留 `.github/workflows/ci.yml` 与 `.github/workflows/cd.yml`；公共自动化深模块文件清单为 `scripts/automation.py`、`scripts/automation_core.py` 及 `scripts/automation_{common,ci,candidate,prepare,publish}.py`，相关变更必须六仓协调并保持每个对应文件提交后的 Git blob/字节一致。workflow 共享稳定 CLI、`required` 门禁、候选交接和发布状态机等不变量，但不要求字节一致；VibeTable 可按其多栈构建和 E2E 瓶颈调整 job、lane、缓存及产物交接。
 - 项目专属命令、测试集合和构建语义优先写在 `.ci/project.json` 及项目脚本中。workflow 可表达项目所需的 runner、job 拓扑、缓存和产物交接，但不重复实现项目命令；需要新依赖或平台步骤时优先扩展 bootstrap/adapter。
 - CI 在 PR 和 `main` push 上完成 `.ci/project.json` 声明的 `bootstrap`、`quality`、`e2e`、`release_build` 与 `release_smoke`，按项目真实依赖串并行编排并 fail closed。PR 必须执行适用的完整 release build/smoke；只有 `main` push 会整理并上传正式候选。只有同一 PR 的陈旧运行可取消，`main` 运行不可互相取消。
 - PR CI 是合并门禁；squash merge 后的 `main` CI 验证合并结果，并额外上传固定名 `release-candidate`。CD 的 publish job 只下载触发它的那次 `main` CI、同一 source SHA 的候选，不重新运行完整 CI，也禁止在 CD 重建、替换或人工上传资产。
