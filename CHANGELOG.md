@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+### Bug Fixes
+
+- **attendance:** 修复考勤报错并完善产品日志 (#28) (7ccb81d)
+
 ## 0.2.1
 
 ### Features
