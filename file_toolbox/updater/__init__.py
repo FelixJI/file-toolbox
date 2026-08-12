@@ -13,10 +13,33 @@ import sys
 from pathlib import Path
 
 from file_toolbox import __version__
+from file_toolbox.updater.coordinator import UpdateCoordinator
+from file_toolbox.updater.models import (
+    UpdateApplyResult,
+    UpdateApplyStatus,
+    UpdateCheckResult,
+    UpdateCheckStatus,
+)
 from file_toolbox.updater.proxy import apply_proxy
+from file_toolbox.updater.velopack_adapter import (
+    VelopackUpdateCoordinator,
+    create_update_coordinator,
+)
 from file_toolbox.updater.versions import RemoteRelease, fetch_latest, is_newer
 
-__all__ = ["check_update", "is_portable_exe", "apply_proxy", "RemoteRelease"]
+__all__ = [
+    "RemoteRelease",
+    "UpdateApplyResult",
+    "UpdateApplyStatus",
+    "UpdateCheckResult",
+    "UpdateCheckStatus",
+    "UpdateCoordinator",
+    "VelopackUpdateCoordinator",
+    "apply_proxy",
+    "check_update",
+    "create_update_coordinator",
+    "is_portable_exe",
+]
 
 
 def is_portable_exe() -> bool:

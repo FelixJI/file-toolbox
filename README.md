@@ -35,15 +35,15 @@ CLI 命令默认只预览计划，只有显式传入 `--yes` 才会执行。
 
 ### 使用发布包
 
-1. 从 [Releases](https://github.com/FelixJI/file-toolbox/releases/latest) 下载最新的
-   `FileToolbox-*-win64.zip` 及对应校验文件。
-2. 校验 SHA-256 后解压 ZIP。
-3. 运行包内桌面程序，或在终端使用随包提供的 CLI。
+1. 新用户从 [Releases](https://github.com/FelixJI/file-toolbox/releases/latest) 下载
+   `FileToolbox-Setup.exe`；无需安装时可选 `FileToolbox-Portable.zip`。
+2. 按同一 Release 的 `checksums.txt` 校验 SHA-256，再运行 Setup 或解压 Portable。
+3. `FileToolbox-*-win64.zip` 仅在更新器迁移桥接期保留，供旧客户端升级，不再是新安装入口。
 
 PowerShell 校验示例：
 
 ```powershell
-Get-FileHash .\FileToolbox-*-win64.zip -Algorithm SHA256
+Get-FileHash .\FileToolbox-Setup.exe -Algorithm SHA256
 ```
 
 ### 从源码运行
@@ -69,9 +69,9 @@ uv run file-toolbox rename --dir ./samples --op "add_suffix:text=_done" --yes
 
 ### 日志与故障排查
 
-CLI 与 GUI 启动后都会把运行信息写入程序目录下的
-`.file_toolbox/logs/file-toolbox.log`。日志按 5 MiB 自动轮转并保留最近 5 份；“关于”页可直接
-打开日志目录。界面出现“错误编号”时，请在反馈问题时附上该编号和对应时段的日志。
+GUI 把运行信息写入 `%USERPROFILE%\.file_toolbox\logs\file-toolbox.log`；CLI 保持工作目录隔离，
+写入当前目录的 `.file_toolbox/logs/file-toolbox.log`。日志按 5 MiB 自动轮转并保留最近 5 份；
+“关于”页可直接打开日志目录。界面出现“错误编号”时，请在反馈问题时附上该编号和对应时段的日志。
 
 日志会记录操作类型、文件路径、异常调用栈和运行环境，不记录文档单元格、正文或发票内容。
 分享日志前仍建议检查路径中是否包含不便公开的人员或项目名称。
@@ -138,8 +138,9 @@ uv run python scripts/regen_ui.py --check
 
 ## 发布资产
 
-正式 Release 包含 Windows x64 ZIP、对应校验文件、`build-identity.json` 与 SPDX SBOM。
-版本与资产由自动化脚本生成；贡献者不应手改派生版本或手工创建正式 tag。
+迁移期正式 Release 精确包含 Setup、Portable ZIP、Velopack full nupkg/feed、legacy Windows x64
+ZIP、`checksums.txt`、`build-identity.json` 与 SPDX SBOM。版本与资产由自动化脚本生成；贡献者
+不应手改派生版本或手工创建正式 tag。
 
 ## 参与贡献
 

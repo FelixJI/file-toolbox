@@ -1,6 +1,7 @@
 """File Toolbox 主窗口：QMainWindow + 6 个功能 Tab。"""
 
 import logging
+import sys
 
 from PySide6.QtCore import QMetaObject, Qt, QTimer
 from PySide6.QtGui import QCloseEvent
@@ -16,7 +17,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from file_toolbox import updater as updater_pkg
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.logging_config import configure_logging
 from file_toolbox.common.metadata import VERSION
@@ -31,7 +31,14 @@ from file_toolbox.gui.dialogs import (
     PDFGeneratorDialog,
 )
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
-from file_toolbox.updater.versions import RemoteRelease
+from file_toolbox.updater import create_update_coordinator
+from file_toolbox.updater.coordinator import UpdateCoordinator
+from file_toolbox.updater.models import (
+    UpdateApplyResult,
+    UpdateApplyStatus,
+    UpdateCheckResult,
+    UpdateCheckStatus,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -39,7 +46,7 @@ _logger = logging.getLogger(__name__)
 class MainWindow(QMainWindow):
     """工具箱主窗口，6 个功能 Tab。"""
 
-    def __init__(self) -> None:
+    def __init__(self, coordinator: UpdateCoordinator | None = None) -> None:
         super().__init__()
         self.setWindowTitle("File Toolbox")
         self.resize(950, 720)
@@ -100,18 +107,17 @@ class MainWindow(QMainWindow):
         # --- 自更新:状态栏 banner + 后台 worker(仅便携 exe 形态启用检查) ---
         self._update_banner = UpdateBanner()
         self.statusBar().addPermanentWidget(self._update_banner)
-        self._update_worker = UpdateWorker(self)
+        self._update_worker = UpdateWorker(coordinator or create_update_coordinator(), self)
         self._update_worker.ready.connect(self._on_update_ready)
         self._update_worker.progress.connect(self._on_update_progress)
-        self._update_worker.verified.connect(self._on_update_verified)
-        self._update_worker.failed.connect(self._on_update_failed)
+        self._update_worker.applied.connect(self._on_update_applied)
         self._update_banner.clicked.connect(self._start_download)
-        self._pending_release: RemoteRelease | None = None
+        self._pending_update: UpdateCheckResult | None = None
         self._update_dialog: QProgressDialog | None = None
         self._download_cancelled = False  # 用户取消下载后抑制后续 verified/failed 弹窗
 
-        if updater_pkg.is_portable_exe():  # pragma: no cover
-            # 仅打包便携 exe 形态启动后台检查;pip/dev 形态跳过(测试与开发均非便携)。
+        if getattr(sys, "frozen", False):  # pragma: no cover
+            # 仅 PyInstaller/Velopack 形态自动检查；开发态仍可从关于页手动检查。
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
 
@@ -155,7 +161,7 @@ class MainWindow(QMainWindow):
         self._manual_check_pending = True
         self._trigger_check()
 
-    def _on_update_checked(self, release: RemoteRelease | None, status: str) -> None:
+    def _on_update_checked(self, result: UpdateCheckResult) -> None:
         """worker checked 信号:仅手动检查时回显结果到关于页。
 
         自动检查场景(启动后台)忽略此回调(由 _on_update_ready 处理 banner)。
@@ -163,112 +169,86 @@ class MainWindow(QMainWindow):
         if not self._manual_check_pending:
             return
         self._manual_check_pending = False
-        if status == "available" and release is not None:
-            if updater_pkg.is_portable_exe():
-                self._about_tab.display_check_result(
-                    "available", f"🆕 发现新版本 {release.version}(点击底部提示更新)"
-                )
-            else:
-                self._about_tab.display_check_result(
-                    "available",
-                    f"🆕 发现新版本 {release.version},请用 pip install -U file-toolbox 升级",
-                )
-        elif status == "failed":
+        if result.status is UpdateCheckStatus.AVAILABLE:
+            self._about_tab.display_check_result(
+                "available", f"🆕 发现新版本 {result.version}(点击底部提示更新)"
+            )
+        elif result.status is UpdateCheckStatus.INSTALLER_REQUIRED:
+            self._about_tab.display_check_result(
+                "available", "当前是旧版/未安装布局，请点击底部提示迁移到新版安装器"
+            )
+        elif result.status is UpdateCheckStatus.FAILED:
             self._about_tab.display_check_result("failed", "⚠ 检查更新失败,请检查网络或代理设置")
         else:  # latest
             self._about_tab.display_check_result("latest", f"✓ 当前为最新版本 v{VERSION}")
 
-    def _on_update_ready(self, release: RemoteRelease) -> None:
-        """检查到新版本 → 状态栏 banner 提示(便携版可下载)。"""
-        self._pending_release = release
-        if updater_pkg.is_portable_exe():
-            self._update_banner.show_release(release)
-        # 非便携版(pip/dev):不在状态栏提示,由关于页 display_check_result 引导 pip 升级
+    def _on_update_ready(self, result: UpdateCheckResult) -> None:
+        """检查到新版或 bridge 需要 → 状态栏 banner 提示。"""
+        self._pending_update = result
+        self._update_banner.show_result(result)
 
     def _start_download(self) -> None:
         """用户点击 banner → 弹进度对话框 + 向 worker 投递下载请求。"""
-        if self._pending_release is None:
+        if self._pending_update is None:
+            return
+        update = self._pending_update
+        if update.status is UpdateCheckStatus.INSTALLER_REQUIRED:
+            prompt = "将下载并启动同版本安装器，现有数据仍保留在用户目录。是否继续？"
+        else:
+            prompt = f"将下载并应用 v{update.version}，应用会在准备完成后退出并重启。是否继续？"
+        if (
+            QMessageBox.question(
+                self,
+                "确认更新",
+                prompt,
+                QMessageBox.StandardButton.Apply | QMessageBox.StandardButton.Cancel,
+            )
+            != QMessageBox.StandardButton.Apply
+        ):
             return
         self._update_banner.hide()
-        release = self._pending_release
         self._download_cancelled = False  # 新一轮下载,清除取消标记
-        dlg = QProgressDialog(f"正在下载 v{release.version}…", "取消", 0, 100, self)
+        label = "正在下载安装器…" if not update.version else f"正在下载 v{update.version}…"
+        dlg = QProgressDialog(label, "取消", 0, 100, self)
         dlg.setWindowTitle("更新")
         dlg.setMinimumDuration(0)
         dlg.setValue(0)
         dlg.canceled.connect(self._on_download_cancel)
         self._update_dialog = dlg
         dlg.show()
-        # 投递下载到 worker 线程(Q_ARG 包装 RemoteRelease 参数)
-        from PySide6.QtCore import Q_ARG
-
         QMetaObject.invokeMethod(
             self._update_worker,
-            "do_download",
+            "do_download_and_apply",
             Qt.ConnectionType.QueuedConnection,
-            Q_ARG(RemoteRelease, release),
         )
 
     def _on_download_cancel(self) -> None:
         """用户取消下载:抑制后续 verified/failed 弹窗(下载本身无法中断,任其完成)。"""
         self._download_cancelled = True
+        self._update_worker.cancel_download()
         self._update_dialog = None
 
-    def _on_update_progress(self, downloaded: int, total: int) -> None:
+    def _on_update_progress(self, value: int) -> None:
         if self._update_dialog is None:
             return
-        if total <= 0:
-            # 拿不到 Content-Length → 不确定模式(滚动条)
-            self._update_dialog.setRange(0, 0)
-            self._update_dialog.setLabelText(f"正在下载…(已 {downloaded // 1024} KB)")
-        else:
-            self._update_dialog.setRange(0, 100)
-            pct = int(downloaded / total * 100)
-            self._update_dialog.setValue(pct)
-            if downloaded >= total:
-                self._update_dialog.setLabelText("正在校验完整性…")
+        self._update_dialog.setValue(max(0, min(100, value)))
+        if value >= 100:
+            self._update_dialog.setLabelText("正在校验并准备更新…")
 
-    def _on_update_verified(self, zip_path: str) -> None:
-        """下载校验完成 → 提示用户应用更新(用户已取消则静默)。"""
+    def _on_update_applied(self, result: UpdateApplyResult) -> None:
+        """处理 Coordinator 的 apply/bridge 结果。"""
         if self._update_dialog is not None:
             self._update_dialog.close()
             self._update_dialog = None
-        if self._download_cancelled:
+        if self._download_cancelled or result.status is UpdateApplyStatus.CANCELLED:
             return
-        ret = QMessageBox.information(
-            self,
-            "更新就绪",
-            "更新已下载并通过校验。\n点击「应用更新」将重启生效。",
-            QMessageBox.StandardButton.Apply | QMessageBox.StandardButton.Cancel,
-        )
-        if ret == QMessageBox.StandardButton.Apply:
-            self._apply_update(zip_path)
-
-    def _on_update_failed(self, msg: str) -> None:
-        """下载/校验失败 → 中文友好弹窗,不暴露 traceback(用户已取消则静默)。"""
-        if self._update_dialog is not None:
-            self._update_dialog.close()
-            self._update_dialog = None
-        if self._download_cancelled:
+        if result.status is UpdateApplyStatus.FAILED:
+            QMessageBox.warning(
+                self,
+                "更新失败",
+                f"{result.message}\n\n原程序未受影响，可稍后重试。",
+            )
             return
-        QMessageBox.warning(self, "更新失败", f"{msg}\n\n请稍后重试,或前往开源仓库手动下载。")
-
-    def _apply_update(self, zip_path: str) -> None:
-        """生成 helper + 启动 + 退出本程序。替换失败 → 友好提示,不崩溃。"""
-        import sys
-        from pathlib import Path as _Path
-
-        from file_toolbox.updater.errors import UpdateError
-        from file_toolbox.updater.replacer import replace_dir
-
-        try:
-            replace_dir(_Path(zip_path), exe_path=_Path(sys.executable))
-        except UpdateError as e:
-            # 替换准备失败(如 zip 结构异常)→ 友好提示,原程序未受影响
-            _logger.warning("更新替换准备失败: %s", e, exc_info=True)
-            QMessageBox.warning(self, "更新失败", f"{e}\n\n原程序未受影响,可稍后重试。")
-            return
-        # helper 已启动,本程序退出
         from PySide6.QtWidgets import QApplication
 
         QApplication.quit()

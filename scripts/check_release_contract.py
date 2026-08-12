@@ -42,6 +42,20 @@ def check_release_contract(root: Path = _ROOT) -> list[str]:
     ]:
         errors.append("version sources must keep pyproject.toml canonical and uv.lock derived")
 
+    required_assets = config["release"]["required_assets"]
+    expected_assets = [
+        "FileToolbox-{version}-win64.zip",
+        "FileToolbox-{version}-full.nupkg",
+        "FileToolbox-Setup.exe",
+        "FileToolbox-Portable.zip",
+        "releases.win.json",
+        "checksums.txt",
+        "SBOM.spdx.json",
+        "build-identity.json",
+    ]
+    if required_assets != expected_assets:
+        errors.append("release assets must match the Velopack bridge exact set")
+
     workflows = {path.name for path in (root / ".github/workflows").glob("*.yml")}
     if workflows != {"ci.yml", "cd.yml"}:
         errors.append(f"only ci.yml and cd.yml are allowed: {sorted(workflows)!r}")

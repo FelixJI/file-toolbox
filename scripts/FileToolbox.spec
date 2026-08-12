@@ -34,7 +34,7 @@ datas: list = []
 binaries: list = []
 hiddenimports: list = []
 for pkg in ("pymupdf", "fitz", "win32com", "win32comext", "win32",
-            "pythoncom", "pywintypes", "PIL"):
+            "pythoncom", "pywintypes", "PIL", "velopack"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
