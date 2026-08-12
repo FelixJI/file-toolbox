@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4
+
+### Features
+
+- **attendance:** 识别加班并清理末尾空行 (#33) (5b89847)
+
 ## 0.2.3
 
 ### Bug Fixes
