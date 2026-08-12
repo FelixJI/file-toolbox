@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+
+### Bug Fixes
+
+- **attendance:** 支持基础模板生成名单分组工作表 (#31) (4d14684)
+- **updater:** 修复便携版更新识别 (#30) (2873d0e)
+
 ## 0.2.2
 
 ### Bug Fixes
