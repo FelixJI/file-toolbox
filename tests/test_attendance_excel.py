@@ -190,9 +190,7 @@ def test_validate_template_checks_each_existing_roster_sheet_pair(monkeypatch, t
     labor_summary.Cells.assert_called_once()
 
 
-def test_validate_template_reports_missing_roster_sheets_instead_of_raw_com_error(
-    monkeypatch, tmp_path
-):
+def test_validate_template_accepts_base_sheets_for_roster_groups(monkeypatch, tmp_path):
     plan = replace(
         _plan(),
         roster=RosterConfig(
@@ -216,24 +214,21 @@ def test_validate_template_reports_missing_roster_sheets_instead_of_raw_com_erro
     summary.Name = "考勤汇总表"
     summary.Cells.return_value = _cell(formula="=COUNTIF(A1:A2,1)")
     sheets = {1: detail, 2: summary, "出勤明细": detail, "考勤汇总表": summary}
-    raw_com_message = "(-2147352567, '发生意外。', (0, None, None, None, 0, -2147352565), None)"
 
     def get_sheet(name):
         if name in sheets:
             return sheets[name]
-        raise RuntimeError(raw_com_message)
+        raise RuntimeError("工作表不存在")
 
     workbook = MagicMock()
     workbook.Worksheets.Count = 2
     workbook.Worksheets.side_effect = get_sheet
     _patch_excel(monkeypatch, workbook)
 
-    with pytest.raises(ValueError, match="模板缺少工作表") as error:
-        ExcelComAdapter().validate_template(tmp_path / "template.xlsx", plan)
+    sheet_names = ExcelComAdapter().validate_template(tmp_path / "template.xlsx", plan)
 
-    assert "出勤明细-劳务" in str(error.value)
-    assert "考勤汇总表-劳务" in str(error.value)
-    assert raw_com_message not in str(error.value)
+    assert sheet_names == ("出勤明细", "考勤汇总表")
+    workbook.Close.assert_called_once_with(SaveChanges=False)
 
 
 def test_read_source_uses_configured_offsets_and_stops_at_blank_name(monkeypatch, tmp_path):
@@ -564,8 +559,16 @@ def test_prepare_group_sheets_uses_existing_pairs_in_roster_mode():
     )
     detail = MagicMock()
     summary = MagicMock()
+    detail.Name = "出勤明细"
+    summary.Name = "考勤汇总表"
     workbook = MagicMock()
-    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    workbook.Worksheets.Count = 2
+    workbook.Worksheets.side_effect = {
+        1: detail,
+        2: summary,
+        "出勤明细": detail,
+        "考勤汇总表": summary,
+    }.__getitem__
     source = SourceAttendance((EmployeeAttendance("张三", "市场部", ("正常",)),), "市场部")
     group = PreparedGroup("徐州中车", source, (("√",),), "出勤明细", "考勤汇总表", ())
 
@@ -574,6 +577,53 @@ def test_prepare_group_sheets_uses_existing_pairs_in_roster_mode():
     assert result == ((group, detail, summary),)
     detail.Copy.assert_not_called()
     summary.Copy.assert_not_called()
+
+
+def test_prepare_group_sheets_copies_missing_pairs_in_roster_mode(monkeypatch):
+    plan = replace(
+        _plan(),
+        roster=RosterConfig(
+            Path("roster.xlsx"),
+            RosterLayout(
+                "Sheet1",
+                CellRef.parse("A1"),
+                CellRef.parse("B1"),
+                CellRef.parse("C1"),
+                CellRef.parse("D1"),
+            ),
+        ),
+    )
+    base_detail = MagicMock(name="base_detail")
+    base_summary = MagicMock(name="base_summary")
+    group_detail = MagicMock(name="group_detail")
+    group_summary = MagicMock(name="group_summary")
+    workbook = MagicMock()
+    workbook.Worksheets.Count = 2
+    workbook.Worksheets.side_effect = {
+        1: base_detail,
+        2: base_summary,
+        "出勤明细": base_detail,
+        "考勤汇总表": base_summary,
+    }.__getitem__
+    base_detail.Name = "出勤明细"
+    base_summary.Name = "考勤汇总表"
+    copied = {"出勤明细-售后组": group_detail, "考勤汇总表-售后组": group_summary}
+
+    def fake_copy(_workbook, source, name):
+        return copied[name]
+
+    monkeypatch.setattr("file_toolbox.core.attendance.excel._copy_worksheet", fake_copy)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", ("正常",), "售后组"),), "市场部"
+    )
+    group = PreparedGroup("售后组", source, (("√",),), "出勤明细-售后组", "考勤汇总表-售后组", ())
+
+    result = _prepare_group_sheets(workbook, plan, (group,))
+
+    assert result == ((group, group_detail, group_summary),)
+    assert group_summary.Cells.Replace.call_count == 2
+    base_summary.Delete.assert_called_once_with()
+    base_detail.Delete.assert_called_once_with()
 
 
 def test_write_column_preserves_employee_ids_as_text():

@@ -111,20 +111,32 @@ def resolve_roster(
             errors.append(f"名单分组输出别名重复: {alias}")
         else:
             claimed_aliases.add(alias.casefold())
+        configured_names = (
+            mapped_config.detail_sheet.strip(),
+            mapped_config.summary_sheet.strip(),
+        )
+        existing_names = tuple(
+            template_by_key.get(configured_name.casefold()) for configured_name in configured_names
+        )
+        if (existing_names[0] is None) != (existing_names[1] is None):
+            missing_label = "明细" if existing_names[0] is None else "汇总"
+            missing_name = configured_names[0] if existing_names[0] is None else configured_names[1]
+            errors.append(f"名单分组“{group_name}”的{missing_label} Sheet 不存在: {missing_name}")
         resolved_names: list[str] = []
         for label, configured_name in (
-            ("明细", mapped_config.detail_sheet),
-            ("汇总", mapped_config.summary_sheet),
+            ("明细", configured_names[0]),
+            ("汇总", configured_names[1]),
         ):
-            actual = template_by_key.get(configured_name.strip().casefold())
-            if actual is None:
-                errors.append(f"名单分组“{group_name}”的{label} Sheet 不存在: {configured_name}")
-                resolved_names.append(configured_name.strip())
+            if not configured_name:
+                errors.append(f"名单分组“{group_name}”的{label} Sheet 名不能为空")
+                resolved_names.append("")
+                continue
+            resolved_name = template_by_key.get(configured_name.casefold(), configured_name)
+            if resolved_name.casefold() in claimed_sheets:
+                errors.append(f"多个名单分组不能共用 Sheet: {resolved_name}")
             else:
-                if actual.casefold() in claimed_sheets:
-                    errors.append(f"多个名单分组不能共用 Sheet: {actual}")
-                claimed_sheets.add(actual.casefold())
-                resolved_names.append(actual)
+                claimed_sheets.add(resolved_name.casefold())
+            resolved_names.append(resolved_name)
         target_sheets[group_name] = (resolved_names[0], resolved_names[1])
         group_aliases[group_name] = alias
 
@@ -220,6 +232,9 @@ def resolve_roster(
         for group_key in group_names
         if group_key not in exported_group_keys
         and all(target_sheets.get(group_names[group_key], ()))
+        and all(
+            name.casefold() in template_by_key for name in target_sheets[group_names[group_key]]
+        )
     )
     for group_key in group_names:
         if group_key not in exported_group_keys:
