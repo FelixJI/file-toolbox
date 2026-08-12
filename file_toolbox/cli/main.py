@@ -27,13 +27,14 @@ app = typer.Typer(
 def gui() -> None:
     """启动图形界面。"""
     try:
-        from file_toolbox.gui.main_window import run_gui
+        from file_toolbox.gui_entry import main as run_gui
+
+        run_gui()
     except ImportError as e:
         typer.secho(
             "GUI 不可用,请安装: pip install 'file-toolbox[gui]'", fg=typer.colors.RED, err=True
         )
         raise typer.Exit(1) from e
-    run_gui()
 
 
 # 注册 5 个命令(平铺,避免子 app 嵌套)

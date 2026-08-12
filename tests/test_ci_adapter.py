@@ -39,8 +39,44 @@ def _archive(directory: Path, version: str) -> Path:
     archive = directory / f"FileToolbox-{version}-win64.zip"
     with zipfile.ZipFile(archive, "w") as package:
         package.writestr("FileToolbox/FileToolbox.exe", b"smoke")
+    portable = directory / "FileToolbox-Portable.zip"
+    with zipfile.ZipFile(portable, "w") as package:
+        package.writestr("FileToolbox.exe", b"smoke")
+    full = directory / f"FileToolbox-{version}-full.nupkg"
+    with zipfile.ZipFile(full, "w") as package:
+        package.writestr("package/services/metadata/core-properties/test.psmdcp", b"metadata")
+    setup = directory / "FileToolbox-Setup.exe"
+    setup.write_bytes(b"setup")
+    feed = directory / "releases.win.json"
+    full_sha = hashlib.sha256(full.read_bytes()).hexdigest()
+    feed.write_text(
+        json.dumps(
+            {
+                "Assets": [
+                    {
+                        "PackageId": "FileToolbox",
+                        "Version": version,
+                        "Type": "Full",
+                        "FileName": full.name,
+                        "SHA256": full_sha,
+                        "Size": full.stat().st_size,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    payloads = [archive, full, setup, portable, feed]
+    records = {
+        path.name: {
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "size": path.stat().st_size,
+        }
+        for path in sorted(payloads, key=lambda item: item.name)
+    }
     (directory / "checksums.txt").write_text(
-        f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n", encoding="utf-8"
+        "".join(f"{record['sha256']}  {name}\n" for name, record in records.items()),
+        encoding="utf-8",
     )
     (directory / "SBOM.spdx.json").write_text(
         json.dumps(
@@ -59,12 +95,21 @@ def _archive(directory: Path, version: str) -> Path:
                         "SPDXID": "SPDXRef-Package",
                         "name": "file-toolbox",
                         "versionInfo": version,
-                        "checksums": [
-                            {
-                                "algorithm": "SHA256",
-                                "checksumValue": hashlib.sha256(archive.read_bytes()).hexdigest(),
-                            }
-                        ],
+                    }
+                ],
+                "files": [
+                    {
+                        "SPDXID": f"SPDXRef-File-{index}",
+                        "fileName": name,
+                        "checksums": [{"algorithm": "SHA256", "checksumValue": record["sha256"]}],
+                    }
+                    for index, (name, record) in enumerate(records.items())
+                ],
+                "relationships": [
+                    {
+                        "spdxElementId": "SPDXRef-DOCUMENT",
+                        "relationshipType": "DESCRIBES",
+                        "relatedSpdxElement": "SPDXRef-Package",
                     }
                 ],
             }
@@ -84,6 +129,7 @@ def _archive(directory: Path, version: str) -> Path:
                     "archive": archive.name,
                     "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                     "source_sha": "a" * 40,
+                    "assets": records,
                 },
             }
         ),

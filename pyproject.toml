@@ -10,6 +10,7 @@ dependencies = [
     "PyMuPDF>=1.23",
     "chardet>=5.0",
     'pywin32>=306; platform_system == "Windows"',
+    "velopack==1.2.0",
 ]
 
 [project.optional-dependencies]

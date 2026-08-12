@@ -41,6 +41,7 @@ _DIST = Path(os.environ.get("AUTOMATION_ARTIFACTS_DIR", _ROOT / "dist")).resolve
 _BUILD = _ROOT / "build"
 _SPEC = _ROOT / "scripts" / "FileToolbox.spec"
 _PRODUCT = "FileToolbox"
+_VPK_VERSION = "1.2.0"
 
 cli = typer.Typer(add_completion=False, help="file-toolbox PyInstaller 打包")
 
@@ -59,11 +60,19 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _write_build_identity(version: str, archive: Path) -> None:
+def _asset_records(paths: list[Path]) -> dict[str, dict[str, int | str]]:
+    return {
+        path.name: {"sha256": _sha256(path), "size": path.stat().st_size}
+        for path in sorted(paths, key=lambda item: item.name)
+    }
+
+
+def _write_build_identity(version: str, payloads: list[Path]) -> None:
     """写入项目构建身份；候选 manifest 由公共 core 负责生成。"""
     source_sha = os.environ.get("AUTOMATION_SOURCE_SHA", "local")
+    legacy_archive = next(path for path in payloads if path.name.endswith("-win64.zip"))
     identity = {
-        "schema_version": 1,
+        "schema_version": 2,
         "project": {
             "component": "file-toolbox",
             "repository": "FelixJI/file-toolbox",
@@ -71,9 +80,11 @@ def _write_build_identity(version: str, archive: Path) -> None:
             "source_sha": source_sha,
         },
         "build": {
-            "archive": archive.name,
-            "archive_sha256": _sha256(archive),
             "source_sha": source_sha,
+            # 兼容现有候选消费者；schema 2 的 assets 是新的 exact-set 权威字段。
+            "archive": legacy_archive.name,
+            "archive_sha256": _sha256(legacy_archive),
+            "assets": _asset_records(payloads),
         },
     }
     (_DIST / "build-identity.json").write_text(
@@ -82,16 +93,19 @@ def _write_build_identity(version: str, archive: Path) -> None:
     )
 
 
-def _write_spdx_sbom(version: str, archive: Path) -> None:
-    """写入稳定文件名、绑定真实归档的 SPDX 2.3 构建资产清单。"""
-    archive_sha256 = _sha256(archive)
+def _write_spdx_sbom(version: str, payloads: list[Path]) -> None:
+    """写入稳定文件名、精确绑定全部发布 payload 的 SPDX 2.3 清单。"""
+    records = _asset_records(payloads)
+    namespace_digest = hashlib.sha256(
+        "\n".join(f"{name}:{record['sha256']}" for name, record in records.items()).encode()
+    ).hexdigest()
     document = {
         "spdxVersion": "SPDX-2.3",
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": f"file-toolbox-{version}-build",
         "documentNamespace": (
-            f"https://github.com/FelixJI/file-toolbox/releases/v{version}/sbom-{archive_sha256}"
+            f"https://github.com/FelixJI/file-toolbox/releases/v{version}/sbom-{namespace_digest}"
         ),
         "creationInfo": {
             "created": "1980-01-01T00:00:00Z",
@@ -103,25 +117,110 @@ def _write_spdx_sbom(version: str, archive: Path) -> None:
                 "name": "file-toolbox",
                 "versionInfo": version,
                 "downloadLocation": "NOASSERTION",
-                "filesAnalyzed": False,
+                "filesAnalyzed": True,
                 "licenseConcluded": "NOASSERTION",
                 "licenseDeclared": "NOASSERTION",
                 "copyrightText": "NOASSERTION",
-                "checksums": [{"algorithm": "SHA256", "checksumValue": archive_sha256}],
             }
+        ],
+        "files": [
+            {
+                "SPDXID": f"SPDXRef-File-{index}",
+                "fileName": name,
+                "checksums": [{"algorithm": "SHA256", "checksumValue": record["sha256"]}],
+            }
+            for index, (name, record) in enumerate(records.items())
         ],
         "relationships": [
             {
                 "spdxElementId": "SPDXRef-DOCUMENT",
                 "relationshipType": "DESCRIBES",
                 "relatedSpdxElement": "SPDXRef-Package",
-            }
+            },
+            *[
+                {
+                    "spdxElementId": "SPDXRef-Package",
+                    "relationshipType": "CONTAINS",
+                    "relatedSpdxElement": f"SPDXRef-File-{index}",
+                }
+                for index in range(len(records))
+            ],
         ],
     }
     (_DIST / "SBOM.spdx.json").write_text(
         json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _dotnet_executable() -> str:
+    """优先选择 Windows x64 dotnet，避免 PATH 中 x86 host 没有 SDK。"""
+
+    if sys.platform == "win32":
+        program_files = os.environ.get("PROGRAMW6432", r"C:\Program Files")
+        x64_dotnet = Path(program_files) / "dotnet" / "dotnet.exe"
+        if x64_dotnet.is_file():
+            return str(x64_dotnet)
+    dotnet = shutil.which("dotnet")
+    if dotnet is None:
+        raise RuntimeError("未找到 .NET 8+ SDK，无法运行固定版本 vpk")
+    return dotnet
+
+
+def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Path]:
+    """用固定 vpk 打包，并只物化声明的正式资产。"""
+
+    cmd = [
+        _dotnet_executable(),
+        "dnx",
+        f"vpk@{_VPK_VERSION}",
+        "--",
+        "pack",
+        "--packId",
+        _PRODUCT,
+        "--packVersion",
+        version,
+        "--packDir",
+        str(product_dir),
+        "--mainExe",
+        f"{_PRODUCT}.exe",
+        "--outputDir",
+        str(output_dir),
+        "--channel",
+        "win",
+        "--delta",
+        "None",
+        "--packTitle",
+        _PRODUCT,
+        "--yes",
+        "--skip-updates",
+        "true",
+    ]
+    subprocess.run(cmd, cwd=str(_ROOT), check=True)
+    sources = {
+        f"{_PRODUCT}-{version}-full.nupkg": (f"{_PRODUCT}-{version}-full.nupkg",),
+        f"{_PRODUCT}-Setup.exe": (
+            f"{_PRODUCT}-Setup.exe",
+            f"{_PRODUCT}-win-Setup.exe",
+        ),
+        f"{_PRODUCT}-Portable.zip": (
+            f"{_PRODUCT}-Portable.zip",
+            f"{_PRODUCT}-win-Portable.zip",
+        ),
+        "releases.win.json": ("releases.win.json",),
+    }
+    copied: list[Path] = []
+    for target_name, source_names in sources.items():
+        source = next(
+            (output_dir / name for name in source_names if (output_dir / name).is_file()),
+            None,
+        )
+        if source is None:
+            raise RuntimeError(f"vpk 未生成声明资产: {source_names!r}")
+        target = _DIST / target_name
+        shutil.copy2(source, target)
+        copied.append(target)
+    return copied
 
 
 @cli.command()
@@ -136,26 +235,28 @@ def build(
         typer.secho(f"✗ 未找到 spec 文件: {_SPEC}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    # 清理旧产物
+    # 清理旧产物（仅仓库声明的 build/dist 输出目录）
     for d in (_DIST, _BUILD):
         if d.exists():
             shutil.rmtree(d)
     _DIST.mkdir(parents=True)
 
+    pyinstaller_dist = _BUILD / "pyinstaller-dist"
+    pyinstaller_work = _BUILD / "pyinstaller-work"
     cmd = [
         sys.executable,
         "-m",
         "PyInstaller",
         str(_SPEC),
-        f"--distpath={_DIST}",
-        f"--workpath={_BUILD}",
+        f"--distpath={pyinstaller_dist}",
+        f"--workpath={pyinstaller_work}",
         "--noconfirm",  # 覆盖已有产物,CI 非交互必需
     ]
     typer.echo("运行 PyInstaller ...")
     subprocess.run(cmd, cwd=str(_ROOT), check=True)
 
     # PyInstaller onedir 产物 = dist/FileToolbox/(由 spec 的 COLLECT.name 决定)
-    product_dir = _DIST / _PRODUCT
+    product_dir = pyinstaller_dist / _PRODUCT
     if not product_dir.exists():
         typer.secho(f"✗ 未找到产物目录: {product_dir}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -176,12 +277,16 @@ def build(
                 zf.write(f, f.relative_to(product_dir.parent))
     typer.secho(f"✓ zip: {zip_path}", fg=typer.colors.GREEN)
 
-    _write_build_identity(version, zip_path)
-    _write_spdx_sbom(version, zip_path)
+    typer.echo("运行 Velopack vpk ...")
+    velopack_payloads = _run_velopack(product_dir, version, _BUILD / "velopack")
+    payloads = [zip_path, *velopack_payloads]
+
+    _write_build_identity(version, payloads)
+    _write_spdx_sbom(version, payloads)
 
     # checksums
     checksums = _DIST / "checksums.txt"
-    lines = [f"{_sha256(zip_path)}  {zip_name}"]
+    lines = [f"{_sha256(path)}  {path.name}" for path in sorted(payloads, key=lambda p: p.name)]
     checksums.write_text("\n".join(lines) + "\n", encoding="utf-8")
     typer.secho(f"✓ checksums: {checksums}", fg=typer.colors.GREEN)
 

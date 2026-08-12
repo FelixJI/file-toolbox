@@ -1,19 +1,20 @@
-"""updater_widget 的 do_download 方法补充测试(mock download_and_verify)。
+"""UpdateWorker 的 Coordinator 下载/apply 结果分支补充测试。"""
 
-do_download 在 worker 线程执行,这里直接同步调用验证信号发射逻辑。
-"""
+from collections.abc import Callable
 
 import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
-from pathlib import Path
-
 from PySide6.QtWidgets import QApplication
 
 from file_toolbox.gui.updater_widget import UpdateWorker
-from file_toolbox.updater.errors import UpdateError
-from file_toolbox.updater.versions import RemoteRelease
+from file_toolbox.updater import (
+    UpdateApplyResult,
+    UpdateApplyStatus,
+    UpdateCheckResult,
+    UpdateCheckStatus,
+)
 
 
 @pytest.fixture(scope="module")
@@ -21,83 +22,53 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def _release() -> RemoteRelease:
-    return RemoteRelease(
-        version="1.0",
-        zip_url="http://x/z.zip",
-        checksum_url="http://x/checksums.txt",
-        source="github",
-    )
+class ResultCoordinator:
+    def __init__(self, result: UpdateApplyResult) -> None:
+        self.result = result
+
+    def check(self) -> UpdateCheckResult:
+        return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="1.0.0")
+
+    def download_and_apply(
+        self, progress: Callable[[int], None] | None = None
+    ) -> UpdateApplyResult:
+        if progress is not None:
+            progress(40)
+            progress(100)
+        return self.result
 
 
-# ---------------------------------------------------------------------------
-# do_download:成功(行 100-106)
-# ---------------------------------------------------------------------------
+def test_download_and_apply_success_emits_progress_and_result(app):
+    result = UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
+    worker = UpdateWorker(ResultCoordinator(result))
+    progress: list[int] = []
+    applied: list[UpdateApplyResult] = []
+    worker.progress.connect(progress.append)
+    worker.applied.connect(applied.append)
+    worker.do_download_and_apply()
+    assert progress == [40, 100]
+    assert applied == [result]
 
 
-def test_do_download_success(app, monkeypatch):
-    """download_and_verify 成功 → emit verified + progress(行 100-106)。"""
-    import file_toolbox.updater.downloader as dl_mod
-
-    progress_calls = []
-
-    def fake_download(release, on_progress=None):
-        if on_progress:
-            on_progress(50, 100)
-            on_progress(100, 100)
-            progress_calls.extend([(50, 100), (100, 100)])
-        return Path("update.zip")
-
-    monkeypatch.setattr(dl_mod, "download_and_verify", fake_download)
-    worker = UpdateWorker()
-    verified = []
-    worker.verified.connect(lambda p: verified.append(p))
-    prog = []
-    worker.progress.connect(lambda d, t: prog.append((d, t)))
-    worker.do_download(_release())
-    assert verified == [Path("update.zip")]
-    assert (50, 100) in prog
+def test_download_and_apply_failure_is_forwarded_as_project_result(app):
+    result = UpdateApplyResult(UpdateApplyStatus.FAILED, "完整性校验失败")
+    worker = UpdateWorker(ResultCoordinator(result))
+    applied: list[UpdateApplyResult] = []
+    worker.applied.connect(applied.append)
+    worker.do_download_and_apply()
+    assert applied == [result]
 
 
-# ---------------------------------------------------------------------------
-# do_download:UpdateError(行 107-108)
-# ---------------------------------------------------------------------------
+def test_unexpected_coordinator_exception_is_mapped_without_leaking(app):
+    class BrokenCoordinator(ResultCoordinator):
+        def download_and_apply(
+            self, progress: Callable[[int], None] | None = None
+        ) -> UpdateApplyResult:
+            raise ConnectionError("网络断开")
 
-
-def test_do_download_update_error(app, monkeypatch):
-    """download_and_verify 抛 UpdateError → emit failed(行 107-108)。"""
-    import file_toolbox.updater.downloader as dl_mod
-
-    monkeypatch.setattr(
-        dl_mod,
-        "download_and_verify",
-        lambda *a, **k: (_ for _ in ()).throw(UpdateError("校验失败")),
-    )
-    worker = UpdateWorker()
-    failed = []
-    worker.failed.connect(lambda m: failed.append(m))
-    worker.do_download(_release())
-    assert failed == ["校验失败"]
-
-
-# ---------------------------------------------------------------------------
-# do_download:通用异常(行 109-110)
-# ---------------------------------------------------------------------------
-
-
-def test_do_download_generic_exception(app, monkeypatch):
-    """download_and_verify 抛通用异常 → emit failed '下载失败: ...'(行 109-110)。"""
-    import file_toolbox.updater.downloader as dl_mod
-
-    monkeypatch.setattr(
-        dl_mod,
-        "download_and_verify",
-        lambda *a, **k: (_ for _ in ()).throw(ConnectionError("网络断开")),
-    )
-    worker = UpdateWorker()
-    failed = []
-    worker.failed.connect(lambda m: failed.append(m))
-    worker.do_download(_release())
-    assert len(failed) == 1
-    assert "下载失败" in failed[0]
-    assert "网络断开" in failed[0]
+    worker = UpdateWorker(BrokenCoordinator(UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)))
+    applied: list[UpdateApplyResult] = []
+    worker.applied.connect(applied.append)
+    worker.do_download_and_apply()
+    assert applied[0].status is UpdateApplyStatus.FAILED
+    assert "网络断开" in applied[0].message

@@ -1,20 +1,26 @@
-"""updater GUI 组件冒烟测试:验证信号连接 + Banner 控件,不真做网络请求。"""
+"""Updater GUI 通过 UpdateCoordinator seam 的行为测试。"""
 
 import os
+from collections.abc import Callable
 
-# GUI 测试用离屏平台,避免弹窗干扰
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 
-# 用 QtWidgets 子模块做 importorskip(而非顶层 PySide6):后者只校验包可 import,
-# 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QEventLoop, QMetaObject, Qt, QTimer  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
+from file_toolbox.gui.main_window import MainWindow  # noqa: E402
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker  # noqa: E402
-from file_toolbox.updater.versions import RemoteRelease  # noqa: E402
+from file_toolbox.updater import (  # noqa: E402
+    UpdateApplyResult,
+    UpdateApplyStatus,
+    UpdateCheckResult,
+    UpdateCheckStatus,
+)
 
 
 @pytest.fixture(scope="module")
@@ -22,293 +28,156 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-class TestUpdateBanner:
-    def test_is_widget(self, app):
-        banner = UpdateBanner()
-        assert banner.isHidden() is True  # 默认隐藏
+class FakeCoordinator:
+    def __init__(
+        self,
+        check_result: UpdateCheckResult,
+        apply_result: UpdateApplyResult | None = None,
+    ) -> None:
+        self.check_result = check_result
+        self.apply_result = apply_result or UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
 
-    def test_show_release(self, app):
+    def check(self) -> UpdateCheckResult:
+        return self.check_result
+
+    def download_and_apply(
+        self, progress: Callable[[int], None] | None = None
+    ) -> UpdateApplyResult:
+        if progress is not None:
+            progress(50)
+            progress(100)
+        return self.apply_result
+
+
+def _available(version: str = "9.9.9") -> UpdateCheckResult:
+    return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version=version)
+
+
+class TestUpdateBanner:
+    def test_available_result_shows_version(self, app):
         banner = UpdateBanner()
-        rel = RemoteRelease("1.2.0", "http://x/a.zip", "http://x/c.txt", "github")
-        banner.show_release(rel)
-        assert banner.isVisible() is True
-        # 文案含版本号
-        text = banner.text()
-        assert "1.2.0" in text
+        banner.show_result(_available("1.2.0"))
+        assert banner.isHidden() is False
+        assert "1.2.0" in banner.text()
+
+    def test_installer_bridge_has_distinct_copy(self, app):
+        banner = UpdateBanner()
+        banner.show_result(UpdateCheckResult(UpdateCheckStatus.INSTALLER_REQUIRED))
+        assert "安装" in banner.text()
 
     def test_click_emits_signal(self, app):
         banner = UpdateBanner()
-        rel = RemoteRelease("1.2.0", "http://x/a.zip", "http://x/c.txt", "github")
-        banner.show_release(rel)
-        clicked: list = []
+        banner.show_result(_available())
+        clicked: list[int] = []
         banner.clicked.connect(lambda: clicked.append(1))
-        # QLabel 无 click(),用 QTest 模拟鼠标点击
-        from PySide6.QtCore import Qt
-        from PySide6.QtTest import QTest
-
         QTest.mouseClick(banner, Qt.MouseButton.LeftButton)
-        assert len(clicked) == 1
+        assert clicked == [1]
 
 
 class TestUpdateWorker:
-    def test_signals_exist(self, app):
-        """worker 暴露 ready/progress/verified/failed 信号。"""
-        w = UpdateWorker()
-        assert hasattr(w, "ready")
-        assert hasattr(w, "progress")
-        assert hasattr(w, "verified")
-        assert hasattr(w, "failed")
-        w.deleteLater()
+    def test_check_emits_project_result(self, app):
+        worker = UpdateWorker(FakeCoordinator(_available()))
+        checked: list[UpdateCheckResult] = []
+        ready: list[UpdateCheckResult] = []
+        worker.checked.connect(checked.append)
+        worker.ready.connect(ready.append)
+        worker.do_check()
+        assert checked == [_available()]
+        assert ready == [_available()]
 
-    def test_check_emits_ready_when_update_available(self, app, monkeypatch):
-        """检查到新版本 → emit ready(RemoteRelease)。"""
-        import file_toolbox.updater as upkg
+    def test_latest_does_not_emit_ready(self, app):
+        result = UpdateCheckResult(UpdateCheckStatus.LATEST)
+        worker = UpdateWorker(FakeCoordinator(result))
+        ready: list[UpdateCheckResult] = []
+        worker.ready.connect(ready.append)
+        worker.do_check()
+        assert ready == []
 
-        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
-        monkeypatch.setattr(upkg, "check_update", lambda: rel)
+    def test_coordinator_exception_maps_to_failed_result(self, app):
+        class BrokenCoordinator(FakeCoordinator):
+            def check(self) -> UpdateCheckResult:
+                raise RuntimeError("network down")
 
-        w = UpdateWorker()
-        got: list = []
-        w.ready.connect(lambda r: got.append(r))
-        w.do_check()
-        assert len(got) == 1
-        assert got[0].version == "9.9.9"
-        w.deleteLater()
+        worker = UpdateWorker(BrokenCoordinator(_available()))
+        checked: list[UpdateCheckResult] = []
+        worker.checked.connect(checked.append)
+        worker.do_check()
+        assert checked[0].status is UpdateCheckStatus.FAILED
 
-    def test_check_silent_when_no_update(self, app, monkeypatch):
-        import file_toolbox.updater as upkg
+    def test_apply_emits_progress_and_result(self, app):
+        worker = UpdateWorker(FakeCoordinator(_available()))
+        progress: list[int] = []
+        applied: list[UpdateApplyResult] = []
+        worker.progress.connect(progress.append)
+        worker.applied.connect(applied.append)
+        worker.do_download_and_apply()
+        assert progress == [50, 100]
+        assert applied == [UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)]
 
-        monkeypatch.setattr(upkg, "check_update", lambda: None)
-        w = UpdateWorker()
-        got: list = []
-        w.ready.connect(lambda r: got.append(r))
-        w.do_check()
-        assert got == []
-        w.deleteLater()
-
-    def test_checked_signal_exists(self, app):
-        """worker 暴露 checked 信号。"""
-        w = UpdateWorker()
-        assert hasattr(w, "checked")
-        w.deleteLater()
-
-    def test_check_emits_checked_available_when_update(self, app, monkeypatch):
-        """有新版 → emit checked(rel, 'available')。"""
-        import file_toolbox.updater as upkg
-
-        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
-        monkeypatch.setattr(upkg, "check_update", lambda: rel)
-
-        w = UpdateWorker()
-        checked: list = []
-        w.checked.connect(lambda r, s: checked.append((r, s)))
-        w.do_check()
-        assert len(checked) == 1
-        assert checked[0][1] == "available"
-        assert checked[0][0] is rel
-        w.deleteLater()
-
-    def test_check_emits_checked_latest_when_no_update(self, app, monkeypatch):
-        """无新版 → emit checked(None, 'latest')。"""
-        import file_toolbox.updater as upkg
-
-        monkeypatch.setattr(upkg, "check_update", lambda: None)
-        w = UpdateWorker()
-        checked: list = []
-        w.checked.connect(lambda r, s: checked.append((r, s)))
-        w.do_check()
-        assert checked == [(None, "latest")]
-        w.deleteLater()
-
-    def test_check_emits_checked_failed_on_exception(self, app, monkeypatch):
-        """check_update 抛异常 → emit checked(None, 'failed')。"""
-        import file_toolbox.updater as upkg
-
-        def boom():
-            raise RuntimeError("network down")
-
-        monkeypatch.setattr(upkg, "check_update", boom)
-        w = UpdateWorker()
-        checked: list = []
-        w.checked.connect(lambda r, s: checked.append((r, s)))
-        w.do_check()
-        assert checked == [(None, "failed")]
-        w.deleteLater()
-
-    def test_do_check_registered_as_slot(self, app):
-        """do_check 必须被 @Slot() 装饰并注册到 metaObject。
-
-        回归契约:主窗口用 QMetaObject.invokeMethod(worker, "do_check",
-        QueuedConnection) 按名跨线程投递,PySide6 只能找到注册为槽的方法。
-        未加 @Slot() 时投递事件被静默丢弃,表现为"检查更新无反应"(按钮永远卡在
-        "检查中…")。此断言确保装饰器不被误删。
-        """
+    def test_worker_methods_are_registered_slots(self, app):
         meta = UpdateWorker.staticMetaObject
         names = {bytes(meta.method(i).name()).decode() for i in range(meta.methodCount())}
-        assert "do_check" in names
-        assert hasattr(UpdateWorker.do_check, "_slots")
+        assert {"do_check", "do_download_and_apply"} <= names
 
-    def test_do_download_registered_as_slot(self, app):
-        """do_download 必须被 @Slot(RemoteRelease) 装饰并注册到 metaObject。
-
-        同 do_check:主窗口按名 invokeMethod 投递,缺装饰器会导致下载投递静默失败。
-        """
-        meta = UpdateWorker.staticMetaObject
-        names = {bytes(meta.method(i).name()).decode() for i in range(meta.methodCount())}
-        assert "do_download" in names
-        assert hasattr(UpdateWorker.do_download, "_slots")
-
-    def test_check_works_via_real_invoke_method(self, app, monkeypatch):
-        """真实跨线程 invokeMethod 投递 do_check → checked 信号必须收到。
-
-        这是"检查更新无反应"bug 的核心回归契约:直接调用 worker.do_check()(同步)
-        在未加 @Slot() 时也能工作,但生产路径是 QMetaObject.invokeMethod(worker,
-        "do_check", QueuedConnection)。本测试走真实跨线程路径,未加 @Slot() 时
-        checked 信号永远不会到达(超时失败),加装饰器后通过。
-        """
-        import file_toolbox.updater as upkg
-
-        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
-        monkeypatch.setattr(upkg, "check_update", lambda: rel)
-
-        from PySide6.QtCore import QEventLoop, QMetaObject, Qt, QTimer
-
-        w = UpdateWorker()
-        checked: list = []
-        w.checked.connect(lambda r, s: checked.append((r, s)))
-        w.start()  # 启动 worker 线程 + 事件循环
+    def test_check_works_via_real_queued_invocation(self, app):
+        worker = UpdateWorker(FakeCoordinator(_available()))
+        checked: list[UpdateCheckResult] = []
+        worker.checked.connect(checked.append)
+        worker.start()
         try:
             loop = QEventLoop()
-            w.checked.connect(loop.quit)  # 信号到达 → 退出等待循环
-            QTimer.singleShot(3000, loop.quit)  # 超时兜底(3s;正常 <100ms)
-            QMetaObject.invokeMethod(w, "do_check", Qt.ConnectionType.QueuedConnection)
+            worker.checked.connect(loop.quit)
+            QTimer.singleShot(3000, loop.quit)
+            assert QMetaObject.invokeMethod(worker, "do_check", Qt.ConnectionType.QueuedConnection)
             loop.exec()
-            assert checked, "checked 信号未到达(do_check 可能未加 @Slot 装饰器)"
-            assert checked[0][1] == "available"
+            assert checked == [_available()]
         finally:
-            w.quit()
-            w.wait(2000)
-            w.deleteLater()
-
-
-from file_toolbox.gui.main_window import MainWindow  # noqa: E402
+            worker.quit()
+            worker.wait(2000)
 
 
 class TestMainWindowIntegration:
-    def test_banner_added(self, app):
-        """主窗口实例化后含 UpdateBanner(默认隐藏)。"""
-        win = MainWindow()
-        assert hasattr(win, "_update_banner")
-        assert win._update_banner.isHidden() is True
-        win.deleteLater()
-
-    def test_worker_added(self, app):
-        win = MainWindow()
-        assert hasattr(win, "_update_worker")
-        win.deleteLater()
-
-    def test_banner_shows_on_ready(self, app, monkeypatch):
-        """worker ready 信号 → banner 显示(便携版)。"""
-        import file_toolbox.updater as upkg
-
-        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
-        monkeypatch.setattr(upkg, "check_update", lambda: rel)
-        # _on_update_ready 仅便携版弹 banner;测试环境非便携,需模拟便携形态
-        monkeypatch.setattr(upkg, "is_portable_exe", lambda: True)
-
-        win = MainWindow()
+    def test_available_check_updates_about_and_banner(self, app):
+        win = MainWindow(FakeCoordinator(_available("8.0.0")))
+        win._manual_check_pending = True
         win._update_worker.do_check()
         app.processEvents()
-        # isVisible() 在父窗口未 show 时恒为 False;改用 isHidden()(show() 后为 False)
+        assert "8.0.0" in win._about_tab._check_result_lbl.text()
         assert win._update_banner.isHidden() is False
-        win.deleteLater()
 
-    def test_no_check_when_not_portable(self, app, monkeypatch):
-        """非便携形态(pip 安装)→ 不启动检查,banner 保持隐藏。"""
-        import file_toolbox.updater as upkg
-
-        monkeypatch.setattr(upkg, "is_portable_exe", lambda: False)
-        win = MainWindow()
+    def test_latest_check_updates_about_without_banner(self, app):
+        win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
+        win._manual_check_pending = True
+        win._update_worker.do_check()
+        app.processEvents()
+        assert "最新" in win._about_tab._check_result_lbl.text()
         assert win._update_banner.isHidden() is True
-        win.deleteLater()
 
-    def test_history_button_is_toolbutton_without_menu(self, app):
-        """历史按钮是 QToolButton 且无下拉菜单(直接对应当前标签页)。"""
-        from PySide6.QtWidgets import QToolButton
-
-        win = MainWindow()
-        assert isinstance(win.btn_history, QToolButton)
-        # 不再有下拉菜单:点击直接打开当前 tab 历史
-        assert win.btn_history.menu() is None
-        # 默认当前 tab(重命名)→ 按钮启用
-        assert win.btn_history.isEnabled() is True
-        win.deleteLater()
-
-    def test_history_button_opens_current_tab_dialog(self, app, monkeypatch):
-        """点击历史按钮 → 打开当前 tab 对应的 HistoryDialog(无二次选择)。"""
-        opened: list[str] = []
-
-        from file_toolbox.gui import main_window as mw_mod
-
-        class _SpyDialog:
-            def __init__(self, history, tool, parent=None):
-                opened.append(tool)
-
-            def exec(self):
-                return 0
-
-        monkeypatch.setattr(mw_mod, "HistoryDialog", _SpyDialog)
-        win = MainWindow()
-        # 切到 pdf tab(index 2),点击历史按钮应打开 pdf 历史
-        win._tabs.setCurrentIndex(2)
-        win._open_history_for_current_tab()
-        assert opened == ["pdf"]
-        win.deleteLater()
-
-    def test_check_requested_triggers_worker(self, app, monkeypatch):
-        """关于页 check_requested → 主窗口投递 worker do_check。"""
-        import file_toolbox.updater as upkg
-
-        rel = RemoteRelease("9.9.9", "http://x/a.zip", "http://x/c.txt", "github")
-        monkeypatch.setattr(upkg, "check_update", lambda: rel)
-
-        win = MainWindow()
-        # 关于页触发检查请求
-        win._about_tab.check_requested.emit()
-        # 同步调 do_check(模拟 worker 投递后执行)
+    def test_bridge_check_explains_installer_migration(self, app):
+        result = UpdateCheckResult(UpdateCheckStatus.INSTALLER_REQUIRED)
+        win = MainWindow(FakeCoordinator(result))
+        win._manual_check_pending = True
         win._update_worker.do_check()
         app.processEvents()
-        # 结果应回显到关于页
-        assert win._about_tab.btn_check_update.isEnabled() is True
-        assert "9.9.9" in win._about_tab._check_result_lbl.text()
-        win.deleteLater()
+        assert "安装器" in win._about_tab._check_result_lbl.text()
+        assert win._update_banner.isHidden() is False
 
-    def test_manual_check_latest_shown_in_about(self, app, monkeypatch):
-        """手动检查无新版 → 关于页显示最新(不弹 banner)。"""
-        import file_toolbox.updater as upkg
+    def test_cancelled_apply_does_not_quit(self, app, monkeypatch):
+        win = MainWindow(
+            FakeCoordinator(_available(), UpdateApplyResult(UpdateApplyStatus.CANCELLED))
+        )
+        quit_calls: list[int] = []
+        monkeypatch.setattr(QApplication, "quit", lambda: quit_calls.append(1))
+        win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.CANCELLED))
+        assert quit_calls == []
 
-        monkeypatch.setattr(upkg, "check_update", lambda: None)
-        win = MainWindow()
-        win._about_tab.check_requested.emit()
-        win._update_worker.do_check()
-        app.processEvents()
-        text = win._about_tab._check_result_lbl.text()
-        assert "最新" in text
-        # 非便携版不弹 banner
-        win.deleteLater()
-
-    def test_manual_check_failed_shown_in_about(self, app, monkeypatch):
-        """手动检查失败 → 关于页显示失败。"""
-        import file_toolbox.updater as upkg
-
-        def boom():
-            raise RuntimeError("net")
-
-        monkeypatch.setattr(upkg, "check_update", boom)
-        win = MainWindow()
-        win._about_tab.check_requested.emit()
-        win._update_worker.do_check()
-        app.processEvents()
-        text = win._about_tab._check_result_lbl.text()
-        assert "失败" in text
-        win.deleteLater()
+    def test_failed_apply_warns_and_keeps_current_process(self, app, monkeypatch):
+        win = MainWindow(FakeCoordinator(_available()))
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            QMessageBox,
+            "warning",
+            lambda _parent, _title, message: warnings.append(message),
+        )
+        win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.FAILED, "损坏包"))
+        assert "原程序未受影响" in warnings[0]

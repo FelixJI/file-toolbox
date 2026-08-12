@@ -30,6 +30,10 @@
     "generated_commands": [["python", "scripts/sync_version.py", "--version", "{version}"]],
     "required_assets": [
       "FileToolbox-{version}-win64.zip",
+      "FileToolbox-{version}-full.nupkg",
+      "FileToolbox-Setup.exe",
+      "FileToolbox-Portable.zip",
+      "releases.win.json",
       "checksums.txt",
       "SBOM.spdx.json",
       "build-identity.json"

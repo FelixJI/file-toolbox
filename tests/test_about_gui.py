@@ -162,6 +162,19 @@ def test_about_tab_has_proxy_edit(app):
     assert isinstance(tab._proxy_edit, QLineEdit)
 
 
+def test_about_tab_saves_standard_forward_proxy_separately(app, tmp_path, monkeypatch):
+    """standard forward proxy 不与 URL-prefix 候选混为同一设置。"""
+    from file_toolbox.common import settings
+
+    monkeypatch.chdir(tmp_path)
+    tab = AboutTab()
+    tab._forward_proxy_edit.setText("http://127.0.0.1:8899")
+
+    tab.btn_proxy_save.click()
+
+    assert settings.get("forward_proxy") == "http://127.0.0.1:8899"
+
+
 # ---------------------------------------------------------------------------
 # 更新与代理整合分组 + 默认候选 / 全选 / 自定义添加 / 保存
 # ---------------------------------------------------------------------------

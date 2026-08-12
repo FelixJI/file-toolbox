@@ -99,8 +99,8 @@ class AboutTab(QWidget):
 
         # 下半:代理设置
         proxy_intro = QLabel(
-            "勾选要启用的 GitHub 加速代理。检查更新与下载时按勾选顺序自动尝试,"
-            "全部失败回退直连(程序内部自动回退,无需手动干预)。"
+            "URL 加速前缀会拼在完整 GitHub feed 地址之前，并按勾选顺序尝试；"
+            "全部失败后回退直连。它不同于下方标准 forward proxy。"
         )
         proxy_intro.setWordWrap(True)
         update_layout.addWidget(proxy_intro)
@@ -130,6 +130,16 @@ class AboutTab(QWidget):
         self.btn_proxy_remove.clicked.connect(self._remove_selected_proxy)
         add_row.addWidget(self.btn_proxy_remove)
         update_layout.addLayout(add_row)
+
+        forward_row = QHBoxLayout()
+        forward_row.addWidget(QLabel("标准 forward proxy:"))
+        self._forward_proxy_edit = QLineEdit()
+        self._forward_proxy_edit.setPlaceholderText("如 http://127.0.0.1:7890（留空沿用系统环境）")
+        saved_forward_proxy = settings.get("forward_proxy", "")
+        if isinstance(saved_forward_proxy, str):
+            self._forward_proxy_edit.setText(saved_forward_proxy)
+        forward_row.addWidget(self._forward_proxy_edit, stretch=1)
+        update_layout.addLayout(forward_row)
 
         save_row = QHBoxLayout()
         self.btn_proxy_save = QPushButton("保存代理设置")
@@ -322,7 +332,7 @@ class AboutTab(QWidget):
             self._proxy_status_lbl.setText("无可移除的自定义项(默认项不可移除)")
 
     def _save_proxy(self) -> None:
-        """保存:把列表中所有已勾选的代理 URL 写入 settings['gh_proxies']。"""
+        """分别保存 URL-prefix 候选与 standard forward proxy。"""
         enabled: list[str] = []
         for i in range(self._proxy_list.count()):
             item = self._proxy_list.item(i)
@@ -338,6 +348,7 @@ class AboutTab(QWidget):
                 seen.add(p)
                 deduped.append(p)
         settings.set("gh_proxies", deduped)
+        settings.set("forward_proxy", self._forward_proxy_edit.text().strip())
         n = len(deduped)
         self._proxy_status_lbl.setText(
             f"已保存 {n} 个代理" if n else "已保存(无勾选 = 直连 GitHub)"

@@ -63,7 +63,7 @@
 - 权威自动化入口是 `scripts/automation.py`，由它读取 `.ci/project.json`：`uv sync --frozen --all-extras`，release contract、Ruff、mypy、UI 生成校验，两套 pytest 覆盖率门禁（不低于 90%）、测试数量基线、`uv build`，以及真实 PyInstaller release build/smoke。
 - `file_toolbox/gui/generated/` 由 `.ui` 经 `scripts/regen_ui.py` 生成，禁止手改或用全仓格式化破坏。UI 变更同时修改源 `.ui`、重新生成并执行 `--check`。
 - 唯一版本源是 `pyproject.toml [project].version`；`uv.lock` 的 editable package 版本和运行时 metadata 是派生值。不要新增 `version.txt` 或手打 tag。
-- 发布契约固定为 `FileToolbox-{version}-win64.zip`、`checksums.txt`、`SBOM.spdx.json`、`build-identity.json`；ZIP 顶层 `FileToolbox/` 和 `FileToolbox/FileToolbox.exe` 是更新器接口，checksum/SBOM/identity 必须绑定同一归档。
+- Velopack bridge 期发布契约固定为 `FileToolbox-{version}-win64.zip`、`FileToolbox-{version}-full.nupkg`、`FileToolbox-Setup.exe`、`FileToolbox-Portable.zip`、`releases.win.json`、`checksums.txt`、`SBOM.spdx.json`、`build-identity.json`；checksums/SBOM/identity 必须绑定同一精确资产集合。legacy ZIP 顶层 `FileToolbox/` 和 `FileToolbox/FileToolbox.exe` 继续作为旧客户端桥接接口；至少两个正式版本或 90 天（以较长者为准）后才能删除旧 ZIP 与 `versions/downloader/replacer` 更新链。
 - 文件修改命令默认 dry-run，只有明确 `--yes` 才执行；不得为了简化调用移除此保险。自动更新只替换程序目录，必须保留 `.file_toolbox/` 备份/历史并维持 hash 校验与失败回滚。
 - Ruff 使用双引号/100 列/Python 3.11，mypy strict 且以 win32 为目标。仓库提供 pre-commit 配置（Ruff fix/format 与 mypy）；不在文档中假定某个 clone 是否安装 hook，按工作开始时的实际检查执行，未安装时运行等价命令。
 
