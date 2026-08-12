@@ -33,3 +33,10 @@ def get_history_dir() -> Path:
     d = _data_dir() / "history"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def get_log_dir() -> Path:
+    """获取（并创建）应用日志目录。"""
+    d = _data_dir() / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d

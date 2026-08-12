@@ -91,9 +91,12 @@ def test_main_typer_exit_propagates_exit_code(monkeypatch):
 
 def test_main_normal_completion_exit_zero(monkeypatch):
     """main():正常完成(无异常)→ 不抛 SystemExit。"""
+    modes = []
+    monkeypatch.setattr(main_mod, "configure_logging", lambda *, mode: modes.append(mode))
     monkeypatch.setattr(main_mod, "app", lambda *a, **k: None)
     # 不应抛异常
     main()
+    assert modes == ["cli"]
 
 
 # ---------------------------------------------------------------------------

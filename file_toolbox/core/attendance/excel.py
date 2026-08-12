@@ -97,20 +97,34 @@ class ExcelComAdapter:
 
     def validate_template(self, template_path: Path, plan: AttendancePlan) -> tuple[str, ...]:
         with _excel_workbook(template_path, read_only=True) as (_, workbook):
+            sheet_names = tuple(
+                str(workbook.Worksheets(index).Name)
+                for index in range(1, int(workbook.Worksheets.Count) + 1)
+            )
+            available_sheets = {name.casefold(): name for name in sheet_names}
             pairs = [(plan.target.detail_sheet, plan.target.summary_sheet)]
             if plan.roster is not None:
                 pairs.extend(
                     (config.detail_sheet, config.summary_sheet)
                     for config in plan.group_sheet_configs
                 )
+            required_names = [name for pair in pairs for name in pair]
+            required_names.extend(mapping.sheet_name for mapping in plan.mappings)
+            missing_names = tuple(
+                dict.fromkeys(
+                    name for name in required_names if name.casefold() not in available_sheets
+                )
+            )
+            if missing_names:
+                raise ValueError(f"模板缺少工作表: {', '.join(missing_names)}")
             checked: set[tuple[str, str]] = set()
             for detail_name, summary_name in pairs:
                 key = (detail_name.casefold(), summary_name.casefold())
                 if key in checked:
                     continue
                 checked.add(key)
-                detail = workbook.Worksheets(detail_name)
-                summary = workbook.Worksheets(summary_name)
+                detail = workbook.Worksheets(available_sheets[detail_name.casefold()])
+                summary = workbook.Worksheets(available_sheets[summary_name.casefold()])
                 header = detail.Cells(
                     plan.target.detail_matrix_start.row - 1,
                     plan.target.detail_matrix_start.column,
@@ -127,10 +141,7 @@ class ExcelComAdapter:
                     raise ValueError(
                         f"模板汇总区域结构不符: {summary_name} 姓名右侧第二列应包含汇总公式"
                     )
-            return tuple(
-                str(workbook.Worksheets(index).Name)
-                for index in range(1, int(workbook.Worksheets.Count) + 1)
-            )
+            return sheet_names
 
     def read_source(
         self,

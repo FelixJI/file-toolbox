@@ -6,8 +6,8 @@
 
 import platform
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from file_toolbox.common import metadata, settings, shortcuts
+from file_toolbox.common.paths import get_log_dir
 from file_toolbox.updater.proxy import DEFAULT_PROXIES
 
 
@@ -73,6 +74,13 @@ class AboutTab(QWidget):
         info_layout.addWidget(QLabel(f"许可证: {metadata.LICENSE}"))
         info_layout.addWidget(QLabel(f"Python 要求: {metadata.PYTHON_REQUIREMENT}"))
         info_layout.addWidget(QLabel(f"运行环境: {platform.platform()}"))
+
+        log_row = QHBoxLayout()
+        log_row.addWidget(QLabel(f"日志目录: {get_log_dir()}"), stretch=1)
+        btn_logs = QPushButton("打开日志目录")
+        btn_logs.clicked.connect(self._open_log_directory)
+        log_row.addWidget(btn_logs)
+        info_layout.addLayout(log_row)
 
         root.addWidget(info_box)
 
@@ -190,6 +198,10 @@ class AboutTab(QWidget):
     def _copy_repo_url(self) -> None:
         QGuiApplication.clipboard().setText(metadata.REPO_URL)
         self._status_lbl.setText("已复制开源地址到剪贴板")
+
+    @staticmethod
+    def _open_log_directory() -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_log_dir())))
 
     def _add_desktop(self) -> None:
         r = shortcuts.create_desktop_shortcut()
