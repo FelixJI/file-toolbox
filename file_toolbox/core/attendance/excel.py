@@ -30,6 +30,8 @@ CancelCheck = Callable[[], bool]
 
 BASE_EMPLOYEE_ROWS = 15
 BASE_DATE_COLUMNS = 30
+OVERTIME_COLUMN_COUNT = 3
+SUMMARY_OVERTIME_COLUMN_OFFSET = 15
 MAX_EMPLOYEES = 1000
 
 
@@ -177,6 +179,26 @@ class ExcelComAdapter:
                     )
                     for day in range(day_count)
                 )
+                overtime_start_column = layout.detail_start.column - OVERTIME_COLUMN_COUNT
+                if overtime_start_column < 1:
+                    raise ValueError("源明细起始列前必须保留工作日、休息日、节假日加班三列")
+                overtime_hours = (
+                    _overtime_value(
+                        sheet.Cells(layout.detail_start.row + offset, overtime_start_column).Value
+                    ),
+                    _overtime_value(
+                        sheet.Cells(
+                            layout.detail_start.row + offset,
+                            overtime_start_column + 1,
+                        ).Value
+                    ),
+                    _overtime_value(
+                        sheet.Cells(
+                            layout.detail_start.row + offset,
+                            overtime_start_column + 2,
+                        ).Value
+                    ),
+                )
                 attendance_group = ""
                 if layout.attendance_group_start is not None:
                     attendance_group = _cell_text(
@@ -185,7 +207,15 @@ class ExcelComAdapter:
                             layout.attendance_group_start.column,
                         ).Value
                     )
-                employees.append(EmployeeAttendance(name, department, records, attendance_group))
+                employees.append(
+                    EmployeeAttendance(
+                        name,
+                        department,
+                        records,
+                        attendance_group,
+                        overtime_hours=overtime_hours,
+                    )
+                )
             else:
                 raise ValueError(f"员工数超过安全上限 {MAX_EMPLOYEES}")
 
@@ -393,11 +423,16 @@ def _write_group(
     day_count: int,
 ) -> None:
     _adjust_date_columns(detail, plan.target.detail_matrix_start, day_count)
-    extra_rows = max(0, len(group.source.employees) - BASE_EMPLOYEE_ROWS)
-    _expand_employee_rows(detail, plan.target.detail_name_start.row, extra_rows)
-    _expand_employee_rows(summary, plan.target.summary_name_start.row, extra_rows)
+    employee_count = len(group.source.employees)
+    _adjust_employee_rows(detail, plan.target.detail_name_start.row, employee_count)
+    _adjust_employee_rows(summary, plan.target.summary_name_start.row, employee_count)
     _write_names(detail, plan.target.detail_name_start, group.source)
     _write_names(summary, plan.target.summary_name_start, group.source)
+    _write_overtime_hours(
+        summary,
+        plan.target.summary_name_start.offset(columns=SUMMARY_OVERTIME_COLUMN_OFFSET),
+        group.source,
+    )
     if plan.roster is not None:
         if plan.roster.fill_serial_numbers:
             serials = tuple(range(1, len(group.source.employees) + 1))
@@ -485,6 +520,16 @@ def _cell_text(value: object) -> str:
     return str(value)
 
 
+def _overtime_value(value: object) -> str | int | float:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (str, int, float)):
+        return value
+    return str(value)
+
+
 def _adjust_date_columns(sheet: Any, matrix_start: CellRef, day_count: int) -> None:
     delta = day_count - BASE_DATE_COLUMNS
     if delta > 0:
@@ -497,11 +542,18 @@ def _adjust_date_columns(sheet: Any, matrix_start: CellRef, day_count: int) -> N
             sheet.Columns(first_unwanted).Delete()
 
 
-def _expand_employee_rows(sheet: Any, first_row: int, extra_rows: int) -> None:
-    for offset in range(extra_rows):
+def _adjust_employee_rows(sheet: Any, first_row: int, employee_count: int) -> None:
+    extra_rows = employee_count - BASE_EMPLOYEE_ROWS
+    for offset in range(max(0, extra_rows)):
         insert_row = first_row + BASE_EMPLOYEE_ROWS + offset
         sheet.Rows(insert_row).Insert(CopyOrigin=0)
         sheet.Rows(insert_row - 1).Copy(Destination=sheet.Rows(insert_row))
+    for row in range(
+        first_row + BASE_EMPLOYEE_ROWS - 1,
+        first_row + employee_count - 1,
+        -1,
+    ):
+        sheet.Rows(row).Delete()
 
 
 def _write_names(sheet: Any, start: CellRef, source: SourceAttendance) -> None:
@@ -509,6 +561,18 @@ def _write_names(sheet: Any, start: CellRef, source: SourceAttendance) -> None:
     sheet.Range(
         sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)
     ).Value = tuple((employee.name,) for employee in source.employees)
+
+
+def _write_overtime_hours(sheet: Any, start: CellRef, source: SourceAttendance) -> None:
+    if not source.employees:
+        return
+    end = start.offset(
+        rows=len(source.employees) - 1,
+        columns=OVERTIME_COLUMN_COUNT - 1,
+    )
+    sheet.Range(
+        sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)
+    ).Value = tuple(employee.overtime_hours for employee in source.employees)
 
 
 def _write_column(

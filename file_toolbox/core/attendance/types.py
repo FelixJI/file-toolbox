@@ -11,6 +11,8 @@ from pathlib import Path
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
 _PLAN_SCHEMA_VERSION = 4
 
+OvertimeValue = str | int | float
+
 
 def _column_number(letters: str) -> int:
     number = 0
@@ -172,6 +174,7 @@ class EmployeeAttendance:
     source_group: str = ""
     employee_id: str = ""
     group_alias: str = ""
+    overtime_hours: tuple[OvertimeValue, OvertimeValue, OvertimeValue] = ("", "", "")
 
 
 @dataclass(frozen=True)
