@@ -187,21 +187,42 @@ class TestIsPortableExe:
     def test_dev_env_is_false(self, monkeypatch, tmp_path):
         """开发环境(非打包形态,可执行名非 FileToolbox.exe)→ False。"""
         monkeypatch.setattr(upkg.sys, "executable", str(tmp_path / "python.exe"))
+        monkeypatch.delattr(upkg.sys, "frozen", raising=False)
+        monkeypatch.delattr(upkg.sys, "_MEIPASS", raising=False)
         assert is_portable_exe() is False
 
     def test_portable_layout_detected(self, monkeypatch, tmp_path):
-        """exe 名为 FileToolbox.exe 且同目录有 python3.dll → True。"""
+        """PyInstaller onedir 运行时标记指向 _internal → True。"""
         exe = tmp_path / "FileToolbox.exe"
         exe.touch()
-        (tmp_path / "python3.dll").touch()
+        bundle_dir = tmp_path / "_internal"
+        bundle_dir.mkdir()
+        (bundle_dir / "python3.dll").touch()
         monkeypatch.setattr(upkg.sys, "executable", str(exe))
+        monkeypatch.setattr(upkg.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(upkg.sys, "_MEIPASS", str(bundle_dir), raising=False)
         assert is_portable_exe() is True
 
-    def test_no_dll_returns_false(self, monkeypatch, tmp_path):
-        """exe 名对但无 python3.dll → False(非 standalone)。"""
+    def test_exe_name_without_pyinstaller_marker_returns_false(self, monkeypatch, tmp_path):
+        """仅伪装 exe 名、没有 PyInstaller 运行时标记 → False。"""
         exe = tmp_path / "FileToolbox.exe"
         exe.touch()
         monkeypatch.setattr(upkg.sys, "executable", str(exe))
+        monkeypatch.delattr(upkg.sys, "frozen", raising=False)
+        monkeypatch.delattr(upkg.sys, "_MEIPASS", raising=False)
+        assert is_portable_exe() is False
+
+    def test_onefile_bundle_outside_install_dir_returns_false(self, monkeypatch, tmp_path):
+        """onefile 临时 bundle 不在安装目录内,不能执行整目录替换。"""
+        install_dir = tmp_path / "install"
+        install_dir.mkdir()
+        exe = install_dir / "FileToolbox.exe"
+        exe.touch()
+        bundle_dir = tmp_path / "_MEI12345"
+        bundle_dir.mkdir()
+        monkeypatch.setattr(upkg.sys, "executable", str(exe))
+        monkeypatch.setattr(upkg.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(upkg.sys, "_MEIPASS", str(bundle_dir), raising=False)
         assert is_portable_exe() is False
 
 
