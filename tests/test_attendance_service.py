@@ -222,6 +222,30 @@ def test_roster_mode_controls_order_groups_exclusions_and_employee_ids(tmp_path)
     assert [employee.exported for employee in prepared.preview.employees] == [True, False, True]
 
 
+def test_roster_mode_accepts_base_only_template_for_configured_groups(tmp_path):
+    request = _request(tmp_path)
+    request = replace(request, plan=_roster_plan(request))
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31))),
+            EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31))),
+            EmployeeAttendance("王五", "市场部", tuple("正常" for _ in range(31))),
+        ),
+        "市场部",
+    )
+    excel = FakeExcel(source, _roster())
+    excel.sheet_names = ("出勤明细", "考勤汇总表")
+
+    preview = AttendanceService(excel).preview(request)
+
+    assert preview.errors == ()
+    assert preview.can_generate is True
+    assert preview.target_sheets == {
+        "徐州中车": ("出勤明细", "考勤汇总表"),
+        "盛世金源": ("出勤明细-劳务", "考勤汇总表-劳务"),
+    }
+
+
 def test_roster_preview_returns_editable_errors_for_missing_mapping_and_attendance(tmp_path):
     request = _request(tmp_path)
     plan = replace(_roster_plan(request), group_sheet_configs=())

@@ -97,26 +97,28 @@ class ExcelComAdapter:
 
     def validate_template(self, template_path: Path, plan: AttendancePlan) -> tuple[str, ...]:
         with _excel_workbook(template_path, read_only=True) as (_, workbook):
-            sheet_names = tuple(
-                str(workbook.Worksheets(index).Name)
-                for index in range(1, int(workbook.Worksheets.Count) + 1)
-            )
+            sheet_names = _worksheet_names(workbook)
             available_sheets = {name.casefold(): name for name in sheet_names}
             pairs = [(plan.target.detail_sheet, plan.target.summary_sheet)]
+            missing_names: list[str] = []
             if plan.roster is not None:
-                pairs.extend(
-                    (config.detail_sheet, config.summary_sheet)
-                    for config in plan.group_sheet_configs
-                )
+                for config in plan.group_sheet_configs:
+                    detail_exists = config.detail_sheet.casefold() in available_sheets
+                    summary_exists = config.summary_sheet.casefold() in available_sheets
+                    if detail_exists and summary_exists:
+                        pairs.append((config.detail_sheet, config.summary_sheet))
+                    elif detail_exists != summary_exists:
+                        missing_names.append(
+                            config.summary_sheet if detail_exists else config.detail_sheet
+                        )
             required_names = [name for pair in pairs for name in pair]
             required_names.extend(mapping.sheet_name for mapping in plan.mappings)
-            missing_names = tuple(
-                dict.fromkeys(
-                    name for name in required_names if name.casefold() not in available_sheets
-                )
+            missing_names.extend(
+                name for name in required_names if name.casefold() not in available_sheets
             )
             if missing_names:
-                raise ValueError(f"模板缺少工作表: {', '.join(missing_names)}")
+                unique_missing = tuple(dict.fromkeys(missing_names))
+                raise ValueError(f"模板缺少工作表: {', '.join(unique_missing)}")
             checked: set[tuple[str, str]] = set()
             for detail_name, summary_name in pairs:
                 key = (detail_name.casefold(), summary_name.casefold())
@@ -282,14 +284,37 @@ def _prepare_group_sheets(
     groups: tuple[PreparedGroup, ...],
 ) -> tuple[tuple[PreparedGroup, Any, Any], ...]:
     if plan.roster is not None:
-        return tuple(
-            (
-                group,
-                workbook.Worksheets(group.detail_sheet),
-                workbook.Worksheets(group.summary_sheet),
-            )
-            for group in groups
-        )
+        base_detail = workbook.Worksheets(plan.target.detail_sheet)
+        base_summary = workbook.Worksheets(plan.target.summary_sheet)
+        available_sheets = {name.casefold(): name for name in _worksheet_names(workbook)}
+        roster_result: list[tuple[PreparedGroup, Any, Any]] = []
+        used_detail_sheets: set[str] = set()
+        used_summary_sheets: set[str] = set()
+        for group in groups:
+            detail_key = group.detail_sheet.casefold()
+            summary_key = group.summary_sheet.casefold()
+            detail_name = available_sheets.get(detail_key)
+            summary_name = available_sheets.get(summary_key)
+            if (detail_name is None) != (summary_name is None):
+                missing_name = group.detail_sheet if detail_name is None else group.summary_sheet
+                raise ValueError(f"模板分组工作表不完整，缺少: {missing_name}")
+            if detail_name is not None and summary_name is not None:
+                detail = workbook.Worksheets(detail_name)
+                summary = workbook.Worksheets(summary_name)
+            else:
+                detail = _copy_worksheet(workbook, base_detail, group.detail_sheet)
+                summary = _copy_worksheet(workbook, base_summary, group.summary_sheet)
+                _replace_sheet_references(summary, plan.target.detail_sheet, group.detail_sheet)
+                available_sheets[detail_key] = group.detail_sheet
+                available_sheets[summary_key] = group.summary_sheet
+            used_detail_sheets.add(detail_key)
+            used_summary_sheets.add(summary_key)
+            roster_result.append((group, detail, summary))
+        if plan.target.summary_sheet.casefold() not in used_summary_sheets:
+            base_summary.Delete()
+        if plan.target.detail_sheet.casefold() not in used_detail_sheets:
+            base_detail.Delete()
+        return tuple(roster_result)
     base_detail = workbook.Worksheets(plan.target.detail_sheet)
     base_summary = workbook.Worksheets(plan.target.summary_sheet)
     if (
@@ -338,6 +363,13 @@ def _copy_worksheet(workbook: Any, source: Any, name: str) -> Any:
     copied = workbook.Sheets(workbook.Sheets.Count)
     copied.Name = name
     return copied
+
+
+def _worksheet_names(workbook: Any) -> tuple[str, ...]:
+    return tuple(
+        str(workbook.Worksheets(index).Name)
+        for index in range(1, int(workbook.Worksheets.Count) + 1)
+    )
 
 
 def _replace_sheet_references(sheet: Any, old_name: str, new_name: str) -> None:
