@@ -23,7 +23,7 @@ __all__ = (
     "subprocess",
 )
 
-try:
+if __package__:
     from scripts.automation_candidate import _CandidateAutomationMixin
     from scripts.automation_ci import _CiAutomationMixin
     from scripts.automation_common import (
@@ -33,7 +33,7 @@ try:
     )
     from scripts.automation_prepare import _PrepareAutomationMixin
     from scripts.automation_publish import _PublishAutomationMixin
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
+else:
     from automation_candidate import _CandidateAutomationMixin
     from automation_ci import _CiAutomationMixin
     from automation_common import AutomationError, CommandRunner, SemVer

@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-try:
+if __package__:
     from scripts.automation_common import (
         _GENERATED_RELEASE_ASSETS,
         AutomationError,
@@ -24,7 +24,7 @@ try:
         _sha256,
         _write_json,
     )
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
+else:
     from automation_common import (
         _GENERATED_RELEASE_ASSETS,
         AutomationError,

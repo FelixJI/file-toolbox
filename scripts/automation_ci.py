@@ -12,14 +12,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-try:
+if __package__:
     from scripts.automation_common import (
         AutomationError,
         SemVer,
         _full_sha,
         _write_json,
     )
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
+else:
     from automation_common import AutomationError, SemVer, _full_sha, _write_json
 
 

@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any
 
-try:
+if __package__:
     from scripts.automation_common import (
         _CONVENTIONAL,
         _INCLUDED,
@@ -19,7 +19,7 @@ try:
         SemVer,
         _write_json,
     )
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
+else:
     from automation_common import (
         _CONVENTIONAL,
         _INCLUDED,
