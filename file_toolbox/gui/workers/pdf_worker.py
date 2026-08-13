@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.office_session import ComSession
+from file_toolbox.core.batch_pdf.constants import OFFICE_EXTENSIONS
 
 
 class PdfGenerateWorker(QThread, LoggableMixin):
@@ -63,6 +64,14 @@ class PdfGenerateWorker(QThread, LoggableMixin):
     def _cancel_check(self) -> bool:
         return self._cancel
 
+    def _needs_office(self) -> bool:
+        """批处理是否含需 Office 引擎(Word/Excel/PowerPoint)的文档。
+
+        纯图片/PDF 批处理返回 False —— 这类转换不依赖 Office COM,worker 据此
+        完全跳过引擎兑现,避免无谓启动 Word/WPS 进程。
+        """
+        return any(path.suffix.lower() in OFFICE_EXTENSIONS for path in self._files)
+
     def run(self) -> None:  # noqa: D401 (QThread 命名)
         """worker 入口(在后台线程执行)。"""
         # COM:win32com 要求使用它的线程先 CoInitialize,否则进程退出抛致命异常。
@@ -72,15 +81,17 @@ class PdfGenerateWorker(QThread, LoggableMixin):
         with ComSession():
             try:
                 self.logger.info("PDF 生成 worker 开始 files=%d", len(self._files))
-                # 首次引擎兑现:注册表说有 → 真 Dispatch 验证一次
-                # (force_refresh=True 才走真 Dispatch;失败则修正缓存,转换单元内会尝试另一引擎)
-                try:
-                    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+                # 一次性引擎兑现:仅当批处理含 Office 文档时才真 Dispatch 验证。
+                # ensure_verified 进程内只兑现一次(_verified 标志),只检测缓存判定可用的
+                # 引擎;纯图片/PDF 批处理(_needs_office=False)完全跳过,零 Office 开销。
+                if self._needs_office():
+                    try:
+                        from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
-                    EngineManager()._detect_available_engines(force_refresh=True)
-                except Exception:
-                    # 兑现失败不致命:auto 引擎下转换单元会逐个 ProgID 尝试
-                    self.logger.warning("引擎兑现检测失败（继续生成）", exc_info=True)
+                        EngineManager().ensure_verified()
+                    except Exception:
+                        # 兑现失败不致命:转换器 _prog_ids_to_try 会逐个 ProgID 尝试回退
+                        self.logger.warning("引擎兑现检测失败（继续生成）", exc_info=True)
 
                 results = self._svc.batch_generate(
                     self._files,

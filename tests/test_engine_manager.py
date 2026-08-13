@@ -88,6 +88,89 @@ def test_detect_force_refresh_uses_real_dispatch(monkeypatch):
     assert result == {"office": True, "wps": True}
 
 
+# ---------------------------------------------------------------------------
+# ensure_verified:进程内一次性兑现(只检测缓存判定可用的引擎,_verified 去重)
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_verified_only_verifies_available_engines(monkeypatch):
+    """首次兑现:只对缓存判定可用的引擎做真 Dispatch(不双引擎全量启动)。
+
+    缓存 office=True、wps=False → 只 Dispatch Word.Application,不碰 KWPS。
+    """
+    EngineManager._cached_engines = {"office": True, "wps": False}
+    EngineManager._verified = False
+    em = EngineManager()
+
+    detected = []
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda prog_id, log: detected.append(prog_id) or True
+    )
+
+    em.ensure_verified()
+
+    assert detected == ["Word.Application"]  # 只兑现 office
+    assert EngineManager._verified is True
+    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_dedupes_within_process(monkeypatch):
+    """_verified 标志:第二次 ensure_verified 直接返回,不再 Dispatch。"""
+    EngineManager._cached_engines = {"office": True, "wps": True}
+    EngineManager._verified = False
+    em = EngineManager()
+
+    calls = []
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda prog_id, log: calls.append(prog_id) or True
+    )
+
+    em.ensure_verified()
+    em.ensure_verified()  # 第二次应短路
+
+    assert len(calls) == 2  # 仅首次两个(office + wps),第二次零 Dispatch
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_no_op_when_cache_empty(monkeypatch):
+    """缓存为空(无可兑现引擎)→ 不 Dispatch,但仍置 _verified(无需再兑现)。"""
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+    em = EngineManager()
+
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda *a, **k: pytest.fail("无可兑现引擎不应 Dispatch")
+    )
+
+    em.ensure_verified()
+
+    assert EngineManager._verified is True
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_updates_cache_with_dispatch_result(monkeypatch):
+    """兑现结果(Dispatch 失败 → False)精确写回缓存,不污染其他引擎键。"""
+    EngineManager._cached_engines = {"office": True, "wps": True}
+    EngineManager._verified = False
+    em = EngineManager()
+
+    # office 兑现成功(True),wps 兑现失败(False)
+    def fake_detect(prog_id, log):
+        return prog_id == "Word.Application"
+
+    monkeypatch.setattr(EngineManager, "_try_detect", fake_detect)
+
+    em.ensure_verified()
+
+    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
 def test_async_detect_body_uses_registry_probe_not_dispatch(monkeypatch):
     """回归:启动异步检测必须走注册表(force_refresh=False),不应触发真 Dispatch。
 

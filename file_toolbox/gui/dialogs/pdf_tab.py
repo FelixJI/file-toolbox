@@ -189,6 +189,18 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             # 非 Windows 或缺少 pywin32 时退回同步(带缓存)信息
             self.ui.label_engine_info.setText(self._svc.get_engine_info(use_cache=True))
 
+    def _refresh_engine_info_label(self) -> None:
+        """用当前缓存刷新引擎信息 label,消除"正在检测..."残留。
+
+        仅当 get_engine_info 返回非占位文案(即缓存已就绪)时才更新;缓存尚未填充
+        (仍为 None → 返回"正在检测可用引擎...")时保持现状,避免把后台探测中的
+        状态误覆盖成过期文本。生成开始/结束时各调一次,确保生成期间 label 不再
+        卡在"正在检测"。
+        """
+        info = self._svc.get_engine_info(use_cache=True)
+        if info and info != "正在检测可用引擎...":
+            self.ui.label_engine_info.setText(info)
+
     # ---------- 配置构建 ----------
 
     def _build_config(self) -> dict[str, object]:
@@ -271,6 +283,9 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         config = self._build_config()
         self.ui.label_progress.setText("处理中...")
         self.ui.progress_bar.setValue(0)
+        # 立即用当前缓存刷新引擎信息,消除"正在检测..."残留(此时后台注册表探测基本
+        # 已完成、缓存已填充);生成期间 label_engine_info 不再停留在检测态。
+        self._refresh_engine_info_label()
 
         from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
 
@@ -293,6 +308,8 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.label_progress.setText(f"完成: 成功 {ok}, 失败 {fail}")
         # 历史记录已下沉 PDFGeneratorService.batch_generate(注入了 history_store,
         # 在 worker 线程内由 JsonHistoryStore 的锁保护写入)
+        # 兑现已完成(若含 Office 文档),刷新引擎信息反映真实状态。
+        self._refresh_engine_info_label()
         self._set_ui_enabled(True)
         self.worker = None
         if fail:
@@ -300,6 +317,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     def _on_generate_failed(self, msg: str) -> None:
         self.ui.label_progress.setText("生成失败")
+        self._refresh_engine_info_label()
         self._set_ui_enabled(True)
         self.worker = None
         QMessageBox.critical(self, "生成失败", msg)

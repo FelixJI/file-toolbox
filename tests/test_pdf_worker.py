@@ -22,17 +22,13 @@ def app():
 
 @pytest.fixture(autouse=True)
 def _stub_engine_validation(monkeypatch):
-    """默认 stub 掉 worker.run() 里的引擎兑现检测,避免测试环境真实 COM Dispatch
-    产生非致命 traceback 噪声(test_worker_invokes_engine_validation 会用自带的
-    spy 覆盖此 stub,单独验证兑现调用)。
+    """默认 stub 掉 worker.run() 里的引擎兑现检测(ensure_verified),避免测试环境
+    真实 COM Dispatch 产生非致命 traceback 噪声(test_worker_invokes_engine_validation
+    会用自带 spy 覆盖此 stub,单独验证兑现调用)。
     """
     from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
-    monkeypatch.setattr(
-        EngineManager,
-        "_detect_available_engines",
-        lambda self, force_refresh=False: {"office": False, "wps": False},
-    )
+    monkeypatch.setattr(EngineManager, "ensure_verified", lambda self: None)
 
 
 class _FakeService:
@@ -148,9 +144,10 @@ def test_worker_cancel_sets_flag(app):
 
 
 def test_worker_invokes_engine_validation(app, monkeypatch):
-    """run() 应实例化 EngineManager 并以 force_refresh=True 调用兑现检测。
+    """run() 对含 Office 文档的批处理应实例化 EngineManager 并调用 ensure_verified 兑现。
 
-    回归:此前误以类调用实例方法,验证被 try/except 静默吞掉(从未真正执行)。
+    回归:此前 worker 以 force_refresh=True 全量双引擎 Dispatch,每次生成重复检测;
+    现改为进程内一次性按需兑现(ensure_verified)。本例用 .docx 触发兑现路径。
     """
     from pathlib import Path
 
@@ -158,11 +155,10 @@ def test_worker_invokes_engine_validation(app, monkeypatch):
 
     calls = []
 
-    def _spy(self, force_refresh=False):
-        calls.append({"force_refresh": force_refresh})
-        return {"office": False, "wps": False}
+    def _spy(self):
+        calls.append(True)
 
-    monkeypatch.setattr(EngineManager, "_detect_available_engines", _spy)
+    monkeypatch.setattr(EngineManager, "ensure_verified", _spy)
 
     results = [_make_result("a.docx")]
     svc = _FakeService(results)
@@ -171,7 +167,28 @@ def test_worker_invokes_engine_validation(app, monkeypatch):
     worker.run()
 
     assert len(calls) == 1
-    assert calls[0]["force_refresh"] is True
+
+
+def test_worker_skips_engine_validation_for_non_office_files(app, monkeypatch):
+    """纯图片/PDF 批处理不触发 ensure_verified —— 零 Office Dispatch 开销。
+
+    回归:此前 worker 无条件 force_refresh,即便转换纯图片也会启动 Word/WPS 进程;
+    现在 _needs_office() 判定为 False 时完全跳过兑现。
+    """
+    from pathlib import Path
+
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    calls = []
+    monkeypatch.setattr(EngineManager, "ensure_verified", lambda self: calls.append(True))
+
+    results = [_make_result("a.png"), _make_result("b.pdf")]
+    svc = _FakeService(results)
+    worker = PdfGenerateWorker(svc, [Path("a.png"), Path("b.pdf")], {})
+
+    worker.run()
+
+    assert calls == [], "纯图片/PDF 批处理不应触发引擎兑现"
 
 
 def test_worker_start_delivers_finished_ok_across_threads(app):
@@ -234,18 +251,18 @@ def test_worker_start_delivers_failed_across_threads(app):
 
 
 def test_worker_run_survives_engine_detection_exception(app, monkeypatch):
-    """EngineManager._detect_available_engines 抛异常 → worker 记 warning 后继续,
-    batch_generate 仍被调用,finished_ok 正常投递(覆盖 83-85 的 except 分支)。
+    """EngineManager.ensure_verified 抛异常 → worker 记 warning 后继续,
+    batch_generate 仍被调用,finished_ok 正常投递(覆盖兑现失败的非致命分支)。
     """
     from pathlib import Path
 
     from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
     # 覆盖 autouse 的 _stub_engine_validation:这里强制抛异常
-    def _raise(self, force_refresh=False):
+    def _raise(self):
         raise RuntimeError("dispatch failed")
 
-    monkeypatch.setattr(EngineManager, "_detect_available_engines", _raise)
+    monkeypatch.setattr(EngineManager, "ensure_verified", _raise)
 
     results = [_make_result("a.docx")]
     svc = _FakeService(results)

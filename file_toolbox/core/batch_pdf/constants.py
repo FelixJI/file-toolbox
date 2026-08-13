@@ -16,6 +16,14 @@ SUPPORTED_FORMATS = {
 # 所有支持的扩展名
 ALL_SUPPORTED_EXTENSIONS = [ext for exts in SUPPORTED_FORMATS.values() for ext in exts]
 
+# 需要 Office 引擎(Word/Excel/PowerPoint)的扩展名集合。
+# 生成 worker 据此判断是否需要做引擎兑现:纯图片/PDF 批处理完全跳过 Office Dispatch。
+OFFICE_EXTENSIONS = (
+    set(SUPPORTED_FORMATS["word"])
+    | set(SUPPORTED_FORMATS["excel"])
+    | set(SUPPORTED_FORMATS["powerpoint"])
+)
+
 # 纸张尺寸定义 (宽, 高) 单位: mm
 PAPER_SIZES = {
     "A3": (297, 420),
