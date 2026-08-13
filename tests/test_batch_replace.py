@@ -1,6 +1,8 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from file_toolbox.core.batch_replace import service as service_mod
+from file_toolbox.core.batch_replace.handlers import text_handler as text_handler_mod
 from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
 from file_toolbox.core.batch_replace.service import ContentReplaceService
 from file_toolbox.core.batch_replace.types import ReplaceOperationType
@@ -143,79 +145,35 @@ def test_service_validate_bad_regex():
     assert ok is False
 
 
-def test_get_office_pids_uses_create_no_window_on_windows(monkeypatch):
-    """Windows GUI 进程(打包后的 exe)起 tasklist 时必须带 CREATE_NO_WINDOW,
-    否则会闪黑框(根因:service.py 的 _no_window_flags)。
+def test_get_office_pids_matches_process_name_case_insensitively(monkeypatch):
+    """psutil 枚举进程时按可执行文件名匹配，并忽略大小写。"""
 
-    断言:win32 平台下,_get_office_pids 调 subprocess.run 时 kwargs 含
-    creationflags=CREATE_NO_WINDOW。非 win32 则不含该键(跨平台守卫)。
+    class _Process:
+        def __init__(self, pid, name):
+            self.info = {"pid": pid, "name": name}
 
-    跨平台:subprocess.CREATE_NO_WINDOW 仅 Windows 存在(Linux CI 上 subprocess 模块无此
-    属性)。测试目标只是验证"win32 下 _no_window_flags 产出该标志",故 monkeypatch 注入该
-    常量,使本测试在 Linux CI 也能跑(不丢覆盖),而非 skipif 跳过。
-    """
-    import subprocess
+    monkeypatch.setattr(
+        service_mod.psutil,
+        "process_iter",
+        lambda attrs: [_Process(1234, "winword.exe"), _Process(5678, "EXCEL.EXE")],
+    )
+    svc = ContentReplaceService()
+    assert svc._get_office_pids("WINWORD.EXE") == [1234]
 
-    # CREATE_NO_WINDOW 实际值 0x08000000;非 Windows 注入同值,使断言可引用该属性
-    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
 
-    captured = {}
-
-    class _FakeResult:
-        stdout = ""
-        returncode = 0
-
-    def fake_run(*args, **kwargs):
-        captured.update(kwargs)
-        return _FakeResult()
-
-    monkeypatch.setattr(service_mod.subprocess, "run", fake_run)
-    # 强制走 Windows 分支(无论测试运行平台),验证标志确实传入
-    monkeypatch.setattr(service_mod.sys, "platform", "win32")
+def test_kill_office_processes_checks_name_before_kill(monkeypatch):
+    """清理新 PID 前再次核对进程名，避免 PID 复用时误杀其他进程。"""
+    monkeypatch.setattr(service_mod.psutil, "process_iter", lambda attrs: [])
+    process = MagicMock()
+    process.name.return_value = "WINWORD.EXE"
 
     svc = ContentReplaceService()
-    svc._get_office_pids("WINWORD.EXE")
-
-    assert "creationflags" in captured
-    assert captured["creationflags"] == subprocess.CREATE_NO_WINDOW
-
-
-def test_kill_office_processes_uses_create_no_window_on_windows(monkeypatch):
-    """taskkill 同样需 CREATE_NO_WINDOW(运行时也会闪黑框)。
-
-    造一个真实存在的 PID:_get_office_pids 返回它,_kill 时 taskkill 应带标志。
-
-    跨平台:subprocess.CREATE_NO_WINDOW 仅 Windows 存在,非 Windows 注入同值(0x08000000)
-    使断言可引用,本测试在 Linux CI 也能跑(不丢覆盖)。
-    """
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
-
-    captured = {}
-
-    def fake_run(*args, **kwargs):
-        # tasklist(taskkill 之前先查 PID)返回空,使 _kill 路径不会真起进程;
-        # 但为验证 taskkill 标志,这里直接捕获 taskkill 的 kwargs。
-        captured.update(kwargs)
-
-        class _R:
-            stdout = ""
-            returncode = 0
-
-        return _R()
-
-    monkeypatch.setattr(service_mod.subprocess, "run", fake_run)
-    monkeypatch.setattr(service_mod.sys, "platform", "win32")
-
-    svc = ContentReplaceService()
-    # 直接验证 _no_window_flags 在 win32 下产出 CREATE_NO_WINDOW
-    flags = service_mod._no_window_flags()
-    assert flags == {"creationflags": subprocess.CREATE_NO_WINDOW}
-
-    # _kill_new_office_processes 内部先 _get_office_pids(无新 PID 则不 kill),
-    # 确保调用不报错且路径覆盖
+    monkeypatch.setattr(svc, "_get_office_pids", lambda name: [4321])
+    monkeypatch.setattr(service_mod.psutil, "Process", lambda pid: process)
     svc._kill_new_office_processes("WINWORD.EXE", [])
+
+    assert process.kill.called
+    process.wait.assert_called_once_with(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -564,63 +522,51 @@ def test_execute_replace_cancel_before_text(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 补充覆盖:_get_office_pids 解析、_kill 路径、is_file_locked 异常分支、
+# 补充覆盖:_get_office_pids 枚举、_kill 路径、is_file_locked 异常分支、
 # preview/execute 异常路径、_read_file_content 边界、close() 早返回。
-# 均 Linux 可测(纯逻辑或 mock subprocess/handler,不触发真实 COM)。
+# 均 Linux 可测(纯逻辑或 mock psutil/handler,不触发真实 COM)。
 # ---------------------------------------------------------------------------
 
 
-def test_get_office_pids_parses_tasklist_csv(monkeypatch):
-    """_get_office_pids 解析 tasklist CSV 输出,提取数字 PID。
+def test_get_office_pids_collects_matching_processes(monkeypatch):
+    """_get_office_pids 提取 psutil 枚举结果中的匹配 PID。"""
 
-    覆盖 service.py 行 107(pids.append(int(parts[1])))。mock subprocess.run 返回
-    含两行 PID 的 CSV,Linux 上不依赖真实 tasklist。
-    """
+    class _Process:
+        def __init__(self, pid):
+            self.info = {"pid": pid, "name": "WINWORD.EXE"}
 
-    class _FakeResult:
-        # 模拟 tasklist /FO CSV /NH 输出:text=True 已归一化行尾为 \n
-        stdout = '"WINWORD.EXE","1234"\n"WINWORD.EXE","5678"\n'
-        returncode = 0
-
-    monkeypatch.setattr(service_mod.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(
+        service_mod.psutil, "process_iter", lambda attrs: [_Process(1234), _Process(5678)]
+    )
     svc = ContentReplaceService()
     pids = svc._get_office_pids("WINWORD.EXE")
     assert pids == [1234, 5678]
 
 
-def test_get_office_pids_swallows_subprocess_error(monkeypatch):
-    """subprocess.run 抛异常(如 tasklist 不存在)→ 返回空列表,不向上抛。"""
+def test_get_office_pids_skips_disappeared_process(monkeypatch):
+    """进程在枚举期间消失时跳过，不向上抛。"""
 
-    def boom(*a, **k):
-        raise FileNotFoundError("tasklist")
+    class _Process:
+        @property
+        def info(self):
+            raise service_mod.psutil.NoSuchProcess(1234)
 
-    monkeypatch.setattr(service_mod.subprocess, "run", boom)
+    monkeypatch.setattr(service_mod.psutil, "process_iter", lambda attrs: [_Process()])
     svc = ContentReplaceService()
     assert svc._get_office_pids("WINWORD.EXE") == []
 
 
-def test_kill_new_office_processes_calls_taskkill(monkeypatch):
-    """_kill_new_office_processes 对新 PID 调 taskkill。
-
-    覆盖 service.py 行 120-121(_kill 循环)。mock _get_office_pids 返回含一个新 PID
-    (不在 pids_before 中),验证 taskkill 被 argv=["taskkill","/F","/PID",...] 调用。
-    """
-    killed = []
-
-    class _FakeResult:
-        stdout = ""
-        returncode = 0
-
-    def fake_run(argv, *a, **k):
-        killed.append(argv)
-        return _FakeResult()
-
+def test_kill_new_office_processes_calls_psutil_kill(monkeypatch):
+    """_kill_new_office_processes 对新 PID 调用 psutil kill/wait。"""
+    monkeypatch.setattr(service_mod.psutil, "process_iter", lambda attrs: [])
+    process = MagicMock()
+    process.name.return_value = "WINWORD.EXE"
     svc = ContentReplaceService()
-    # mock _get_office_pids 返回 [9999](pids_before 为空 → 9999 是新 PID)
     monkeypatch.setattr(svc, "_get_office_pids", lambda name: [9999])
-    monkeypatch.setattr(service_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(service_mod.psutil, "Process", lambda pid: process)
     svc._kill_new_office_processes("WINWORD.EXE", [])
-    assert any("/PID" in a and "9999" in a for a in killed)
+    assert process.kill.called
+    process.wait.assert_called_once_with(timeout=5)
 
 
 def test_is_file_locked_permission_error(tmp_path, monkeypatch):
@@ -737,7 +683,7 @@ def test_close_returns_early_when_interpreter_shutting_down():
     """close() 在解释器关闭判定为真时早返回(不执行 kill)。
 
     覆盖 service.py 行 488-489。sys.exitfunc 在 CPython 通常恒存在 → 直接走早返回。
-    确保调用不抛异常即可(此路径不执行 taskkill)。
+    确保调用不抛异常即可(此路径不执行进程清理)。
     """
     svc = ContentReplaceService()
     svc.close()  # 不抛异常即通过
@@ -753,19 +699,30 @@ SIMPLE = "simple_replace"
 REGEX = "regex_replace"
 
 
-def test_text_read_content_chardet_fallback(tmp_path):
-    """混合非法字节序列 → latin-1 兜底解码为字符串(含可识别 ASCII)。
-
-    注:text_handler 的 encodings 列表含 latin-1(可解码任意字节),故 chardet 与
-    utf-8 ignore 分支理论不可达,已标注 pragma。此测试验证当前 latin-1 兜底行为。
-    """
-    # 0x80 单字节在 utf-8 非法、gbk 不完整,但 latin-1 能解码
+def test_text_read_content_uses_chardet_before_legacy_fallback(tmp_path, monkeypatch):
+    """非 UTF-8 文本优先采用高置信度 chardet 结果。"""
     f = tmp_path / "weird.bin"
-    f.write_bytes(b"\x80\x81\x82 foo")
+    f.write_bytes(b"\x93hello\x94")
+    monkeypatch.setattr(
+        text_handler_mod.chardet,
+        "detect",
+        lambda data: {"encoding": "windows-1252", "confidence": 0.99},
+    )
     h = TextHandler()
     content = h.read_content(f)
-    assert isinstance(content, str)
-    assert "foo" in content
+    assert content == "“hello”"
+
+
+def test_text_read_content_low_confidence_uses_latin1_fallback(tmp_path, monkeypatch):
+    """检测置信度不足时走确定性的兼容编码与 latin-1 最终兜底。"""
+    f = tmp_path / "weird.bin"
+    f.write_bytes(b"\x80")
+    monkeypatch.setattr(
+        text_handler_mod.chardet,
+        "detect",
+        lambda data: {"encoding": "windows-1252", "confidence": 0.1},
+    )
+    assert TextHandler().read_content(f) == "\x80"
 
 
 def test_text_read_content_empty_file_returns_empty(tmp_path):

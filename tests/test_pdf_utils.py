@@ -2,18 +2,20 @@
 
 覆盖 convert_pdf_to_image_pdf / merge_pdfs / get_file_info 以及
 _resize_to_fit / _fit_image_to_paper 等纯逻辑函数。
-使用 fitz(PyMuPDF) 与 PIL 直接生成 fixture,不依赖任何 Office COM。
+使用 pypdf 与 PIL 直接生成 fixture,不依赖任何 Office COM。
 """
 
 from pathlib import Path
 
 import pytest
+from pypdf import PdfReader, PdfWriter
 
-fitz = pytest.importorskip("fitz")  # noqa: F841 — 触发 skip 并保留别名
+pytest.importorskip("pypdfium2")
 pytest.importorskip("PIL")  # noqa: E402
 
 from unittest.mock import MagicMock
 
+from file_toolbox.core.batch_pdf import pdf_utils  # noqa: E402
 from file_toolbox.core.batch_pdf.constants import (  # noqa: E402
     PAPER_SIZES,
     PRINT_MODE_DUPLEX,
@@ -34,11 +36,11 @@ from file_toolbox.core.batch_pdf.pdf_utils import (  # noqa: E402
 
 def _make_pdf(path: Path, pages: int = 1) -> Path:
     """生成一个指定页数的空白 PDF(width=200, height=300 点)。"""
-    doc = fitz.open()
+    writer = PdfWriter()
     for _ in range(pages):
-        doc.new_page(width=200, height=300)
-    doc.save(str(path))
-    doc.close()
+        writer.add_blank_page(width=200, height=300)
+    writer.write(path)
+    writer.close()
     return path
 
 
@@ -54,11 +56,7 @@ def test_convert_pdf_to_image_pdf(tmp_path):
     assert ok is True
     assert msg == ""
     assert out.exists()
-    doc = fitz.open(str(out))
-    try:
-        assert len(doc) == 1
-    finally:
-        doc.close()
+    assert len(PdfReader(out).pages) == 1
 
 
 def test_convert_pdf_to_image_pdf_multipage(tmp_path):
@@ -68,11 +66,7 @@ def test_convert_pdf_to_image_pdf_multipage(tmp_path):
     ok, msg = convert_pdf_to_image_pdf(src, out)
 
     assert ok, msg
-    doc = fitz.open(str(out))
-    try:
-        assert len(doc) == 3
-    finally:
-        doc.close()
+    assert len(PdfReader(out).pages) == 3
 
 
 def test_convert_pdf_to_image_pdf_with_paper(tmp_path):
@@ -104,11 +98,7 @@ def test_merge_pdfs_two_files(tmp_path):
 
     assert ok, msg
     assert out.exists()
-    doc = fitz.open(str(out))
-    try:
-        assert len(doc) == 2
-    finally:
-        doc.close()
+    assert len(PdfReader(out).pages) == 2
 
 
 def test_merge_pdfs_duplex_inserts_blank_for_odd(tmp_path):
@@ -119,11 +109,7 @@ def test_merge_pdfs_duplex_inserts_blank_for_odd(tmp_path):
     ok, msg = merge_pdfs([odd], out, print_mode=PRINT_MODE_DUPLEX)
 
     assert ok, msg
-    doc = fitz.open(str(out))
-    try:
-        assert len(doc) == 2  # 原页 + 补的空白页
-    finally:
-        doc.close()
+    assert len(PdfReader(out).pages) == 2  # 原页 + 补的空白页
 
 
 def test_merge_pdfs_duplex_even_pages_no_blank(tmp_path):
@@ -134,11 +120,7 @@ def test_merge_pdfs_duplex_even_pages_no_blank(tmp_path):
     ok, msg = merge_pdfs([even], out, print_mode=PRINT_MODE_DUPLEX)
 
     assert ok, msg
-    doc = fitz.open(str(out))
-    try:
-        assert len(doc) == 2  # 不补页
-    finally:
-        doc.close()
+    assert len(PdfReader(out).pages) == 2  # 不补页
 
 
 def test_merge_pdfs_missing_file_skipped(tmp_path):
@@ -150,18 +132,11 @@ def test_merge_pdfs_missing_file_skipped(tmp_path):
     ok, msg = merge_pdfs([a, missing], out)
 
     assert ok, msg
-    doc = fitz.open(str(out))
-    try:
-        assert len(doc) == 1
-    finally:
-        doc.close()
+    assert len(PdfReader(out).pages) == 1
 
 
 def test_merge_pdfs_empty_list_fails_cleanly(tmp_path):
-    """空列表 → fitz 保存 0 页文档抛异常,merge_pdfs 捕获返回 (False, 提示)。
-
-    锁定当前行为:不产生空 PDF 文件,返回失败与中文提示(PyMuPDF 不允许 0 页保存)。
-    """
+    """空列表不产生 PDF 文件，并返回失败与中文提示。"""
     out = tmp_path / "empty.pdf"
     ok, msg = merge_pdfs([], out)
     assert ok is False
@@ -328,17 +303,16 @@ def test_get_file_info_stat_exception_swallowed(tmp_path, monkeypatch):
 def test_convert_pdf_to_image_pdf_empty_returns_error(tmp_path, monkeypatch):
     """0 页 PDF → images 空 → (False, 'PDF无内容')(行 97)。
 
-    用 mock fitz.open 返回一个 len()=0 的假文档(真实 fitz 不能 save 0 页)。
+    用 mock PdfDocument 返回一个 len()=0 的假文档。
     """
     src = tmp_path / "empty.pdf"
     src.write_bytes(b"fake")
     out = tmp_path / "out.pdf"
 
-    import fitz
-
     fake_doc = MagicMock()
     fake_doc.__len__ = lambda self: 0  # 0 页
-    monkeypatch.setattr(fitz, "open", lambda *a, **k: fake_doc)
+    fake_doc.__enter__.return_value = fake_doc
+    monkeypatch.setattr(pdf_utils.pdfium, "PdfDocument", lambda *a, **k: fake_doc)
 
     ok, err = convert_pdf_to_image_pdf(src, out, dpi=72)
     assert ok is False
@@ -351,52 +325,44 @@ def test_convert_pdf_to_image_pdf_empty_returns_error(tmp_path, monkeypatch):
 
 
 def test_convert_pdf_to_image_pdf_generic_exception(tmp_path, monkeypatch):
-    """fitz.open 抛异常 → 通用 except → (False, '转换图片型PDF失败: ...')(行 115-116)。"""
+    """PdfDocument 抛异常 → 通用 except → (False, '转换图片型PDF失败: ...')。"""
     src = tmp_path / "a.pdf"
     src.write_bytes(b"fake")
     out = tmp_path / "out.pdf"
 
-    import fitz
-
     monkeypatch.setattr(
-        fitz, "open", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("fitz boom"))
+        pdf_utils.pdfium,
+        "PdfDocument",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("pdfium boom")),
     )
     ok, err = convert_pdf_to_image_pdf(src, out, dpi=72)
     assert ok is False
     assert "转换图片型PDF失败" in err
-    assert "fitz boom" in err
+    assert "pdfium boom" in err
 
 
 def test_convert_pdf_to_image_pdf_non_rgb_converted(tmp_path, monkeypatch):
     """像素图产生非 RGB 图像 → convert("RGB")(行 86)。
 
-    用 mock page.get_pixmap 返回灰度 PNG(模式 'L'),触发 convert 分支。
+    用 mock bitmap.to_pil 返回灰度图(模式 'L'),触发 convert 分支。
     """
-    import io as _io
-
     from PIL import Image
 
-    # 造一张灰度 PNG 字节(模式 'L',非 RGB)
     gray_img = Image.new("L", (5, 5), 128)
-    buf = _io.BytesIO()
-    gray_img.save(buf, format="PNG")
-    gray_png_bytes = buf.getvalue()
 
     src = tmp_path / "a.pdf"
     src.write_bytes(b"fake")
     out = tmp_path / "out.pdf"
 
-    import fitz
-
-    fake_pix = MagicMock()
-    fake_pix.tobytes.return_value = gray_png_bytes
+    fake_bitmap = MagicMock()
+    fake_bitmap.to_pil.return_value = gray_img
     fake_page = MagicMock()
-    fake_page.get_pixmap.return_value = fake_pix
+    fake_page.render.return_value = fake_bitmap
     fake_doc = MagicMock()
     fake_doc.__len__ = lambda self: 1
     fake_doc.__getitem__ = lambda self, i: fake_page
-    monkeypatch.setattr(fitz, "open", lambda *a, **k: fake_doc)
-    monkeypatch.setattr(fitz, "Matrix", lambda x, y: MagicMock())
+    fake_doc.__enter__.return_value = fake_doc
+    monkeypatch.setattr(pdf_utils.pdfium, "PdfDocument", lambda *a, **k: fake_doc)
 
     ok, err = convert_pdf_to_image_pdf(src, out, dpi=72)
     assert ok is True
@@ -409,15 +375,15 @@ def test_convert_pdf_to_image_pdf_non_rgb_converted(tmp_path, monkeypatch):
 
 
 def test_merge_pdfs_generic_exception(tmp_path, monkeypatch):
-    """fitz.open 抛异常 → 通用 except → (False, '合并PDF失败: ...')(行 272-273)。"""
+    """PdfWriter 抛异常 → 通用 except → (False, '合并PDF失败: ...')。"""
     src = tmp_path / "a.pdf"
     src.write_bytes(b"fake")
     out = tmp_path / "merged.pdf"
 
-    import fitz
-
     monkeypatch.setattr(
-        fitz, "open", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("merge boom"))
+        pdf_utils,
+        "PdfWriter",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("merge boom")),
     )
     ok, err = merge_pdfs([src], out)
     assert ok is False

@@ -6,8 +6,7 @@
 
 打包策略(对比旧 Nuitka 方案,核心优势是 C 扩展/运行时 DLL 全自动收集):
   - PIL(Pillow):标准 C 扩展包,collect_all 自动收 _imaging.cp*.pyd。
-  - pymupdf/fitz(PyMuPDF):原生绑定体量巨大,Nuitka 编译会 OOM(issue #3291);
-    PyInstaller 无编译步骤,collect_all 直接收 .pyd/.dll/.py,无需手工干预。
+  - pypdfium2:携带 PDFium 原生 DLL；collect_all 收运行时，copy_metadata 同步许可证。
   - win32com/win32comext/win32/pythoncom/pywintypes(pywin32):COM 自动化运行时。
     PyInstaller 内置 pywin32 hook 会把 pywin32_system32/ 下的 pythoncom3XX.dll、
     pywintypes3XX.dll 自动收进产物根目录(Nuitka 下需手工 copytree,是旧 bug 根源)。
@@ -21,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 block_cipher = None
 
@@ -33,12 +32,15 @@ project_root = Path(SPECPATH).parent
 datas: list = []
 binaries: list = []
 hiddenimports: list = []
-for pkg in ("pymupdf", "fitz", "win32com", "win32comext", "win32",
+for pkg in ("pypdfium2", "win32com", "win32comext", "win32",
             "pythoncom", "pywintypes", "PIL", "velopack"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
     hiddenimports += h
+
+# pypdfium2 的 dist-info 含 PDFium 及第三方许可证；发布物必须随二进制一起分发。
+datas += copy_metadata("pypdfium2")
 
 # CHANGELOG.md 随包:放到 exe 同级("."),供关于页 metadata.get_changelog()
 # 回退链第 2 级(Path(sys.executable).parent / "CHANGELOG.md")命中。

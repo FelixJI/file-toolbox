@@ -21,7 +21,7 @@ TECH_STACK: list[tuple[str, str]] = [
     ("Python", "(主语言)"),
     ("PySide6", "(GUI 框架)"),
     ("typer", "(CLI 框架)"),
-    ("pypdf / PyMuPDF", "(PDF 处理)"),
+    ("pypdf + pypdfium2", "(PDF 处理)"),
     ("pdfplumber + openpyxl", "(发票识别,可选)"),
     ("pywin32", "(Windows COM 自动化,仅 Windows)"),
 ]

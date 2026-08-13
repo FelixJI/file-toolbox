@@ -4,9 +4,11 @@ PDF工具函数
 包含PDF合并、PDF转图片型PDF等功能
 """
 
-import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import pypdfium2 as pdfium
+from pypdf import PdfReader, PdfWriter
 
 from file_toolbox.common.file_utils import format_file_size
 
@@ -48,70 +50,60 @@ def convert_pdf_to_image_pdf(
         (是否成功, 错误消息)
     """
     try:
-        # 尝试多种导入方式（兼容不同PyMuPDF版本）
-        fitz = None
-        with contextlib.suppress(ImportError):
-            import fitz  # type: ignore[no-redef]
-
-        if fitz is None:  # pragma: no cover - fitz 在依赖中已安装,此分支在测试环境不可达
-            with contextlib.suppress(ImportError):
-                import pymupdf as fitz  # type: ignore[assignment]
-
-        if fitz is None:  # pragma: no cover - 同上,fitz 已安装
-            return (
-                False,
-                "未安装 PyMuPDF 库，请运行: pip install PyMuPDF",
-            )
-
-        import io
-
         from PIL import Image
 
-        # 打开PDF
-        pdf_doc = fitz.open(str(input_pdf))
-        images = []
+        images: list[Image.Image] = []
+        try:
+            with pdfium.PdfDocument(str(input_pdf)) as pdf_doc:
+                if len(pdf_doc) == 0:
+                    return False, "PDF无内容"
 
-        for page_num in range(len(pdf_doc)):
-            page = pdf_doc[page_num]
-            # 渲染为图片
-            mat = fitz.Matrix(dpi / 72, dpi / 72)
-            pix = page.get_pixmap(matrix=mat)
+                for page_num in range(len(pdf_doc)):
+                    page = pdf_doc[page_num]
+                    try:
+                        bitmap = page.render(scale=dpi / 72)
+                        try:
+                            # pypdfium2 对常见格式返回共享 bitmap 内存的 PIL Image；
+                            # 关闭 bitmap 前复制，避免后续保存读取已释放内存。
+                            img = bitmap.to_pil().copy()
+                        finally:
+                            bitmap.close()
+                    finally:
+                        page.close()
 
-            # 转换为PIL Image
-            img_data = pix.tobytes("png")
-            img = Image.open(io.BytesIO(img_data))
+                    if img.mode != "RGB":
+                        rgb_img = img.convert("RGB")
+                        img.close()
+                        img = rgb_img
 
-            # 转换为RGB模式
-            if img.mode != "RGB":
-                img = img.convert("RGB")
+                    if paper_size != "auto" and paper_size in PAPER_SIZES:
+                        fitted_img = _fit_image_to_paper(
+                            img, paper_size, orientation, dpi, scale_mode
+                        )
+                        if fitted_img is not img:
+                            img.close()
+                        img = fitted_img
 
-            # 如果指定了纸张尺寸，将图片适应到纸张上
-            if paper_size != "auto" and paper_size in PAPER_SIZES:
-                img = _fit_image_to_paper(img, paper_size, orientation, dpi, scale_mode)
+                    images.append(img)
 
-            images.append(img)
-
-        pdf_doc.close()
-
-        if not images:
-            return False, "PDF无内容"
-
-        # 保存为图片型PDF
-        if len(images) == 1:
-            images[0].save(str(output_pdf), "PDF", resolution=dpi)
-        else:
-            images[0].save(
-                str(output_pdf),
-                "PDF",
-                resolution=dpi,
-                save_all=True,
-                append_images=images[1:],
-            )
+            if len(images) == 1:
+                images[0].save(str(output_pdf), "PDF", resolution=dpi)
+            else:
+                images[0].save(
+                    str(output_pdf),
+                    "PDF",
+                    resolution=dpi,
+                    save_all=True,
+                    append_images=images[1:],
+                )
+        finally:
+            for image in images:
+                image.close()
 
         return True, ""
 
     except ImportError as e:  # pragma: no cover - 依赖已安装,ImportError 在测试环境不可达
-        return False, f"缺少依赖库: {e!s}，请确保已安装 PyMuPDF 和 Pillow"
+        return False, f"缺少依赖库: {e!s}，请确保已安装 pypdfium2 和 Pillow"
     except Exception as e:
         return False, f"转换图片型PDF失败: {e!s}"
 
@@ -216,59 +208,32 @@ def merge_pdfs(
         (是否成功, 错误消息)
     """
     try:
-        # 尝试多种导入方式（兼容不同PyMuPDF版本）
-        fitz = None
-        with contextlib.suppress(ImportError):
-            import fitz  # type: ignore[no-redef]
+        existing_files = [pdf_file for pdf_file in pdf_files if pdf_file.exists()]
+        if not existing_files:
+            return False, "合并PDF失败: 没有可合并的PDF文件"
 
-        if fitz is None:  # pragma: no cover - fitz 在依赖中已安装,此分支在测试环境不可达
-            with contextlib.suppress(ImportError):
-                import pymupdf as fitz  # type: ignore[assignment]
+        writer = PdfWriter()
+        try:
+            for pdf_file in existing_files:
+                with pdf_file.open("rb") as stream:
+                    reader = PdfReader(stream)
+                    writer.append(reader)
 
-        if fitz is None:  # pragma: no cover - 同上,fitz 已安装
-            return (
-                False,
-                "未安装 PyMuPDF 库，请运行: pip install PyMuPDF",
-            )
+                    if print_mode == PRINT_MODE_DUPLEX and len(reader.pages) % 2 == 1:
+                        last_page = reader.pages[-1]
+                        writer.add_blank_page(
+                            width=float(last_page.mediabox.width),
+                            height=float(last_page.mediabox.height),
+                        )
 
-        # 创建新文档用于合并
-        merged_doc = fitz.open()
-
-        for pdf_file in pdf_files:
-            if pdf_file.exists():
-                src_doc = fitz.open(str(pdf_file))
-
-                # 双面打印模式下,为奇数页文档添加空白页
-                if print_mode == PRINT_MODE_DUPLEX:
-                    page_count = len(src_doc)
-
-                    # 如果页数是奇数,需要添加空白页
-                    if page_count % 2 == 1:
-                        # 获取最后一页的尺寸
-                        last_page = src_doc[-1]
-                        rect = last_page.rect
-
-                        # 添加所有原始页面到合并文档
-                        merged_doc.insert_pdf(src_doc)
-
-                        # 添加空白页
-                        merged_doc.new_page(width=rect.width, height=rect.height)
-                    else:
-                        # 页数为偶数,直接合并
-                        merged_doc.insert_pdf(src_doc)
-                else:
-                    # 单面打印模式,直接合并
-                    merged_doc.insert_pdf(src_doc)
-
-                src_doc.close()
-
-        merged_doc.save(str(output_path))
-        merged_doc.close()
+            writer.write(output_path)
+        finally:
+            writer.close()
 
         return True, ""
 
     except ImportError:  # pragma: no cover - 依赖已安装,ImportError 在测试环境不可达
-        return False, "未安装 PyMuPDF 库，请运行: pip install PyMuPDF"
+        return False, "未安装 pypdf 库，请运行: uv sync --frozen"
     except Exception as e:
         return False, f"合并PDF失败: {e!s}"
 

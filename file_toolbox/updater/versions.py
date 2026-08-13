@@ -1,17 +1,17 @@
 """版本来源层:从 GitHub 获取最新正式版 Release。
 
 本模块只负责"拿版本信息 + 比对版本号",不下载、不替换。
-零第三方依赖:版本号解析与比对用轻量正则 + 数字比较,
-不引入 packaging(便携 exe 运行时不带 dev extra)。
+版本号遵循 PEP 440，由 packaging 统一解析和比较。
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from urllib import request as urlrequest
+
+from packaging.version import InvalidVersion, Version
 
 from file_toolbox.updater.proxy import apply_proxy, get_fetch_candidates
 
@@ -19,9 +19,6 @@ _logger = logging.getLogger(__name__)
 
 # owner/repo 硬编码常量(与 git remote 一致,不引入配置真相源)
 GITHUB_REPO = ("FelixJI", "file-toolbox")
-
-# 预发布后缀(PEP 440 prerelease 段)
-_PRERELEASE_RE = re.compile(r"(a|b|rc|dev|alpha|beta)\d*$", re.IGNORECASE)
 
 # 检查超时(秒):双源并发取版本信息,给 10s 足够
 _FETCH_TIMEOUT = 10
@@ -43,46 +40,19 @@ def strip_v_prefix(version: str) -> str:
 
 
 def _is_prerelease(version: str) -> bool:
-    """是否符合预发布后缀(a/b/rc/dev/alpha/beta)。"""
-    return bool(_PRERELEASE_RE.search(version))
-
-
-def _normalize_segments(version: str) -> list[int]:
-    """把版本号切成数字段列表,忽略 +local 后缀。
-
-    "1.2.3" → [1, 2, 3]
-    "1.2"   → [1, 2]
-    "1.0.0+unknown" → [1, 0, 0]  (+ 后整段丢弃)
-
-    遇到第一个非数字段(如 prerelease 段 "3a1")即停止,后续段不解析。
-    本函数仅供已过滤 prerelease 的正式版比对使用(见 is_newer 契约)。
-    """
-    base = version.split("+", 1)[0]  # 去掉 +local
-    segs: list[int] = []
-    for part in base.split("."):
-        try:
-            segs.append(int(part))
-        except ValueError:
-            # 非数字段(如 prerelease 段)→ 停止解析后续段
-            break
-    return segs
+    """是否为预发布版本；非法版本按不可信候选处理。"""
+    try:
+        return Version(version).is_prerelease
+    except InvalidVersion:
+        return True
 
 
 def is_newer(remote: str, local: str) -> bool:
-    """remote 版本号是否比 local 新(逐段数字比较)。
-
-    段数不同时短的补 0(1.2 视作 1.2.0)。
-
-    契约:仅用于正式版比对(调用方应先用 _is_prerelease 过滤)。
-    传入 prerelease 版本号(如 "1.2.3a1")时,非数字段会被截断,
-    可能得出错误结论 —— 但自更新流程已在 fetch_latest 阶段过滤掉 prerelease。
-    """
-    r = _normalize_segments(remote)
-    loc = _normalize_segments(local)
-    n = max(len(r), len(loc))
-    r += [0] * (n - len(r))
-    loc += [0] * (n - len(loc))
-    return r > loc
+    """remote 版本号是否比 local 新；非法版本安全地视为不可更新。"""
+    try:
+        return Version(remote) > Version(local)
+    except InvalidVersion:
+        return False
 
 
 # ---------------------------------------------------------------------------

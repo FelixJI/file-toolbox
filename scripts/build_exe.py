@@ -5,8 +5,8 @@
 
 打包策略(详见 scripts/FileToolbox.spec):
   - 用 .spec 文件配置,C 扩展/运行时 DLL 全由 PyInstaller hook + collect_all 自动收集。
-  - 关键差异(对比旧 Nuitka 方案):pywin32 的 pywin32_system32/ DLL、PyMuPDF 的
-    原生绑定、Pillow 的 _imaging.pyd 全部自动进产物,无需手工 copytree —— 这正是
+  - 关键差异(对比旧 Nuitka 方案):pywin32 的 pywin32_system32/ DLL、pypdfium2 的
+    PDFium 运行时、Pillow 的 _imaging.pyd 全部自动进产物,无需手工 copytree —— 这正是
     旧 Nuitka 方案"批量转 PDF 缺少依赖"bug 的根治点。
 
 CI 复用同一脚本(带 --ci)。

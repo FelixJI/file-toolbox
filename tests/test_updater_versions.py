@@ -26,9 +26,12 @@ class TestIsPrerelease:
     def test_prerelease_versions(self, v):
         assert _is_prerelease(v) is True
 
-    @pytest.mark.parametrize("v", ["1.2.3", "0.1.0", "1.0.0", "2.0"])
+    @pytest.mark.parametrize("v", ["1.2.3", "0.1.0", "1.0.0", "2.0", "1.2.3.post1"])
     def test_stable_versions(self, v):
         assert _is_prerelease(v) is False
+
+    def test_invalid_version_is_rejected(self):
+        assert _is_prerelease("not-a-version") is True
 
 
 class TestIsNewer:
@@ -54,6 +57,13 @@ class TestIsNewer:
     def test_local_version_suffix_ignored(self):
         # 带 +local 后缀的(开发态 0.0.0+unknown)不影响比对
         assert is_newer("1.2.3", "0.0.0+unknown") is True
+
+    def test_post_release_is_newer(self):
+        assert is_newer("1.2.3.post1", "1.2.3") is True
+
+    @pytest.mark.parametrize("remote,local", [("bad", "1.0"), ("1.0", "bad")])
+    def test_invalid_version_is_not_newer(self, remote, local):
+        assert is_newer(remote, local) is False
 
 
 class TestRepoConstants:
@@ -261,21 +271,6 @@ class TestProxyApplied:
         monkeypatch.setattr(vmod, "_urlopen", fake_urlopen)
         vmod.fetch_latest()
         assert captured_urls[0].startswith("https://api.github.com/")
-
-
-class TestNormalizeSegments:
-    """覆盖 _normalize_segments 的截断/后缀分支(missing 62-64)。"""
-
-    def test_truncates_on_non_numeric_segment(self):
-        """遇非数字段(如 "3a1")→ ValueError 截断,后续段不解析。"""
-        assert vmod._normalize_segments("1.2.3a1") == [1, 2]
-
-    def test_local_suffix_segment_dropped(self):
-        """+local 后缀整段丢弃(base.split('+')[0] 已切掉)。"""
-        assert vmod._normalize_segments("1.0.0+local") == [1, 0, 0]
-
-    def test_two_segments(self):
-        assert vmod._normalize_segments("1.2") == [1, 2]
 
 
 class TestFetchLatestFallback:
