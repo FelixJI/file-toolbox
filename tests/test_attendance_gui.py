@@ -26,6 +26,7 @@ from file_toolbox.core.attendance import (  # noqa: E402
     RosterLayout,
     UnmatchedAttendance,
 )
+from file_toolbox.core.attendance.rules import CONTENT_TEMPLATE_TOKENS  # noqa: E402
 from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab  # noqa: E402
 
 
@@ -575,6 +576,14 @@ def test_fixed_mapping_sheet_uses_controlled_target_selector(tab):
         "出勤明细",
         "考勤汇总表",
     ]
+
+
+def test_fixed_mapping_help_shows_copyable_variable_examples(tab):
+    help_text = tab.ui.label_mapping_help.text()
+
+    assert all(f"{{{{{token}}}}}" in help_text for token in CONTENT_TEMPLATE_TOKENS)
+    assert "示例：{{department}} {{year}}年{{month}}月" in help_text
+    assert "分组示例：{{attendance_group}} / {{roster_group}}（{{group_alias}}）" in help_text
 
 
 def test_fixed_mapping_selector_follows_target_sheet_rename(tab):

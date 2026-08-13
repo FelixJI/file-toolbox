@@ -15,6 +15,7 @@ repos:
         additional_dependencies:
           - types-pywin32
           - PySide6>=6.5
+          - cattrs>=26.1.0
           - pypdf>=6.15.0
           - pypdfium2>=5.10.1
           - Pillow>=10.0

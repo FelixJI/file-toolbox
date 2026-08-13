@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
+
+from cattrs import Converter
+from cattrs.errors import BaseValidationError, ForbiddenExtraKeysError
 
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
 _PLAN_SCHEMA_VERSION = 4
@@ -290,218 +294,171 @@ def _sequence(value: object, label: str) -> Sequence[object]:
     return value
 
 
-def _text(data: Mapping[str, object], key: str) -> str:
-    value = data.get(key)
+def _structure_str(value: object, _: type[str]) -> str:
+    if not isinstance(value, str):
+        raise ValueError("值必须是字符串")
+    return value
+
+
+def _structure_bool(value: object, _: type[bool]) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError("值必须是布尔值")
+    return value
+
+
+def _structure_path(value: object, _: type[Path]) -> Path:
     if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{key} 必须是非空字符串")
-    return value.strip()
+        raise ValueError("路径必须是非空字符串")
+    return Path(value.strip())
+
+
+def _structure_cell_ref(value: object, _: type[CellRef]) -> CellRef:
+    if not isinstance(value, str):
+        raise ValueError("单元格地址必须是字符串")
+    return CellRef.parse(value)
+
+
+def _unstructure_cell_ref(value: CellRef) -> str:
+    return value.address
+
+
+_PLAN_CONVERTER = Converter(
+    forbid_extra_keys=True,
+    unstruct_collection_overrides={tuple: list},
+)
+_PLAN_CONVERTER.register_structure_hook(str, _structure_str)
+_PLAN_CONVERTER.register_structure_hook(bool, _structure_bool)
+_PLAN_CONVERTER.register_structure_hook(Path, _structure_path)
+_PLAN_CONVERTER.register_structure_hook(CellRef, _structure_cell_ref)
+_PLAN_CONVERTER.register_unstructure_hook(CellRef, _unstructure_cell_ref)
 
 
 def plan_to_dict(plan: AttendancePlan) -> dict[str, object]:
-    """把方案转换为可 JSON 序列化对象。"""
-    return {
-        "schema_version": _PLAN_SCHEMA_VERSION,
-        "name": plan.name,
-        "template_path": str(plan.template_path),
-        "source": {
-            "sheet_name": plan.source.sheet_name,
-            "name_start": plan.source.name_start.address,
-            "department_start": plan.source.department_start.address,
-            "detail_start": plan.source.detail_start.address,
-            "attendance_group_start": (
-                plan.source.attendance_group_start.address
-                if plan.source.attendance_group_start is not None
-                else None
-            ),
-        },
-        "target": {
-            "detail_sheet": plan.target.detail_sheet,
-            "detail_name_start": plan.target.detail_name_start.address,
-            "detail_matrix_start": plan.target.detail_matrix_start.address,
-            "summary_sheet": plan.target.summary_sheet,
-            "summary_name_start": plan.target.summary_name_start.address,
-        },
-        "mappings": [
-            {
-                "sheet_name": mapping.sheet_name,
-                "cell": mapping.cell.address,
-                "content_template": mapping.content_template,
-            }
-            for mapping in plan.mappings
-        ],
-        "rules": [
-            {"pattern": rule.pattern, "output": rule.output, "enabled": rule.enabled}
-            for rule in plan.rules
-        ],
-        "split_by_group": plan.split_by_group,
-        "employee_group_overrides": [
-            {
-                "employee_name": override.employee_name,
-                "source_group": override.source_group,
-                "target_group": override.target_group,
-            }
-            for override in plan.employee_group_overrides
-        ],
-        "group_sheet_configs": [
-            {
-                "attendance_group": config.attendance_group,
-                "detail_sheet": config.detail_sheet,
-                "summary_sheet": config.summary_sheet,
-                "group_alias": config.group_alias,
-            }
-            for config in plan.group_sheet_configs
-        ],
-        "roster": (
-            {
-                "workbook_path": str(plan.roster.workbook_path),
-                "layout": {
-                    "sheet_name": plan.roster.layout.sheet_name,
-                    "group_start": plan.roster.layout.group_start.address,
-                    "department_start": plan.roster.layout.department_start.address,
-                    "name_start": plan.roster.layout.name_start.address,
-                    "employee_id_start": plan.roster.layout.employee_id_start.address,
-                },
-                "fill_serial_numbers": plan.roster.fill_serial_numbers,
-                "fill_employee_ids": plan.roster.fill_employee_ids,
-                "detail_serial_start": plan.roster.detail_serial_start.address,
-                "detail_employee_id_start": plan.roster.detail_employee_id_start.address,
-                "summary_serial_start": plan.roster.summary_serial_start.address,
-                "summary_employee_id_start": plan.roster.summary_employee_id_start.address,
-                "excluded_employee_ids": list(plan.roster.excluded_employee_ids),
-            }
-            if plan.roster is not None
-            else None
-        ),
-    }
+    """使用 cattrs 把方案转换为 JSON 兼容对象。"""
+    value = _PLAN_CONVERTER.unstructure(
+        replace(plan, schema_version=_PLAN_SCHEMA_VERSION), AttendancePlan
+    )
+    return cast(dict[str, object], value)
 
 
-def plan_from_dict(value: object) -> AttendancePlan:
-    """严格解析持久化方案。"""
-    data = _mapping(value, "方案")
+def _migrate_plan_payload(value: object) -> dict[str, object]:
+    """把历史 schema 显式迁移为 cattrs 可结构化的完整 v4 payload。"""
+    data = dict(_mapping(value, "方案"))
     version = data.get("schema_version")
-    if version not in {1, 2, 3, _PLAN_SCHEMA_VERSION}:
+    if not isinstance(version, int) or isinstance(version, bool) or version not in {1, 2, 3, 4}:
         raise ValueError("不支持的考勤方案版本")
-    source_data = _mapping(data.get("source"), "source")
-    target_data = _mapping(data.get("target"), "target")
-    split_by_group = data.get("split_by_group", False) if version in {2, 3, 4} else False
-    if not isinstance(split_by_group, bool):
-        raise ValueError("split_by_group 必须是布尔值")
-    group_start_value = source_data.get("attendance_group_start") if version in {2, 3, 4} else None
-    if group_start_value is not None and not isinstance(group_start_value, str):
-        raise ValueError("attendance_group_start 必须是单元格地址或 null")
 
-    mappings: list[CellMapping] = []
-    for item in _sequence(data.get("mappings", []), "mappings"):
-        mapping = _mapping(item, "mapping")
-        mappings.append(
-            CellMapping(
-                sheet_name=_text(mapping, "sheet_name"),
-                cell=CellRef.parse(_text(mapping, "cell")),
-                content_template=str(mapping.get("content_template", "")),
-            )
+    source = dict(_mapping(data.get("source"), "source"))
+    data["source"] = source
+    data.setdefault("mappings", [])
+    data.setdefault("rules", [])
+
+    if version == 1:
+        data["split_by_group"] = False
+        source["attendance_group_start"] = None
+    else:
+        data.setdefault("split_by_group", False)
+        source.setdefault("attendance_group_start", None)
+
+    if version < 3:
+        data["employee_group_overrides"] = []
+        data["group_sheet_configs"] = []
+    else:
+        data.setdefault("employee_group_overrides", [])
+        data.setdefault("group_sheet_configs", [])
+
+    if version == 3:
+        configs: list[dict[str, object]] = []
+        for item in _sequence(data["group_sheet_configs"], "group_sheet_configs"):
+            config = dict(_mapping(item, "group_sheet_config"))
+            config["group_alias"] = ""
+            configs.append(config)
+        data["group_sheet_configs"] = configs
+
+    if version < 4:
+        data["roster"] = None
+    else:
+        data.setdefault("roster", None)
+
+    data["schema_version"] = _PLAN_SCHEMA_VERSION
+    return data
+
+
+def _required_text(value: str, label: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{label} 必须是非空字符串")
+    return value
+
+
+def _normalize_plan(plan: AttendancePlan) -> AttendancePlan:
+    """应用 cattrs 之外的领域文本约束，并保持旧解析器的 strip 语义。"""
+    source = replace(plan.source, sheet_name=_required_text(plan.source.sheet_name, "sheet_name"))
+    target = replace(
+        plan.target,
+        detail_sheet=_required_text(plan.target.detail_sheet, "detail_sheet"),
+        summary_sheet=_required_text(plan.target.summary_sheet, "summary_sheet"),
+    )
+    mappings = tuple(
+        replace(mapping, sheet_name=_required_text(mapping.sheet_name, "sheet_name"))
+        for mapping in plan.mappings
+    )
+    rules = tuple(
+        replace(rule, pattern=_required_text(rule.pattern, "pattern")) for rule in plan.rules
+    )
+    overrides = tuple(
+        replace(
+            override,
+            employee_name=_required_text(override.employee_name, "employee_name"),
+            source_group=_required_text(override.source_group, "source_group"),
+            target_group=_required_text(override.target_group, "target_group"),
         )
-
-    rules: list[AttendanceRule] = []
-    for item in _sequence(data.get("rules", []), "rules"):
-        rule = _mapping(item, "rule")
-        enabled = rule.get("enabled", True)
-        if not isinstance(enabled, bool):
-            raise ValueError("rule.enabled 必须是布尔值")
-        rules.append(
-            AttendanceRule(
-                pattern=_text(rule, "pattern"),
-                output=str(rule.get("output", "")),
-                enabled=enabled,
-            )
+        for override in plan.employee_group_overrides
+    )
+    configs = tuple(
+        replace(
+            config,
+            attendance_group=_required_text(config.attendance_group, "attendance_group"),
+            detail_sheet=_required_text(config.detail_sheet, "detail_sheet"),
+            summary_sheet=_required_text(config.summary_sheet, "summary_sheet"),
+            group_alias=config.group_alias.strip(),
         )
+        for config in plan.group_sheet_configs
+    )
 
-    employee_group_overrides: list[EmployeeGroupOverride] = []
-    group_sheet_configs: list[GroupSheetConfig] = []
-    if version in {3, 4}:
-        for item in _sequence(data.get("employee_group_overrides", []), "employee_group_overrides"):
-            override = _mapping(item, "employee_group_override")
-            employee_group_overrides.append(
-                EmployeeGroupOverride(
-                    employee_name=_text(override, "employee_name"),
-                    source_group=_text(override, "source_group"),
-                    target_group=_text(override, "target_group"),
-                )
-            )
-        for item in _sequence(data.get("group_sheet_configs", []), "group_sheet_configs"):
-            config = _mapping(item, "group_sheet_config")
-            group_sheet_configs.append(
-                GroupSheetConfig(
-                    attendance_group=_text(config, "attendance_group"),
-                    detail_sheet=_text(config, "detail_sheet"),
-                    summary_sheet=_text(config, "summary_sheet"),
-                    group_alias=(
-                        str(config.get("group_alias", "")).strip() if version == 4 else ""
-                    ),
-                )
-            )
-
-    roster: RosterConfig | None = None
-    roster_value = data.get("roster") if version == 4 else None
-    if roster_value is not None:
-        roster_data = _mapping(roster_value, "roster")
-        roster_layout = _mapping(roster_data.get("layout"), "roster.layout")
-        fill_serial_numbers = roster_data.get("fill_serial_numbers", True)
-        fill_employee_ids = roster_data.get("fill_employee_ids", True)
-        if not isinstance(fill_serial_numbers, bool):
-            raise ValueError("roster.fill_serial_numbers 必须是布尔值")
-        if not isinstance(fill_employee_ids, bool):
-            raise ValueError("roster.fill_employee_ids 必须是布尔值")
-        excluded_employee_ids = tuple(
-            str(item).strip()
-            for item in _sequence(
-                roster_data.get("excluded_employee_ids", []), "roster.excluded_employee_ids"
-            )
-            if str(item).strip()
-        )
-        roster = RosterConfig(
-            workbook_path=Path(_text(roster_data, "workbook_path")),
-            layout=RosterLayout(
-                sheet_name=_text(roster_layout, "sheet_name"),
-                group_start=CellRef.parse(_text(roster_layout, "group_start")),
-                department_start=CellRef.parse(_text(roster_layout, "department_start")),
-                name_start=CellRef.parse(_text(roster_layout, "name_start")),
-                employee_id_start=CellRef.parse(_text(roster_layout, "employee_id_start")),
+    roster = plan.roster
+    if roster is not None:
+        roster = replace(
+            roster,
+            layout=replace(
+                roster.layout,
+                sheet_name=_required_text(roster.layout.sheet_name, "roster.layout.sheet_name"),
             ),
-            fill_serial_numbers=fill_serial_numbers,
-            fill_employee_ids=fill_employee_ids,
-            detail_serial_start=CellRef.parse(_text(roster_data, "detail_serial_start")),
-            detail_employee_id_start=CellRef.parse(_text(roster_data, "detail_employee_id_start")),
-            summary_serial_start=CellRef.parse(_text(roster_data, "summary_serial_start")),
-            summary_employee_id_start=CellRef.parse(
-                _text(roster_data, "summary_employee_id_start")
+            excluded_employee_ids=tuple(
+                employee_id.strip()
+                for employee_id in roster.excluded_employee_ids
+                if employee_id.strip()
             ),
-            excluded_employee_ids=excluded_employee_ids,
         )
 
-    return AttendancePlan(
-        name=_text(data, "name"),
-        template_path=Path(_text(data, "template_path")),
-        source=SourceLayout(
-            sheet_name=_text(source_data, "sheet_name"),
-            name_start=CellRef.parse(_text(source_data, "name_start")),
-            department_start=CellRef.parse(_text(source_data, "department_start")),
-            detail_start=CellRef.parse(_text(source_data, "detail_start")),
-            attendance_group_start=(
-                CellRef.parse(group_start_value) if group_start_value is not None else None
-            ),
-        ),
-        target=TargetLayout(
-            detail_sheet=_text(target_data, "detail_sheet"),
-            detail_name_start=CellRef.parse(_text(target_data, "detail_name_start")),
-            detail_matrix_start=CellRef.parse(_text(target_data, "detail_matrix_start")),
-            summary_sheet=_text(target_data, "summary_sheet"),
-            summary_name_start=CellRef.parse(_text(target_data, "summary_name_start")),
-        ),
-        mappings=tuple(mappings),
-        rules=tuple(rules),
-        split_by_group=split_by_group,
-        employee_group_overrides=tuple(employee_group_overrides),
-        group_sheet_configs=tuple(group_sheet_configs),
+    return replace(
+        plan,
+        name=_required_text(plan.name, "name"),
+        source=source,
+        target=target,
+        mappings=mappings,
+        rules=rules,
+        employee_group_overrides=overrides,
+        group_sheet_configs=configs,
         roster=roster,
         schema_version=_PLAN_SCHEMA_VERSION,
     )
+
+
+def plan_from_dict(value: object) -> AttendancePlan:
+    """迁移历史 schema 后使用 cattrs 严格解析持久化方案。"""
+    try:
+        plan = _PLAN_CONVERTER.structure(_migrate_plan_payload(value), AttendancePlan)
+    except (BaseValidationError, ForbiddenExtraKeysError, KeyError, TypeError) as exc:
+        raise ValueError(f"无效的考勤方案: {exc}") from exc
+    return _normalize_plan(plan)
