@@ -8,7 +8,7 @@ from datetime import date
 from file_toolbox.core.attendance.types import AttendanceRule
 
 _TOKEN_RE = re.compile(r"{{([a-z_]+)}}")
-_TOKENS = {
+CONTENT_TEMPLATE_TOKENS = (
     "year",
     "month",
     "month_start",
@@ -17,7 +17,8 @@ _TOKENS = {
     "attendance_group",
     "roster_group",
     "group_alias",
-}
+)
+_TOKENS = set(CONTENT_TEMPLATE_TOKENS)
 
 
 def compile_rules(rules: tuple[AttendanceRule, ...]) -> tuple[tuple[re.Pattern[str], str], ...]:

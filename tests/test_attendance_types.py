@@ -164,6 +164,21 @@ def test_plan_from_dict_rejects_unknown_version():
         plan_from_dict(data)
 
 
+def test_plan_from_dict_rejects_unknown_fields():
+    data = plan_to_dict(_plan())
+    data["unknown_field"] = "typo"
+    with pytest.raises(ValueError, match="无效的考勤方案"):
+        plan_from_dict(data)
+
+
+@pytest.mark.parametrize(("field", "value"), [("split_by_group", 1), ("split_by_group", "false")])
+def test_plan_from_dict_keeps_boolean_fields_strict(field, value):
+    data = plan_to_dict(_plan())
+    data[field] = value
+    with pytest.raises(ValueError, match="无效的考勤方案"):
+        plan_from_dict(data)
+
+
 def test_default_rule_order_handles_mixed_status():
     rules = compile_rules(default_rules())
     assert classify("正常,出差07-02到07-03", rules) == "差"

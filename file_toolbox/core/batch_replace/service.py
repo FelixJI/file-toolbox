@@ -3,13 +3,13 @@
 import contextlib
 import gc
 import shutil
-import subprocess
-import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
+
+import psutil
 
 from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import format_file_size
@@ -22,27 +22,12 @@ from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
 from file_toolbox.core.batch_replace.handlers.word_handler import WordHandler
 from file_toolbox.core.batch_replace.types import REPLACE_PARAM_RULES, ReplaceOperationType
 
-# 子进程超时(秒)
-SUBPROCESS_TIMEOUT_SECONDS = 5
-
 # 单个文件操作超时时间（秒）
 FILE_OPERATION_TIMEOUT = 30
 # 应用程序退出超时时间（秒）
 APP_QUIT_TIMEOUT = 10
 # 文本文件并行处理的最大线程数
 MAX_TEXT_WORKERS = 4
-
-
-def _no_window_flags() -> dict[str, Any]:
-    """Windows GUI 进程(如 PyInstaller 打包的 FileToolbox.exe,PE 子系统 = GUI)启动控制台
-    子进程(tasklist/taskkill)时,缺本标志 Windows 会为子进程分配可见控制台 → 黑框一闪。
-
-    CREATE_NO_WINDOW 阻止子进程分配控制台。非 Windows 无此标志,返回空 dict。
-    根因详见 Nuitka Issue #3073(GUI 子系统进程的通用现象,与具体打包器无关)。
-    """
-    if sys.platform != "win32":
-        return {}
-    return {"creationflags": subprocess.CREATE_NO_WINDOW}
 
 
 class ContentReplaceService(BaseOperationService, LoggableMixin):
@@ -79,38 +64,15 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
     def _get_office_pids(self, process_name: str) -> list[int]:
         """获取指定 Office 进程的 PID 列表"""
-        pids = []
-
-        try:
-            result = subprocess.run(
-                [
-                    "tasklist",
-                    "/FI",
-                    f"IMAGENAME eq {process_name}",
-                    "/FO",
-                    "CSV",
-                    "/NH",
-                ],
-                capture_output=True,
-                text=True,
-                # tasklist CSV 输出含本地编码字符(GBK),text=True 默认 UTF-8
-                # 解码会抛 UnicodeDecodeError 导致子线程崩溃。errors=ignore 容错:
-                # PID 解析只需 ASCII 数字部分,丢失个别非 ASCII 字符不影响。
-                errors="ignore",
-                timeout=SUBPROCESS_TIMEOUT_SECONDS,
-                # Windows GUI 进程起 tasklist 时不分配可见控制台(避免黑框一闪)。
-                **_no_window_flags(),
-            )
-
-            for line in result.stdout.strip().split("\n"):
-                parts = line.replace('"', "").split(",")
-
-                if len(parts) >= 2 and parts[1].isdigit():
-                    pids.append(int(parts[1]))
-
-        except Exception:
-            pass
-
+        pids: list[int] = []
+        target_name = process_name.casefold()
+        for process in psutil.process_iter(["pid", "name"]):
+            try:
+                name = process.info.get("name")
+                if isinstance(name, str) and name.casefold() == target_name:
+                    pids.append(int(process.info["pid"]))
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, KeyError):
+                continue
         return pids
 
     def _kill_new_office_processes(self, process_name: str, pids_before: list[int]) -> None:
@@ -119,14 +81,17 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         new_pids = set(current_pids) - set(pids_before)
 
         for pid in new_pids:
-            with contextlib.suppress(Exception):
-                subprocess.run(
-                    ["taskkill", "/F", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=SUBPROCESS_TIMEOUT_SECONDS,
-                    # 同 _get_office_pids:GUI 进程起 taskkill 时不分配可见控制台。
-                    **_no_window_flags(),
-                )
+            with contextlib.suppress(
+                psutil.AccessDenied,
+                psutil.NoSuchProcess,
+                psutil.TimeoutExpired,
+                psutil.ZombieProcess,
+            ):
+                process = psutil.Process(pid)
+                if process.name().casefold() != process_name.casefold():
+                    continue
+                process.kill()
+                process.wait(timeout=5)
 
     def is_supported_file(self, file_path: Path) -> bool:
         """检查文件是否为支持的格式"""
@@ -497,7 +462,7 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         """关闭服务,释放资源。
 
         _from_del:由 __del__ 调用时为 True,此时跳过末尾的进程清理与潜在
-        gc 交互——在解释器关闭链中调用 taskkill/子进程不安全。
+        gc 交互——在解释器关闭链中调用进程清理 API 不安全。
         """
         with contextlib.suppress(Exception):
             self.converter.close()

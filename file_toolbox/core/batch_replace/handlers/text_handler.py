@@ -9,6 +9,8 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
+import chardet
+
 from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
 
@@ -25,35 +27,31 @@ class TextHandler:
         Returns:
             文件文本内容
         """
-        # 尝试多种编码
-        # utf-8-sig 优先:对带 BOM 的 UTF-8 文件自动剥离 \ufeff(否则 BOM 残留在内容开头,
-        # 破坏后续 simple_replace 匹配);对无 BOM 的 UTF-8 行为与 utf-8 完全一致。
-        encodings = ["utf-8-sig", "utf-8", "gbk", "gb2312", "utf-16", "latin-1"]
+        raw_data = file_path.read_bytes()
 
-        for encoding in encodings:
+        # 先处理确定性最强且最常见的 UTF-8，再让 chardet 识别其他编码。
+        for encoding in ("utf-8-sig", "utf-8"):
             try:
-                with open(file_path, encoding=encoding) as f:
-                    return f.read()
-            except (UnicodeDecodeError, UnicodeError):
+                return raw_data.decode(encoding)
+            except UnicodeError:
                 continue
 
-        # 使用 chardet 检测编码
-        # latin-1(上一轮)能解码任意字节流,故整个 chardet/utf-8-ignore 兜底理论不可达。
-        try:  # pragma: no cover
-            import chardet
-
-            with open(file_path, "rb") as f:
-                raw_data = f.read()
+        try:
             detected = chardet.detect(raw_data)
-            encoding: str | None = detected.get("encoding", "utf-8")  # type: ignore[no-redef]
-            if encoding:
-                return raw_data.decode(encoding)
-        except Exception:  # pragma: no cover
+            detected_encoding = detected.get("encoding")
+            confidence = float(detected.get("confidence") or 0.0)
+            if detected_encoding and confidence >= 0.5:
+                return raw_data.decode(detected_encoding)
+        except (LookupError, TypeError, UnicodeError, ValueError):
             pass
 
-        # 最后尝试 utf-8 忽略错误
-        with open(file_path, encoding="utf-8", errors="ignore") as f:  # pragma: no cover
-            return f.read()
+        # 检测不可靠时保留常见中文/UTF-16 兼容路径；latin-1 作为无损最终兜底。
+        for encoding in ("gb18030", "gbk", "utf-16"):
+            try:
+                return raw_data.decode(encoding)
+            except UnicodeError:
+                continue
+        return raw_data.decode("latin-1")
 
     def replace_file(self, file_path: Path, operations: list[dict[str, Any]]) -> int:
         """

@@ -1,7 +1,6 @@
 """ContentReplaceService 未覆盖分支的补充测试。
 
 聚焦 service.py 行:
-- 43: _no_window_flags 非 win32 → {} (跨平台守卫)
 - 217-237: preview_replace 的 .doc/.xls 转换路径(成功/失败两支)
 - 337-345: execute_replace 分组(docx/xlsx 分类 + 锁定跳过)
 - 382-413: execute_replace Word 文档处理块
@@ -12,20 +11,19 @@
 - close(_from_del=True):由 __del__ 调用时跳过进程清理
 
 策略:用 MagicMock 替换 svc 的 handler/converter/_get_office_pids,
-避免真实 COM/subprocess。文本路径用真文件。
+避免真实 COM/进程操作。文本路径用真文件。
 """
 
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from file_toolbox.core.batch_replace import service as service_mod
 from file_toolbox.core.batch_replace.service import ContentReplaceService
 
 SIMPLE = {"type": "simple_replace", "params": {"find": "old", "replace": "new"}}
 
 
 def _svc_with_mocks() -> ContentReplaceService:
-    """构造 svc,替换所有 handler/converter/pids 为 mock(避免真实 COM/tasklist)。"""
+    """构造 svc,替换所有 handler/converter/pids 为 mock(避免真实 COM/进程操作)。"""
     svc = ContentReplaceService.__new__(ContentReplaceService)
     svc._history_store = None  # __init__ 被绕过,显式置 None 让 execute_replace 的历史记录块正常跳过
     svc.converter = MagicMock()
@@ -37,17 +35,6 @@ def _svc_with_mocks() -> ContentReplaceService:
     svc._text_handler = MagicMock()
     svc._backup_dir = Path(".")
     return svc
-
-
-# ---------------------------------------------------------------------------
-# _no_window_flags 非 win32 分支(行 43)
-# ---------------------------------------------------------------------------
-
-
-def test_no_window_flags_non_win32_returns_empty(monkeypatch):
-    """非 win32 平台 → 返回 {} (无 CREATE_NO_WINDOW)。"""
-    monkeypatch.setattr(service_mod.sys, "platform", "linux")
-    assert service_mod._no_window_flags() == {}
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +503,7 @@ def test_close_from_del_skips_process_cleanup(monkeypatch):
     """close(_from_del=True):跳过进程清理(由 __del__ 调用)。
 
     _from_del=True 时直接 return,不获取锁、不 kill——避免解释器关闭链中
-    调用 taskkill/子进程的不安全操作。
+    调用进程清理 API 的不安全操作。
     """
     svc = _svc_with_mocks()
     svc._lock.acquire.return_value = True
