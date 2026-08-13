@@ -21,6 +21,29 @@ check_release_contract = importlib.import_module("check_release_contract")
 automation_core = importlib.import_module("automation_core")
 
 
+def test_top_level_automation_import_does_not_probe_unrelated_scripts_namespace(
+    tmp_path: Path,
+) -> None:
+    foreign_root = tmp_path / "foreign"
+    (foreign_root / "scripts").mkdir(parents=True)
+    code = (
+        "import importlib, sys; "
+        f"sys.path[:0] = [{str(SCRIPTS)!r}, {str(foreign_root)!r}]; "
+        "importlib.import_module('automation_core'); "
+        "raise SystemExit('scripts' in sys.modules)"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_sync_version_updates_only_derived_lockfile(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "file-toolbox"\nversion = "0.1.0"\n', encoding="utf-8"
