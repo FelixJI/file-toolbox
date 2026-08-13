@@ -57,6 +57,10 @@ class EngineManager(LoggableMixin):
 
     # 缓存检测结果（类变量，所有实例共享）
     _cached_engines: dict[str, bool] | None = None
+    # 缓存是否已通过真 Dispatch "兑现"(force_refresh 路径)验证过。
+    # 进程内只兑现一次,避免每次生成都重新 Dispatch Word/WPS(冷启动每个数秒)。
+    # 注册表探测(force_refresh=False)不置此标志——它只是快速预筛,仍需兑现。
+    _verified: bool = False
 
     def __init__(self) -> None:
         self._word_app = None
@@ -137,6 +141,39 @@ class EngineManager(LoggableMixin):
 
         EngineManager._cached_engines = engines
         return engines
+
+    def ensure_verified(self) -> None:
+        """进程内一次性"兑现":把注册表预筛结果用真 COM Dispatch 验证一次。
+
+        设计目标:消除 worker 每次生成都全量 Dispatch Word+WPS 的数秒级冷启动开销。
+        - 进程内只兑现一次(`_verified` 标志);后续生成直接命中缓存,零 Dispatch。
+        - 只对**缓存判定可用**的引擎做真 Dispatch(注册表说没装就不启动该引擎),
+          避免无条件双引擎全量启动。
+        - 精确更新被验证的引擎键,不污染整份缓存。
+        - 兑现失败(如 Office 临时忙)时:该引擎回退为缓存原值,不抛出——转换时
+          `_prog_ids_to_try` 仍会逐个 ProgID 尝试并回退兜底。
+
+        此方法在后台线程(由 PdfGenerateWorker)调用,COM 线程初始化由调用方负责。
+        """
+        if EngineManager._verified:
+            return  # 进程内已兑现,直接返回
+
+        cached = EngineManager._cached_engines or {"office": False, "wps": False}
+        verified = dict(cached)
+        # 仅兑现预筛判定的可用引擎,避免无谓启动未安装的 Office。
+        # 经类访问调用 staticmethod(与 _probe_registry 一致),避免 self 绑定歧义。
+        if cached.get("office"):
+            verified["office"] = EngineManager._try_detect(
+                "Word.Application",
+                lambda m: self.logger.warning(f"兑现Microsoft Office Word失败: {m}"),
+            )
+        if cached.get("wps"):
+            verified["wps"] = EngineManager._try_detect(
+                "KWPS.Application",
+                lambda m: self.logger.warning(f"兑现WPS Office失败: {m}"),
+            )
+        EngineManager._cached_engines = verified
+        EngineManager._verified = True
 
     def get_engine_info(self, use_cache: bool = True) -> str:
         """获取当前引擎信息"""

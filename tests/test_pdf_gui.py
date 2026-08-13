@@ -272,6 +272,27 @@ def test_generate_starts_worker_and_disables_ui(dlg, monkeypatch, tmp_path):
     assert dlg.ui.btn_cancel.isHidden() is False  # 已设为可见(取消按钮亮起)
 
 
+def test_generate_refreshes_engine_info_label(dlg, monkeypatch, tmp_path):
+    """_generate 调用 _refresh_engine_info_label:缓存就绪时 label_engine_info 反映
+    "可用引擎",不再停留在"正在检测可用引擎..."(回归:生成流程此前从不刷新该 label)。
+    """
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
+
+    # 预置缓存(daemon 注册表探测的等价结果),模拟"探测已完成"
+    monkeypatch.setattr(EngineManager, "_cached_engines", {"office": True, "wps": False})
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"x")
+    dlg.selected_files = [f]
+    monkeypatch.setattr(PdfGenerateWorker, "start", lambda self: None)
+
+    dlg._generate()
+
+    assert dlg.ui.label_engine_info.text() != "正在检测可用引擎..."
+    assert "MS Office" in dlg.ui.label_engine_info.text()
+
+
 def test_on_progress_updates_label_and_bar(dlg):
     """_on_progress 更新 label_progress 与 progress_bar。"""
     dlg._on_progress(2, 5, "处理中")
