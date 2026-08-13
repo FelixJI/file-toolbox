@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.5
+
+### Features
+
+- **updater:** 迁移 Velopack 更新链 (#35) (b02c96d)
+
+### Dependencies
+
+- **deps:** 使用成熟依赖收敛基础能力 (#37) (1f0224e)
+
 ## 0.2.4
 
 ### Features
