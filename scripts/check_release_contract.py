@@ -45,7 +45,6 @@ def check_release_contract(root: Path = _ROOT) -> list[str]:
     required_assets = config["release"]["required_assets"]
     expected_assets = [
         "FileToolbox-{version}-full.nupkg",
-        "FileToolbox-Setup.exe",
         "FileToolbox-Portable.zip",
         "releases.win.json",
         "checksums.txt",

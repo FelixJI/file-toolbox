@@ -185,6 +185,7 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
         "win",
         "--delta",
         "None",
+        "--noInst",
         "--packTitle",
         _PRODUCT,
         "--yes",
@@ -194,10 +195,6 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
     subprocess.run(cmd, cwd=str(_ROOT), check=True)
     sources = {
         f"{_PRODUCT}-{version}-full.nupkg": (f"{_PRODUCT}-{version}-full.nupkg",),
-        f"{_PRODUCT}-Setup.exe": (
-            f"{_PRODUCT}-Setup.exe",
-            f"{_PRODUCT}-win-Setup.exe",
-        ),
         f"{_PRODUCT}-Portable.zip": (
             f"{_PRODUCT}-Portable.zip",
             f"{_PRODUCT}-win-Portable.zip",
