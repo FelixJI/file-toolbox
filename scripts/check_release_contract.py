@@ -44,7 +44,6 @@ def check_release_contract(root: Path = _ROOT) -> list[str]:
 
     required_assets = config["release"]["required_assets"]
     expected_assets = [
-        "FileToolbox-{version}-win64.zip",
         "FileToolbox-{version}-full.nupkg",
         "FileToolbox-Setup.exe",
         "FileToolbox-Portable.zip",
@@ -54,7 +53,7 @@ def check_release_contract(root: Path = _ROOT) -> list[str]:
         "build-identity.json",
     ]
     if required_assets != expected_assets:
-        errors.append("release assets must match the Velopack bridge exact set")
+        errors.append("release assets must match the Velopack exact set")
 
     workflows = {path.name for path in (root / ".github/workflows").glob("*.yml")}
     if workflows != {"ci.yml", "cd.yml"}:

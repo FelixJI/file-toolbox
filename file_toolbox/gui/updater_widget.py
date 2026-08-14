@@ -43,10 +43,7 @@ class UpdateBanner(QLabel):
         self.hide()
 
     def show_result(self, result: UpdateCheckResult) -> None:
-        if result.status is UpdateCheckStatus.INSTALLER_REQUIRED:
-            self.setText("🆕 安装新版更新器 · 点击继续")
-        else:
-            self.setText(f"🆕 发现新版本 {result.version} · 点击更新")
+        self.setText(f"🆕 发现新版本 {result.version} · 点击更新")
         self.show()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt 命名)
@@ -57,10 +54,10 @@ class UpdateWorker(QThread):
     """后台检查 + 下载 worker(运行自身事件循环,接收跨线程方法投递)。
 
     信号(均跨线程安全投递回主线程):
-      ready(UpdateCheckResult)    — 检查到新版本或需要 Setup bridge
+      ready(UpdateCheckResult)    — 检查到新版本
       checked(UpdateCheckResult)  — 每次检查的可观察结果
       progress(int)               — SDK 计算的下载百分比
-      applied(UpdateApplyResult)  — apply/bridge 安排结果
+      applied(UpdateApplyResult)  — apply 安排结果
 
     用法(主线程):
       worker.start()                                  # 启动线程 + 事件循环
@@ -102,10 +99,7 @@ class UpdateWorker(QThread):
             _logger.warning("检查更新失败", exc_info=True)
             result = UpdateCheckResult(UpdateCheckStatus.FAILED, message=str(error))
         self.checked.emit(result)
-        if result.status in {
-            UpdateCheckStatus.AVAILABLE,
-            UpdateCheckStatus.INSTALLER_REQUIRED,
-        }:
+        if result.status is UpdateCheckStatus.AVAILABLE:
             self.ready.emit(result)
 
     @Slot()

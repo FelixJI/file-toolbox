@@ -18,10 +18,7 @@ def _sha256(path: Path) -> str:
 
 def _write_candidate(directory: Path, version: str) -> set[str]:
     directory.mkdir()
-    legacy = directory / f"FileToolbox-{version}-win64.zip"
     portable = directory / "FileToolbox-Portable.zip"
-    with zipfile.ZipFile(legacy, "w") as package:
-        package.writestr("FileToolbox/FileToolbox.exe", b"smoke")
     with zipfile.ZipFile(portable, "w") as package:
         package.writestr("FileToolbox.exe", b"smoke")
     full = directory / f"FileToolbox-{version}-full.nupkg"
@@ -47,7 +44,7 @@ def _write_candidate(directory: Path, version: str) -> set[str]:
         ),
         encoding="utf-8",
     )
-    payloads = {legacy.name, portable.name, full.name, setup.name, feed.name}
+    payloads = {portable.name, full.name, setup.name, feed.name}
     (directory / "checksums.txt").write_text(
         "".join(f"{_sha256(directory / name)}  {name}\n" for name in sorted(payloads)),
         encoding="utf-8",
@@ -105,15 +102,10 @@ def _write_candidate(directory: Path, version: str) -> set[str]:
         ),
         encoding="utf-8",
     )
-    identity_path = directory / "build-identity.json"
-    identity = json.loads(identity_path.read_text(encoding="utf-8"))
-    identity["build"]["archive"] = legacy.name
-    identity["build"]["archive_sha256"] = _sha256(legacy)
-    identity_path.write_text(json.dumps(identity), encoding="utf-8")
     return payloads | {"checksums.txt", "build-identity.json", "SBOM.spdx.json"}
 
 
-def test_release_smoke_accepts_exact_bridge_asset_set(tmp_path: Path) -> None:
+def test_release_smoke_accepts_exact_velopack_asset_set(tmp_path: Path) -> None:
     expected = _write_candidate(tmp_path / "artifacts", "1.2.3")
 
     release_smoke.check_release_smoke(tmp_path / "artifacts", "1.2.3")

@@ -57,11 +57,8 @@ def test_sync_version_updates_only_derived_lockfile(tmp_path: Path) -> None:
     assert 'version = "2.3.4" # generated' in (tmp_path / "uv.lock").read_text(encoding="utf-8")
 
 
-def _archive(directory: Path, version: str) -> Path:
+def _archive(directory: Path, version: str) -> None:
     directory.mkdir(parents=True)
-    archive = directory / f"FileToolbox-{version}-win64.zip"
-    with zipfile.ZipFile(archive, "w") as package:
-        package.writestr("FileToolbox/FileToolbox.exe", b"smoke")
     portable = directory / "FileToolbox-Portable.zip"
     with zipfile.ZipFile(portable, "w") as package:
         package.writestr("FileToolbox.exe", b"smoke")
@@ -89,7 +86,7 @@ def _archive(directory: Path, version: str) -> Path:
         ),
         encoding="utf-8",
     )
-    payloads = [archive, full, setup, portable, feed]
+    payloads = [full, setup, portable, feed]
     records = {
         path.name: {
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -149,8 +146,6 @@ def _archive(directory: Path, version: str) -> Path:
                     "source_sha": "a" * 40,
                 },
                 "build": {
-                    "archive": archive.name,
-                    "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                     "source_sha": "a" * 40,
                     "assets": records,
                 },
@@ -158,7 +153,6 @@ def _archive(directory: Path, version: str) -> Path:
         ),
         encoding="utf-8",
     )
-    return archive
 
 
 def test_release_smoke_validates_project_archive_sbom_and_build_identity(tmp_path: Path) -> None:

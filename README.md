@@ -38,7 +38,7 @@ CLI 命令默认只预览计划，只有显式传入 `--yes` 才会执行。
 1. 新用户从 [Releases](https://github.com/FelixJI/file-toolbox/releases/latest) 下载
    `FileToolbox-Setup.exe`；无需安装时可选 `FileToolbox-Portable.zip`。
 2. 按同一 Release 的 `checksums.txt` 校验 SHA-256，再运行 Setup 或解压 Portable。
-3. `FileToolbox-*-win64.zip` 仅在更新器迁移桥接期保留，供旧客户端升级，不再是新安装入口。
+3. 安装版由 Velopack 在应用内检查、下载并应用更新；Portable 用户需要手动下载新版。
 
 PowerShell 校验示例：
 
@@ -138,8 +138,8 @@ uv run python scripts/regen_ui.py --check
 
 ## 发布资产
 
-迁移期正式 Release 精确包含 Setup、Portable ZIP、Velopack full nupkg/feed、legacy Windows x64
-ZIP、`checksums.txt`、`build-identity.json` 与 SPDX SBOM。版本与资产由自动化脚本生成；贡献者
+正式 Release 精确包含 Setup、Portable ZIP、Velopack full nupkg/feed、`checksums.txt`、
+`build-identity.json` 与 SPDX SBOM。版本与资产由自动化脚本生成；贡献者
 不应手改派生版本或手工创建正式 tag。
 
 ## 参与贡献

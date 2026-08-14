@@ -11,7 +11,6 @@ class UpdateCheckStatus(StrEnum):
 
     AVAILABLE = "available"
     LATEST = "latest"
-    INSTALLER_REQUIRED = "installer_required"
     FAILED = "failed"
 
 
@@ -19,7 +18,6 @@ class UpdateApplyStatus(StrEnum):
     """下载并应用更新的调用方可见状态。"""
 
     APPLY_STARTED = "apply_started"
-    INSTALLER_STARTED = "installer_started"
     CANCELLED = "cancelled"
     FAILED = "failed"
 
@@ -36,7 +34,7 @@ class UpdateCheckResult:
 
 @dataclass(frozen=True)
 class UpdateApplyResult:
-    """下载/apply/bridge 的最终可观察结果。"""
+    """下载/apply 的最终可观察结果。"""
 
     status: UpdateApplyStatus
     message: str = ""

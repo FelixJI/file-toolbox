@@ -173,17 +173,15 @@ class MainWindow(QMainWindow):
             self._about_tab.display_check_result(
                 "available", f"🆕 发现新版本 {result.version}(点击底部提示更新)"
             )
-        elif result.status is UpdateCheckStatus.INSTALLER_REQUIRED:
-            self._about_tab.display_check_result(
-                "available", "当前是旧版/未安装布局，请点击底部提示迁移到新版安装器"
-            )
         elif result.status is UpdateCheckStatus.FAILED:
-            self._about_tab.display_check_result("failed", "⚠ 检查更新失败,请检查网络或代理设置")
+            self._about_tab.display_check_result(
+                "failed", f"⚠ {result.message or '检查更新失败,请检查网络或代理设置'}"
+            )
         else:  # latest
             self._about_tab.display_check_result("latest", f"✓ 当前为最新版本 v{VERSION}")
 
     def _on_update_ready(self, result: UpdateCheckResult) -> None:
-        """检查到新版或 bridge 需要 → 状态栏 banner 提示。"""
+        """检查到新版 → 状态栏 banner 提示。"""
         self._pending_update = result
         self._update_banner.show_result(result)
 
@@ -192,10 +190,7 @@ class MainWindow(QMainWindow):
         if self._pending_update is None:
             return
         update = self._pending_update
-        if update.status is UpdateCheckStatus.INSTALLER_REQUIRED:
-            prompt = "将下载并启动同版本安装器，现有数据仍保留在用户目录。是否继续？"
-        else:
-            prompt = f"将下载并应用 v{update.version}，应用会在准备完成后退出并重启。是否继续？"
+        prompt = f"将下载并应用 v{update.version}，应用会在准备完成后退出并重启。是否继续？"
         if (
             QMessageBox.question(
                 self,
@@ -208,7 +203,7 @@ class MainWindow(QMainWindow):
             return
         self._update_banner.hide()
         self._download_cancelled = False  # 新一轮下载,清除取消标记
-        label = "正在下载安装器…" if not update.version else f"正在下载 v{update.version}…"
+        label = f"正在下载 v{update.version}…"
         dlg = QProgressDialog(label, "取消", 0, 100, self)
         dlg.setWindowTitle("更新")
         dlg.setMinimumDuration(0)
@@ -236,7 +231,7 @@ class MainWindow(QMainWindow):
             self._update_dialog.setLabelText("正在校验并准备更新…")
 
     def _on_update_applied(self, result: UpdateApplyResult) -> None:
-        """处理 Coordinator 的 apply/bridge 结果。"""
+        """处理 Coordinator 的 apply 结果。"""
         if self._update_dialog is not None:
             self._update_dialog.close()
             self._update_dialog = None
