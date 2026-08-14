@@ -60,11 +60,6 @@ class TestUpdateBanner:
         assert banner.isHidden() is False
         assert "1.2.0" in banner.text()
 
-    def test_installer_bridge_has_distinct_copy(self, app):
-        banner = UpdateBanner()
-        banner.show_result(UpdateCheckResult(UpdateCheckStatus.INSTALLER_REQUIRED))
-        assert "安装" in banner.text()
-
     def test_click_emits_signal(self, app):
         banner = UpdateBanner()
         banner.show_result(_available())
@@ -152,15 +147,6 @@ class TestMainWindowIntegration:
         app.processEvents()
         assert "最新" in win._about_tab._check_result_lbl.text()
         assert win._update_banner.isHidden() is True
-
-    def test_bridge_check_explains_installer_migration(self, app):
-        result = UpdateCheckResult(UpdateCheckStatus.INSTALLER_REQUIRED)
-        win = MainWindow(FakeCoordinator(result))
-        win._manual_check_pending = True
-        win._update_worker.do_check()
-        app.processEvents()
-        assert "安装器" in win._about_tab._check_result_lbl.text()
-        assert win._update_banner.isHidden() is False
 
     def test_cancelled_apply_does_not_quit(self, app, monkeypatch):
         win = MainWindow(

@@ -20,7 +20,6 @@ import os
 import shutil
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
 import typer
@@ -70,7 +69,6 @@ def _asset_records(paths: list[Path]) -> dict[str, dict[str, int | str]]:
 def _write_build_identity(version: str, payloads: list[Path]) -> None:
     """写入项目构建身份；候选 manifest 由公共 core 负责生成。"""
     source_sha = os.environ.get("AUTOMATION_SOURCE_SHA", "local")
-    legacy_archive = next(path for path in payloads if path.name.endswith("-win64.zip"))
     identity = {
         "schema_version": 2,
         "project": {
@@ -81,9 +79,6 @@ def _write_build_identity(version: str, payloads: list[Path]) -> None:
         },
         "build": {
             "source_sha": source_sha,
-            # 兼容现有候选消费者；schema 2 的 assets 是新的 exact-set 权威字段。
-            "archive": legacy_archive.name,
-            "archive_sha256": _sha256(legacy_archive),
             "assets": _asset_records(payloads),
         },
     }
@@ -227,7 +222,7 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
 def build(
     ci: bool = typer.Option(False, "--ci", help="CI 模式:非交互,结构化输出"),
 ) -> None:
-    """PyInstaller 打包 → 压缩便携 zip → 生成 checksums。"""
+    """PyInstaller 打包 → Velopack 发布物 → 生成 checksums。"""
     version = _current_version()
     typer.echo(f"打包版本: {version}")
 
@@ -267,19 +262,8 @@ def build(
         raise typer.Exit(1)
     typer.secho(f"✓ exe: {exe}", fg=typer.colors.GREEN)
 
-    # 便携 zip:以 FileToolbox/ 为顶层目录打包,解压即用
-    zip_name = f"{_PRODUCT}-{version}-win64.zip"
-    zip_path = _DIST / zip_name
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in product_dir.rglob("*"):
-            if f.is_file():
-                # 相对 product_dir(而非 product_dir.parent),使 zip 顶层是 FileToolbox/
-                zf.write(f, f.relative_to(product_dir.parent))
-    typer.secho(f"✓ zip: {zip_path}", fg=typer.colors.GREEN)
-
     typer.echo("运行 Velopack vpk ...")
-    velopack_payloads = _run_velopack(product_dir, version, _BUILD / "velopack")
-    payloads = [zip_path, *velopack_payloads]
+    payloads = _run_velopack(product_dir, version, _BUILD / "velopack")
 
     _write_build_identity(version, payloads)
     _write_spdx_sbom(version, payloads)
@@ -294,7 +278,6 @@ def build(
         # GitHub Actions 结构化输出(用 $GITHUB_OUTPUT,非已废弃的 ::set-output)
         gh_output = _BUILD / "_gha_output.txt"
         with gh_output.open("a", encoding="utf-8") as fh:
-            fh.write(f"zip={zip_name}\n")
             fh.write(f"version={version}\n")
         typer.echo(f"CI 输出写入 {gh_output}")
 

@@ -22,7 +22,6 @@ def _sha256(path: Path) -> str:
 
 def _payload_names(version: str) -> set[str]:
     return {
-        f"FileToolbox-{version}-win64.zip",
         f"FileToolbox-{version}-full.nupkg",
         "FileToolbox-Setup.exe",
         "FileToolbox-Portable.zip",
@@ -50,10 +49,6 @@ def check_release_smoke(artifacts_dir: Path, version: str) -> None:
             f"release build assets must be exact: expected={sorted(expected_names)!r}, "
             f"actual={sorted(actual_names)!r}"
         )
-    legacy = artifacts_dir / f"FileToolbox-{version}-win64.zip"
-    with zipfile.ZipFile(legacy) as package:
-        if "FileToolbox/FileToolbox.exe" not in package.namelist():
-            raise ValueError("legacy archive must contain FileToolbox/FileToolbox.exe")
     portable = artifacts_dir / "FileToolbox-Portable.zip"
     with zipfile.ZipFile(portable) as package:
         names = package.namelist()
@@ -136,8 +131,6 @@ def check_release_smoke(artifacts_dir: Path, version: str) -> None:
     }
     if build.get("assets") != identity_records:
         raise ValueError("build identity must bind every release payload exactly")
-    if build.get("archive") != legacy.name or build.get("archive_sha256") != _sha256(legacy):
-        raise ValueError("build identity legacy archive fields do not bind the bridge archive")
 
 
 def main() -> int:
