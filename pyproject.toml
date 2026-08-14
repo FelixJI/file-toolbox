@@ -2,7 +2,7 @@
 name = "file-toolbox"
 version = "0.2.5"
 description = "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "typer>=0.9",
     "cattrs>=26.1.0",
@@ -33,7 +33,7 @@ include = ["file_toolbox*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
 # generated/ 下的 ui_*.py 由 scripts/regen_ui.py 从 .ui 经 pyside6-uic 再生(或手维护)。
 # uic 输出含 u"" 前缀、(object) 基类、# -*- coding -*- 等会被 UP/format 规则改写的写法,
 # 手动格式化会与再生产生冲突;故把 generated/ 排除出 ruff(lint+format),
@@ -55,7 +55,7 @@ quote-style = "double"
 exclude = ["scripts/automation_core.py"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 # 本应用是 Windows 桌面工具,依赖 pywin32/winreg/os.startfile 等 Windows-only API。
 # 若按宿主平台(如 Linux)检查,会把这些 Windows-only 符号全部报为 attr-defined,
 # 产生误报。固定 platform=win32,让 mypy 按目标平台 win32 校验(含 os.startfile /
