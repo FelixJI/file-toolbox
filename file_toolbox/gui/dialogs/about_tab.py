@@ -106,6 +106,8 @@ class AboutTab(QWidget):
         update_layout.addWidget(proxy_intro)
 
         self._proxy_list = QListWidget()
+        # 限制代理列表高度,避免默认候选项把整个关于页撑得过高(其余空间留给更新日志)
+        self._proxy_list.setMaximumHeight(160)
         update_layout.addWidget(self._proxy_list)
 
         proxy_btn_row = QHBoxLayout()

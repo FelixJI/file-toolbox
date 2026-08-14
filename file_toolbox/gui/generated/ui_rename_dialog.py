@@ -255,7 +255,7 @@ class Ui_FileRenamerDialog:
             QCoreApplication.translate("FileRenamerDialog", "\u9009\u62e9\u6587\u4ef6\u5939", None)
         )
         self.btn_clear_files.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u6e05\u7a7a\u5217\u8868", None)
+            QCoreApplication.translate("FileRenamerDialog", "清空", None)
         )
         self.btn_load_template.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u52a0\u8f7d\u6a21\u677f", None)
@@ -269,10 +269,11 @@ class Ui_FileRenamerDialog:
             )
         )
         self.label_operations.setText(
+            QCoreApplication.translate("FileRenamerDialog", "重命名操作：", None)
+        )
+        self.label_operations.setToolTip(
             QCoreApplication.translate(
-                "FileRenamerDialog",
-                "\u91cd\u547d\u540d\u64cd\u4f5c\uff08\u53ef\u62d6\u62fd\u8c03\u6574\u987a\u5e8f\uff09\uff1a",
-                None,
+                "FileRenamerDialog", "可拖拽列表项调整操作顺序", None
             )
         )
         self.btn_add_prefix.setText(
@@ -329,11 +330,7 @@ class Ui_FileRenamerDialog:
             QCoreApplication.translate("FileRenamerDialog", "\u72b6\u6001", None)
         )
         self.label_status.setText(
-            QCoreApplication.translate(
-                "FileRenamerDialog",
-                "\u5df2\u9009\u62e9 0 \u4e2a\u6587\u4ef6\uff0c0 \u4e2a\u6587\u4ef6\u5939",
-                None,
-            )
+            QCoreApplication.translate("FileRenamerDialog", "已选择 0 个文件", None)
         )
         self.btn_show_history.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u5386\u53f2\u8bb0\u5f55", None)

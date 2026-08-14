@@ -100,7 +100,7 @@ class Ui_InvoiceDialog:
 
         self.cmb_dedupe = QComboBox(InvoiceDialog)
         self.cmb_dedupe.setObjectName("cmb_dedupe")
-        self.cmb_dedupe.addItems(["keep_all(不处理)", "dedupe(去重)", "mark(标色)"])
+        self.cmb_dedupe.addItems(["不去重", "去重", "标色保留"])
         self.cmb_dedupe.setCurrentIndex(0)
         opt_row.addWidget(self.cmb_dedupe)
 

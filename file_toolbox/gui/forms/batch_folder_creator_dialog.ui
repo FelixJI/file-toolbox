@@ -81,7 +81,7 @@
        <item>
         <widget class="QLabel" name="label_paste">
          <property name="text">
-          <string>从Excel粘贴文件夹结构（列代表层级）：</string>
+          <string>粘贴文件夹结构（每列一级）：</string>
          </property>
         </widget>
        </item>

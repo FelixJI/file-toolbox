@@ -156,6 +156,14 @@ class Ui_ContentReplaceDialog:
 
         self.verticalLayout_3.addLayout(self.horizontalLayout_ops2)
 
+        self.chk_keep_new_format = QCheckBox(self.groupBox_operations)
+
+        self.chk_keep_new_format.setObjectName("chk_keep_new_format")
+
+        self.chk_keep_new_format.setChecked(False)
+
+        self.verticalLayout_3.addWidget(self.chk_keep_new_format)
+
         self.splitter.addWidget(self.groupBox_operations)
 
         self.verticalLayout.addWidget(self.splitter)
@@ -163,8 +171,6 @@ class Ui_ContentReplaceDialog:
         self.groupBox_preview = QGroupBox(ContentReplaceDialog)
 
         self.groupBox_preview.setObjectName("groupBox_preview")
-
-        self.groupBox_preview.setMinimumSize(QSize(0, 200))
 
         self.verticalLayout_4 = QVBoxLayout(self.groupBox_preview)
 
@@ -206,30 +212,6 @@ class Ui_ContentReplaceDialog:
         self.verticalLayout_4.addWidget(self.table_preview)
 
         self.verticalLayout.addWidget(self.groupBox_preview)
-
-        self.groupBox_options = QGroupBox(ContentReplaceDialog)
-
-        self.groupBox_options.setObjectName("groupBox_options")
-
-        self.horizontalLayout_options = QHBoxLayout(self.groupBox_options)
-
-        self.horizontalLayout_options.setObjectName("horizontalLayout_options")
-
-        self.chk_keep_new_format = QCheckBox(self.groupBox_options)
-
-        self.chk_keep_new_format.setObjectName("chk_keep_new_format")
-
-        self.chk_keep_new_format.setChecked(False)
-
-        self.horizontalLayout_options.addWidget(self.chk_keep_new_format)
-
-        self.horizontalSpacer_options = QSpacerItem(
-            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-        )
-
-        self.horizontalLayout_options.addItem(self.horizontalSpacer_options)
-
-        self.verticalLayout.addWidget(self.groupBox_options)
 
         self.frame_status = QFrame(ContentReplaceDialog)
 
@@ -405,15 +387,12 @@ class Ui_ContentReplaceDialog:
             QCoreApplication.translate("ContentReplaceDialog", "\u72b6\u6001", None)
         )
 
-        self.groupBox_options.setTitle(
-            QCoreApplication.translate("ContentReplaceDialog", "\u9009\u9879", None)
-        )
-
         self.chk_keep_new_format.setText(
+            QCoreApplication.translate("ContentReplaceDialog", "转换后保留新格式", None)
+        )
+        self.chk_keep_new_format.setToolTip(
             QCoreApplication.translate(
-                "ContentReplaceDialog",
-                "\u8f6c\u6362\u540e\u4fdd\u7559\u65b0\u683c\u5f0f (doc\u2192docx, xls\u2192xlsx)",
-                None,
+                "ContentReplaceDialog", "doc→docx、xls→xlsx 等旧格式转换后保留为新格式", None
             )
         )
 
@@ -422,15 +401,11 @@ class Ui_ContentReplaceDialog:
         )
 
         self.btn_refresh_preview.setText(
-            QCoreApplication.translate(
-                "ContentReplaceDialog", "\U0001f504 \U00005237\U000065b0\U00009884\U000089c8", None
-            )
+            QCoreApplication.translate("ContentReplaceDialog", "刷新预览", None)
         )
 
         self.btn_show_history.setText(
-            QCoreApplication.translate(
-                "ContentReplaceDialog", "\U0001f4cb \U00005386\U000053f2\U00008bb0\U00005f55", None
-            )
+            QCoreApplication.translate("ContentReplaceDialog", "历史记录", None)
         )
 
         self.btn_cancel.setText(
@@ -438,9 +413,7 @@ class Ui_ContentReplaceDialog:
         )
 
         self.btn_execute.setText(
-            QCoreApplication.translate(
-                "ContentReplaceDialog", "\U0001f680 \U00006267\U0000884c\U000066ff\U00006362", None
-            )
+            QCoreApplication.translate("ContentReplaceDialog", "执行替换", None)
         )
 
         self.btn_execute.setStyleSheet(
