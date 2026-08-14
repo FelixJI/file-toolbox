@@ -27,7 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # 基线:补强类型注解与边缘测试(覆盖率提升至 100%)后的实际用例数。
 # 超过此数即通过;低于则失败提醒「测试被删除」。
-DEFAULT_MIN = 1436
+DEFAULT_MIN = 1619
 
 
 def collect_test_count() -> int:
