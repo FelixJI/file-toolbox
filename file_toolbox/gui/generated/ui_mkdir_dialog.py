@@ -156,7 +156,7 @@ class Ui_BatchFolderCreatorDialog(object):
         self.btn_browse_root.setText(QCoreApplication.translate("BatchFolderCreatorDialog", u"\u6d4f\u89c8", None))
         self.label_error.setText("")
         self.btn_fix_special_chars.setText(QCoreApplication.translate("BatchFolderCreatorDialog", u"\u5904\u7406\u7279\u6b8a\u5b57\u7b26", None))
-        self.label_paste.setText(QCoreApplication.translate("BatchFolderCreatorDialog", u"\u4eceExcel\u7c98\u8d34\u6587\u4ef6\u5939\u7ed3\u6784\uff08\u5217\u4ee3\u8868\u5c42\u7ea7\uff09\uff1a", None))
+        self.label_paste.setText(QCoreApplication.translate("BatchFolderCreatorDialog", u"\u7c98\u8d34\u6587\u4ef6\u5939\u7ed3\u6784\uff08\u6bcf\u5217\u4e00\u7ea7\uff09\uff1a", None))
         ___qtablewidgetitem = self.table_paste.horizontalHeaderItem(0)
         ___qtablewidgetitem.setText(QCoreApplication.translate("BatchFolderCreatorDialog", u"\u4e00\u7ea7\u6587\u4ef6\u5939", None))
         ___qtablewidgetitem1 = self.table_paste.horizontalHeaderItem(1)

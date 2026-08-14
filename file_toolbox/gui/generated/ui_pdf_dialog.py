@@ -40,12 +40,11 @@ class Ui_PDFGeneratorDialog:
         PDFGeneratorDialog.resize(900, 700)
         PDFGeneratorDialog.setMinimumSize(QSize(800, 600))
         self.mainLayout = QVBoxLayout(PDFGeneratorDialog)
-        self.mainLayout.setSpacing(10)
+        self.mainLayout.setSpacing(6)
         self.mainLayout.setObjectName("mainLayout")
-        self.mainLayout.setContentsMargins(15, 15, 15, 15)
+        self.mainLayout.setContentsMargins(9, 9, 9, 9)
         self.group_files = QGroupBox(PDFGeneratorDialog)
         self.group_files.setObjectName("group_files")
-        self.group_files.setMinimumSize(QSize(0, 180))
         self.filesLayout = QVBoxLayout(self.group_files)
         self.filesLayout.setObjectName("filesLayout")
         self.btnFileLayout = QHBoxLayout()
@@ -108,7 +107,7 @@ class Ui_PDFGeneratorDialog:
         self.group_settings = QGroupBox(PDFGeneratorDialog)
         self.group_settings.setObjectName("group_settings")
         self.settingsLayout = QVBoxLayout(self.group_settings)
-        self.settingsLayout.setSpacing(12)
+        self.settingsLayout.setSpacing(8)
         self.settingsLayout.setObjectName("settingsLayout")
         self.typeLayout = QHBoxLayout()
         self.typeLayout.setObjectName("typeLayout")
@@ -410,13 +409,13 @@ class Ui_PDFGeneratorDialog:
 
         self.btn_refresh = QPushButton(PDFGeneratorDialog)
         self.btn_refresh.setObjectName("btn_refresh")
-        self.btn_refresh.setMinimumSize(QSize(100, 35))
+        self.btn_refresh.setMinimumSize(QSize(100, 0))
 
         self.btnLayout.addWidget(self.btn_refresh)
 
         self.btn_generate = QPushButton(PDFGeneratorDialog)
         self.btn_generate.setObjectName("btn_generate")
-        self.btn_generate.setMinimumSize(QSize(100, 35))
+        self.btn_generate.setMinimumSize(QSize(100, 0))
         self.btn_generate.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }\n"
             "QPushButton:hover { background-color: #45a049; }\n"
@@ -427,7 +426,7 @@ class Ui_PDFGeneratorDialog:
 
         self.btn_cancel = QPushButton(PDFGeneratorDialog)
         self.btn_cancel.setObjectName("btn_cancel")
-        self.btn_cancel.setMinimumSize(QSize(80, 35))
+        self.btn_cancel.setMinimumSize(QSize(80, 0))
 
         self.btnLayout.addWidget(self.btn_cancel)
 
@@ -482,8 +481,11 @@ class Ui_PDFGeneratorDialog:
             QCoreApplication.translate("PDFGeneratorDialog", "\u53ef\u7f16\u8f91\u578b", None)
         )
         self.radio_type_image.setText(
+            QCoreApplication.translate("PDFGeneratorDialog", "图片型", None)
+        )
+        self.radio_type_image.setToolTip(
             QCoreApplication.translate(
-                "PDFGeneratorDialog", "\u56fe\u7247\u578b(\u4e0d\u53ef\u7f16\u8f91)", None
+                "PDFGeneratorDialog", "生成扫描/图片型 PDF,不可编辑", None
             )
         )
         self.label_dpi.setText(

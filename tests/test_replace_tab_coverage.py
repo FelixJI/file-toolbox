@@ -227,6 +227,47 @@ def test_execute_with_errors(dlg, monkeypatch, tmp_path):
     assert info_calls
 
 
+def test_execute_passes_keep_new_format_when_checked(dlg, monkeypatch, tmp_path):
+    """勾选"转换后保留新格式" → execute_replace 收到 keep_new_format=True。
+
+    回归:此前 _execute 从未读取该复选框,GUI 选项长期失效。
+    """
+    f1 = tmp_path / "a.txt"
+    f1.write_text("hello")
+    dlg.selected_files = [f1]
+    dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
+    dlg.ui.chk_keep_new_format.setChecked(True)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        dlg._svc,
+        "execute_replace",
+        lambda *a, **k: captured.update(k) or (0, 0, []),
+    )
+    dlg._execute()
+    assert captured.get("keep_new_format") is True
+
+
+def test_execute_defaults_keep_new_format_false_when_unchecked(dlg, monkeypatch, tmp_path):
+    """未勾选 → keep_new_format=False(保持默认行为)。"""
+    f1 = tmp_path / "a.txt"
+    f1.write_text("hello")
+    dlg.selected_files = [f1]
+    dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
+    dlg.ui.chk_keep_new_format.setChecked(False)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        dlg._svc,
+        "execute_replace",
+        lambda *a, **k: captured.update(k) or (0, 0, []),
+    )
+    dlg._execute()
+    assert captured.get("keep_new_format") is False
+
+
 # ---------------------------------------------------------------------------
 # _show_history
 # ---------------------------------------------------------------------------

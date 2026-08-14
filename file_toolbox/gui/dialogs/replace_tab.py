@@ -132,7 +132,9 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         if reply != QMessageBox.StandardButton.Yes:
             return
         success, total, errors = self._svc.execute_replace(
-            list(self.selected_files), self.operations
+            list(self.selected_files),
+            self.operations,
+            keep_new_format=self.ui.chk_keep_new_format.isChecked(),
         )
         # 历史记录已下沉 ContentReplaceService.execute_replace(注入了 history_store)
         QMessageBox.information(
