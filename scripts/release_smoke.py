@@ -23,7 +23,6 @@ def _sha256(path: Path) -> str:
 def _payload_names(version: str) -> set[str]:
     return {
         f"FileToolbox-{version}-full.nupkg",
-        "FileToolbox-Setup.exe",
         "FileToolbox-Portable.zip",
         "releases.win.json",
     }
@@ -57,8 +56,6 @@ def check_release_smoke(artifacts_dir: Path, version: str) -> None:
     full = artifacts_dir / f"FileToolbox-{version}-full.nupkg"
     with zipfile.ZipFile(full):
         pass
-    if (artifacts_dir / "FileToolbox-Setup.exe").stat().st_size <= 0:
-        raise ValueError("Setup asset is empty")
 
     checksum_records = _checksum_records(artifacts_dir / "checksums.txt")
     expected_records = {name: _sha256(artifacts_dir / name) for name in sorted(payload_names)}

@@ -31,8 +31,6 @@ class _UpdateInfo(Protocol):
 
 
 class _Manager(Protocol):
-    def get_is_portable(self) -> bool: ...
-
     def check_for_updates(self) -> object | None: ...
 
     def download_updates(
@@ -77,11 +75,6 @@ class VelopackUpdateCoordinator:
             try:
                 with forward_proxy_environment(self._forward_proxy):
                     manager = self._manager_factory(source)
-                    if manager.get_is_portable():
-                        return UpdateCheckResult(
-                            UpdateCheckStatus.FAILED,
-                            message="便携版不支持自动更新，请运行 Setup 安装版",
-                        )
                     update = manager.check_for_updates()
             except Exception as error:  # SDK/网络边界统一映射为项目结果
                 _logger.info("更新源不可用 source=%s: %s", source, error)

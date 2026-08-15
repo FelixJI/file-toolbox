@@ -118,13 +118,18 @@ def test_real_velopack_binding_construction_failure_is_observable() -> None:
     assert coordinator.check().status is UpdateCheckStatus.FAILED
 
 
-def test_portable_manager_requires_manual_setup_without_bridge() -> None:
-    manager = FakeManager(portable=True)
+def test_portable_manager_applies_updates_without_installer() -> None:
+    """便携是唯一发行形态，自更新不得再被阻断。"""
 
-    result = VelopackUpdateCoordinator(
-        feed_candidates=("http://unused.invalid/",),
+    manager = FakeManager(update=FakeUpdateInfo(), portable=True)
+
+    coordinator = VelopackUpdateCoordinator(
+        feed_candidates=("https://direct.invalid/feed/",),
         manager_factory=lambda _source: manager,
-    ).check()
+    )
+    result = coordinator.check()
+    applied = coordinator.download_and_apply()
 
-    assert result.status is UpdateCheckStatus.FAILED
-    assert result.message == "便携版不支持自动更新，请运行 Setup 安装版"
+    assert result.status is UpdateCheckStatus.AVAILABLE
+    assert applied.status is UpdateApplyStatus.APPLY_STARTED
+    assert manager.applied is manager.update

@@ -24,8 +24,6 @@ def _write_candidate(directory: Path, version: str) -> set[str]:
     full = directory / f"FileToolbox-{version}-full.nupkg"
     with zipfile.ZipFile(full, "w") as package:
         package.writestr("package/services/metadata/core-properties/x.psmdcp", b"meta")
-    setup = directory / "FileToolbox-Setup.exe"
-    setup.write_bytes(b"setup")
     feed = directory / "releases.win.json"
     feed.write_text(
         json.dumps(
@@ -44,7 +42,7 @@ def _write_candidate(directory: Path, version: str) -> set[str]:
         ),
         encoding="utf-8",
     )
-    payloads = {portable.name, full.name, setup.name, feed.name}
+    payloads = {portable.name, full.name, feed.name}
     (directory / "checksums.txt").write_text(
         "".join(f"{_sha256(directory / name)}  {name}\n" for name in sorted(payloads)),
         encoding="utf-8",
