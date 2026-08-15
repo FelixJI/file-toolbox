@@ -35,15 +35,16 @@ CLI 命令默认只预览计划，只有显式传入 `--yes` 才会执行。
 
 ### 使用发布包
 
-1. 新用户从 [Releases](https://github.com/FelixJI/file-toolbox/releases/latest) 下载
-   `FileToolbox-Setup.exe`；无需安装时可选 `FileToolbox-Portable.zip`。
-2. 按同一 Release 的 `checksums.txt` 校验 SHA-256，再运行 Setup 或解压 Portable。
-3. 安装版由 Velopack 在应用内检查、下载并应用更新；Portable 用户需要手动下载新版。
+1. 从 [Releases](https://github.com/FelixJI/file-toolbox/releases/latest) 下载
+   `FileToolbox-Portable.zip`，解压到可写目录后运行 `FileToolbox.exe`。
+2. 按同一 Release 的 `checksums.txt` 校验 SHA-256 后再运行。
+3. 便携版由 Velopack 在应用内检查、下载并应用更新；请将解压目录放在无需
+   管理员权限的可写位置，以保证自动更新可写回文件。
 
 PowerShell 校验示例：
 
 ```powershell
-Get-FileHash .\FileToolbox-Setup.exe -Algorithm SHA256
+Get-FileHash .\FileToolbox-Portable.zip -Algorithm SHA256
 ```
 
 ### 从源码运行
@@ -138,9 +139,9 @@ uv run python scripts/regen_ui.py --check
 
 ## 发布资产
 
-正式 Release 精确包含 Setup、Portable ZIP、Velopack full nupkg/feed、`checksums.txt`、
-`build-identity.json` 与 SPDX SBOM。版本与资产由自动化脚本生成；贡献者
-不应手改派生版本或手工创建正式 tag。
+正式 Release 精确包含 Portable ZIP、Velopack full nupkg/feed、`checksums.txt`、
+`build-identity.json` 与 SPDX SBOM，不生成 Setup 安装器。版本与资产由自动化脚本生成；
+贡献者不应手改派生版本或手工创建正式 tag。
 
 ## 参与贡献
 

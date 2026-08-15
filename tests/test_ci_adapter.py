@@ -65,8 +65,6 @@ def _archive(directory: Path, version: str) -> None:
     full = directory / f"FileToolbox-{version}-full.nupkg"
     with zipfile.ZipFile(full, "w") as package:
         package.writestr("package/services/metadata/core-properties/test.psmdcp", b"metadata")
-    setup = directory / "FileToolbox-Setup.exe"
-    setup.write_bytes(b"setup")
     feed = directory / "releases.win.json"
     full_sha = hashlib.sha256(full.read_bytes()).hexdigest()
     feed.write_text(
@@ -86,7 +84,7 @@ def _archive(directory: Path, version: str) -> None:
         ),
         encoding="utf-8",
     )
-    payloads = [full, setup, portable, feed]
+    payloads = [full, portable, feed]
     records = {
         path.name: {
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
