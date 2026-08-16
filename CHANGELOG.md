@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.6
+
+### Breaking Changes
+
+- 升级到 Python 3.13、升级全部依赖并修复 Dependabot 安全提醒 (#42) (8523354)
+
+### Features
+
+- **release:** 移除 Setup 安装器仅保留便携版自更新 (#43) (6cfd69a)
+
+### Bug Fixes
+
+- **pdf:** 加快引擎检测并修正生成态引擎显示 (#39) (84fa474)
+
 ## 0.2.5
 
 ### Features
