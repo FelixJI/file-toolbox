@@ -45,8 +45,9 @@ class BatchDialogMixin:
     SUPPORTED_FORMATS: set[str] = set()
     PREVIEW_DEBOUNCE_MS: int = 200  # 预览防抖(毫秒)
 
-    # 子类(QDialog 子类,如 PDFGeneratorDialog)必须提供 logger。
-    # 声明类型而非赋值:mypy 据此认定 self.logger 合法,且不在此引入实例属性。
+    # _stop_worker/_cleanup_batch_dialog 需要 logger。子类可显式提供(如
+    # PDFGeneratorDialog 的模块级类属性);未提供时由 _init_batch_dialog 兜底,
+    # 否则 closeEvent 清理会抛 AttributeError(旧版 FileRenamerDialog 即如此)。
     logger: logging.Logger
     # worker 可能是任意 QThread 子类(如 PdfGenerateWorker),运行期可为 None。
     # 声明类级类型,避免 mypy 从 self.worker = None 推断出过于窄的 None 类型。
@@ -54,6 +55,10 @@ class BatchDialogMixin:
 
     def _init_batch_dialog(self) -> None:
         """初始化批处理对话框功能（在__init__中调用）"""
+        # logger 兜底:实例属性而非 @property——property 与 Qt 元类在解释器退出期
+        # GC 交互有堆损坏风险(见 pdf_tab 中放弃 LoggableMixin 的同类注释)。
+        if not hasattr(self, "logger"):
+            self.logger = logging.getLogger(type(self).__module__)
         self.selected_files: list[Path] = []
         self.worker = None
         # 本 mixin 总是被混入 QDialog(本身是 QObject)。用 cast 如实表达
