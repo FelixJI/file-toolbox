@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+### Bug Fixes
+
+- **gui:** 修复关闭 Tab 报错、配置落位程序目录并增加冻结诊断留痕 (#46) (2688877)
+
 ## 0.2.6
 
 ### Breaking Changes
