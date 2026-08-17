@@ -445,3 +445,19 @@ def test_cleanup_batch_dialog(app):
     """_cleanup_batch_dialog 停 timer/worker/断信号(行 217-222)。"""
     dlg = _TestDialog()
     dlg._cleanup_batch_dialog()  # 不应抛
+
+
+def test_init_batch_dialog_provides_fallback_logger(app):
+    """回归:子类未提供 logger(旧版 FileRenamerDialog/ContentReplaceDialog)时,
+    _init_batch_dialog 按子类模块名兜底,_cleanup_batch_dialog 不再抛 AttributeError。"""
+
+    class _NoLogger(QObject, BatchDialogMixin):
+        SUPPORTED_FORMATS = set()
+
+        def __init__(self):
+            super().__init__()
+            self._init_batch_dialog()
+
+    dlg = _NoLogger()
+    assert dlg.logger.name == _NoLogger.__module__
+    dlg._cleanup_batch_dialog()  # 旧实现在此抛 AttributeError: no attribute 'logger'

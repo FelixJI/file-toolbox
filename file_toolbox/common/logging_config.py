@@ -19,6 +19,10 @@ _LOG_FILE_NAME = "file-toolbox.log"
 _MAX_LOG_BYTES = 5 * 1024 * 1024
 _BACKUP_COUNT = 5
 _HANDLER_MARKER = "_file_toolbox_file_handler"
+# 已记录"应用启动"行的 (日志文件, mode)(按二者去重:gui_entry 与 run_gui 各配置
+# 一次只留一行;CLI 先 mode=cli 再进 gui 子命令时保留各自的模式行;测试切换
+# tmp 目录换文件时各自保留)。
+_startup_line_key: tuple[Path, str] | None = None
 _hooks_installed = False
 _original_sys_excepthook = sys.excepthook
 _original_threading_excepthook = threading.excepthook
@@ -65,13 +69,16 @@ def configure_logging(*, mode: str) -> Path:
         app_logger.addHandler(matching_handler)
 
     _install_exception_hooks()
-    app_logger.info(
-        "应用启动 version=%s mode=%s platform=%s python=%s",
-        __version__,
-        mode,
-        platform.platform(),
-        platform.python_version(),
-    )
+    global _startup_line_key
+    if _startup_line_key != (log_file, mode):
+        _startup_line_key = (log_file, mode)
+        app_logger.info(
+            "应用启动 version=%s mode=%s platform=%s python=%s",
+            __version__,
+            mode,
+            platform.platform(),
+            platform.python_version(),
+        )
     return log_file
 
 
