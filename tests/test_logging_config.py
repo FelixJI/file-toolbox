@@ -34,6 +34,35 @@ def test_configure_logging_creates_single_rotating_utf8_log(monkeypatch, tmp_pat
     assert handlers[0].maxBytes > 0
 
 
+def test_configure_logging_dedups_startup_line_for_same_file(monkeypatch, tmp_path):
+    """gui_entry 与 run_gui 各配置一次,同一日志文件只留一行"应用启动"。"""
+    monkeypatch.chdir(tmp_path)
+
+    log_file = configure_logging(mode="test")
+    configure_logging(mode="test")
+    _flush_file_handlers()
+
+    content = log_file.read_text(encoding="utf-8")
+    assert content.count("应用启动") == 1
+
+
+def test_configure_logging_logs_startup_line_for_each_new_file(monkeypatch, tmp_path):
+    """切换日志文件(如测试切换 cwd)时,新文件保留各自的启动行。"""
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+
+    monkeypatch.chdir(first)
+    first_log = configure_logging(mode="test")
+    monkeypatch.chdir(second)
+    second_log = configure_logging(mode="test")
+    _flush_file_handlers()
+
+    assert first_log.read_text(encoding="utf-8").count("应用启动") == 1
+    assert second_log.read_text(encoding="utf-8").count("应用启动") == 1
+
+
 def test_uncaught_exception_hook_writes_traceback(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     log_file = configure_logging(mode="test")

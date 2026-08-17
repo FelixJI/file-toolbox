@@ -48,16 +48,35 @@ def prepare_gui_runtime(
 
 
 def main() -> None:
-    """运行 GUI；frozen 时先执行 Velopack hook，所有 GUI 形态使用程序目录数据根。"""
+    """运行 GUI;日志先于 Velopack hook 与 GUI 导入配置,启动各阶段留痕。"""
 
-    if getattr(sys, "frozen", False):
-        # 必须早于 Qt、logging、settings 等应用初始化。
-        import velopack
+    import logging
+    import time
 
-        velopack.App().run()
     with prepare_gui_runtime():
+        # 日志必须最先就绪:偶发启动卡死时,最后一个完成的阶段日志即卡死位置。
+        from file_toolbox.common.logging_config import configure_logging
+
+        logger = logging.getLogger(__name__)
+        log_file = configure_logging(mode="gui")
+        logger.info(
+            "GUI 入口 frozen=%s pid=%s exe=%s log=%s",
+            bool(getattr(sys, "frozen", False)),
+            os.getpid(),
+            sys.executable,
+            log_file,
+        )
+        if getattr(sys, "frozen", False):
+            # 必须早于 Qt、settings 等应用初始化(logging 只写文件,不属于应用状态)。
+            import velopack
+
+            t0 = time.perf_counter()
+            velopack.App().run()
+            logger.info("Velopack hook 完成 耗时=%.0fms", (time.perf_counter() - t0) * 1000)
+        t0 = time.perf_counter()
         from file_toolbox.gui.main_window import run_gui
 
+        logger.info("GUI 模块导入完成 耗时=%.0fms", (time.perf_counter() - t0) * 1000)
         run_gui()
 
 

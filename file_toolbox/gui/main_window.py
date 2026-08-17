@@ -2,6 +2,7 @@
 
 import logging
 import sys
+import time
 
 from PySide6.QtCore import QMetaObject, Qt, QTimer
 from PySide6.QtGui import QCloseEvent
@@ -30,6 +31,7 @@ from file_toolbox.gui.dialogs import (
     InvoiceTab,
     PDFGeneratorDialog,
 )
+from file_toolbox.gui.freeze_watchdog import FreezeWatchdog
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
 from file_toolbox.updater import create_update_coordinator
 from file_toolbox.updater.coordinator import UpdateCoordinator
@@ -41,6 +43,16 @@ from file_toolbox.updater.models import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _construct_tab[T](cls: type[T]) -> T:
+    """构造一个功能 Tab 并记录耗时(偶发启动卡顿时定位到具体 Tab)。"""
+    t0 = time.perf_counter()
+    tab = cls()
+    _logger.debug(
+        "Tab 构造完成 tab=%s 耗时=%.0fms", cls.__name__, (time.perf_counter() - t0) * 1000
+    )
+    return tab
 
 
 class MainWindow(QMainWindow):
@@ -72,12 +84,12 @@ class MainWindow(QMainWindow):
         # 6 个功能 Tab + 关于
         tabs = QTabWidget()
         self._tabs = tabs
-        self._rename_tab = FileRenamerDialog()
-        self._mkdir_tab = BatchFolderCreatorDialog()
-        self._pdf_tab = PDFGeneratorDialog()
-        self._replace_tab = ContentReplaceDialog()
-        self._attendance_tab = AttendanceTab()
-        self._invoice_tab = InvoiceTab()
+        self._rename_tab = _construct_tab(FileRenamerDialog)
+        self._mkdir_tab = _construct_tab(BatchFolderCreatorDialog)
+        self._pdf_tab = _construct_tab(PDFGeneratorDialog)
+        self._replace_tab = _construct_tab(ContentReplaceDialog)
+        self._attendance_tab = _construct_tab(AttendanceTab)
+        self._invoice_tab = _construct_tab(InvoiceTab)
         tabs.addTab(self._rename_tab, "重命名")
         tabs.addTab(self._mkdir_tab, "建文件夹")
         tabs.addTab(self._pdf_tab, "生成PDF")
@@ -283,11 +295,18 @@ def run_gui() -> None:
 
     from PySide6.QtWidgets import QApplication
 
-    configure_logging(mode="gui")
+    log_file = configure_logging(mode="gui")
     _logger.info("GUI 初始化")
+    watchdog = FreezeWatchdog(log_file)
+    t0 = time.perf_counter()
     app = QApplication.instance() or QApplication(sys.argv)
+    _logger.info("QApplication 就绪 耗时=%.0fms", (time.perf_counter() - t0) * 1000)
+    watchdog.start(app)
+    t0 = time.perf_counter()
     win = MainWindow()
+    _logger.info("主窗口构造完成 耗时=%.0fms", (time.perf_counter() - t0) * 1000)
     win.show()
+    _logger.info("进入事件循环")
     sys.exit(app.exec())
 
 

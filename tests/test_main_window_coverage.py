@@ -171,7 +171,7 @@ def test_close_event_respects_attendance_pending_state(win, monkeypatch):
     win._attendance_tab._close_pending = False
 
 
-def test_run_gui_creates_and_shows_window(monkeypatch):
+def test_run_gui_creates_and_shows_window(monkeypatch, tmp_path):
     import sys
 
     modes: list[str] = []
@@ -179,7 +179,9 @@ def test_run_gui_creates_and_shows_window(monkeypatch):
     fake_window = MagicMock()
     fake_window.show.side_effect = lambda: shown.append(1)
     monkeypatch.setattr(mw_mod, "MainWindow", lambda: fake_window)
-    monkeypatch.setattr(mw_mod, "configure_logging", lambda *, mode: modes.append(mode))
+    monkeypatch.setattr(
+        mw_mod, "configure_logging", lambda *, mode: modes.append(mode) or tmp_path / "log"
+    )
     real_app = QApplication.instance() or QApplication([])
     monkeypatch.setattr(real_app, "exec", lambda: 0)
     exited: list[int] = []
