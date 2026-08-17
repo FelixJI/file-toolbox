@@ -70,8 +70,9 @@ uv run file-toolbox rename --dir ./samples --op "add_suffix:text=_done" --yes
 
 ### 日志与故障排查
 
-GUI 把运行信息写入 `%USERPROFILE%\.file_toolbox\logs\file-toolbox.log`；CLI 保持工作目录隔离，
-写入当前目录的 `.file_toolbox/logs/file-toolbox.log`。日志按 5 MiB 自动轮转并保留最近 5 份；
+GUI 把运行信息写入程序所在目录的 `.file_toolbox/logs/file-toolbox.log`（便携形态下数据
+跟随程序一起携带，不落在用户主目录）；CLI 保持工作目录隔离，写入当前目录的
+`.file_toolbox/logs/file-toolbox.log`。日志按 5 MiB 自动轮转并保留最近 5 份；
 “关于”页可直接打开日志目录。界面出现“错误编号”时，请在反馈问题时附上该编号和对应时段的日志。
 
 日志会记录操作类型、文件路径、异常调用栈和运行环境，不记录文档单元格、正文或发票内容。

@@ -1,6 +1,7 @@
 """工具箱持久数据路径。
 
-CLI 默认保持 cwd-scoped ``.file_toolbox/``；GUI 入口显式切换为 home-scoped policy。
+CLI 默认保持 cwd-scoped ``.file_toolbox/``；GUI 入口显式切换为程序目录 policy
+(便携发行形态下数据跟随程序所在目录，而不是用户 home)。
 业务模块只通过本文件的 ``get_*_dir`` Interface 访问路径，不感知启动形态。
 """
 
@@ -33,12 +34,12 @@ class CliDataRootPolicy:
 
 @dataclass(frozen=True)
 class GuiDataRootPolicy:
-    """GUI 数据始终留在用户 home，不随 Velopack ``current/`` 漂移。"""
+    """GUI 数据固定在程序目录(Velopack ``current/`` 之外)，随便携包整体携带。"""
 
-    home: Path
+    base_dir: Path
 
     def data_root(self) -> Path:
-        return self.home / _DIR_NAME
+        return self.base_dir / _DIR_NAME
 
 
 _POLICY: ContextVar[DataRootPolicy | None] = ContextVar(
