@@ -70,12 +70,17 @@ class TestUpdateBanner:
 
 
 class TestUpdateWorker:
+    # 前 4 个用例在主线程直调 worker 方法验证信号载荷:worker 亲和性在自身
+    # 线程,普通函数槽的 Auto 连接会被 Queued 到未启动的 worker 队列,须显式
+    # 直连;真实跨线程投递由 test_check_works_via_real_queued_invocation 覆盖。
+    _DIRECT = Qt.ConnectionType.DirectConnection
+
     def test_check_emits_project_result(self, app):
         worker = UpdateWorker(FakeCoordinator(_available()))
         checked: list[UpdateCheckResult] = []
         ready: list[UpdateCheckResult] = []
-        worker.checked.connect(checked.append)
-        worker.ready.connect(ready.append)
+        worker.checked.connect(checked.append, self._DIRECT)
+        worker.ready.connect(ready.append, self._DIRECT)
         worker.do_check()
         assert checked == [_available()]
         assert ready == [_available()]
@@ -84,7 +89,7 @@ class TestUpdateWorker:
         result = UpdateCheckResult(UpdateCheckStatus.LATEST)
         worker = UpdateWorker(FakeCoordinator(result))
         ready: list[UpdateCheckResult] = []
-        worker.ready.connect(ready.append)
+        worker.ready.connect(ready.append, self._DIRECT)
         worker.do_check()
         assert ready == []
 
@@ -95,7 +100,7 @@ class TestUpdateWorker:
 
         worker = UpdateWorker(BrokenCoordinator(_available()))
         checked: list[UpdateCheckResult] = []
-        worker.checked.connect(checked.append)
+        worker.checked.connect(checked.append, self._DIRECT)
         worker.do_check()
         assert checked[0].status is UpdateCheckStatus.FAILED
 
@@ -103,8 +108,8 @@ class TestUpdateWorker:
         worker = UpdateWorker(FakeCoordinator(_available()))
         progress: list[int] = []
         applied: list[UpdateApplyResult] = []
-        worker.progress.connect(progress.append)
-        worker.applied.connect(applied.append)
+        worker.progress.connect(progress.append, self._DIRECT)
+        worker.applied.connect(applied.append, self._DIRECT)
         worker.do_download_and_apply()
         assert progress == [50, 100]
         assert applied == [UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)]
