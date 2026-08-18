@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         # --- 自更新:状态栏 banner + 后台 worker(仅便携 exe 形态启用检查) ---
         self._update_banner = UpdateBanner()
         self.statusBar().addPermanentWidget(self._update_banner)
-        self._update_worker = UpdateWorker(coordinator or create_update_coordinator(), self)
+        self._update_worker = UpdateWorker(coordinator or create_update_coordinator())
         self._update_worker.ready.connect(self._on_update_ready)
         self._update_worker.progress.connect(self._on_update_progress)
         self._update_worker.applied.connect(self._on_update_applied)

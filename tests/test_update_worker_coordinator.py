@@ -4,6 +4,10 @@ from collections.abc import Callable
 
 import pytest
 
+pytest.importorskip("PySide6")
+
+from PySide6.QtCore import Qt
+
 from file_toolbox.gui.updater_widget import UpdateWorker
 from file_toolbox.updater import (
     UpdateApplyResult,
@@ -11,8 +15,6 @@ from file_toolbox.updater import (
     UpdateCheckResult,
     UpdateCheckStatus,
 )
-
-pytest.importorskip("PySide6")
 
 
 class FakeCoordinator:
@@ -40,9 +42,11 @@ def test_worker_exposes_only_coordinator_result_models() -> None:
     checks: list[UpdateCheckResult] = []
     progress: list[int] = []
     applies: list[UpdateApplyResult] = []
-    worker.checked.connect(checks.append)
-    worker.progress.connect(progress.append)
-    worker.applied.connect(applies.append)
+    # 主线程直调方法验证信号载荷:worker 亲和性在自身线程,普通函数槽的
+    # Auto 连接会被 Queued 到未启动的 worker 队列,须显式 DirectConnection。
+    worker.checked.connect(checks.append, Qt.ConnectionType.DirectConnection)
+    worker.progress.connect(progress.append, Qt.ConnectionType.DirectConnection)
+    worker.applied.connect(applies.append, Qt.ConnectionType.DirectConnection)
 
     worker.do_check()
     worker.do_download_and_apply()

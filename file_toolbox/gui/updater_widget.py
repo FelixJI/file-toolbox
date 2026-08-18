@@ -2,9 +2,14 @@
 
 线程模型(QThread 事件循环):
   - 检查:主窗口 start() → run() → exec() 启动事件循环;
-         主窗口用 invokeMethod(do_check, QueuedConnection) 投递检查。
+         主窗口用 invokeMethod(do_check, QueuedConnection) 投递。
   - 下载/应用:主窗口用 invokeMethod(do_download_and_apply, QueuedConnection) 投递。
   两者都在 worker 线程执行,不阻塞 UI。结果模型和 progress 跨线程经信号回主线程。
+
+亲和性注意:queued 方法投递按"接收者对象的亲和性线程"派发,而 QThread 对象
+默认亲和于创建线程(主线程)。worker 构造时必须 moveToThread(self),且不能设
+parent(带 parent 的 QObject 禁止跨线程移动);否则投递的 do_check 会被主线程
+事件循环取出、在主线程同步执行网络检查,冻结 GUI 直至网络超时。
 """
 
 from __future__ import annotations
@@ -66,6 +71,9 @@ class UpdateWorker(QThread):
       # 用户点击后:
       QMetaObject.invokeMethod(worker, "do_download_and_apply",
                                Qt.ConnectionType.QueuedConnection)
+
+    生命周期:不得设 parent(亲和性约束,见模块 docstring);由 MainWindow 属性
+    引用保活,closeEvent 中 quit/wait 收尾。
     """
 
     ready = Signal(object)  # UpdateCheckResult
@@ -73,10 +81,12 @@ class UpdateWorker(QThread):
     applied = Signal(object)  # UpdateApplyResult
     checked = Signal(object)  # UpdateCheckResult
 
-    def __init__(self, coordinator: UpdateCoordinator, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+    def __init__(self, coordinator: UpdateCoordinator) -> None:
+        super().__init__()
         self._coordinator = coordinator
         self._cancel_requested = Event()
+        # queued 投递按接收者亲和性派发;移入自身线程后 do_check 才在 worker 执行。
+        self.moveToThread(self)
 
     def run(self) -> None:
         """启动事件循环,等待方法投递(do_check / do_download)。"""
