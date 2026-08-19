@@ -82,6 +82,61 @@ def test_tab_tools_mapping(win):
     ]
 
 
+def test_only_first_tab_constructed_initially(win):
+    """首屏只构造重命名 Tab:其余 Tab 属性为 None,但占位页保持标签/数量。"""
+
+    assert isinstance(win._rename_tab, mw_mod.FileRenamerDialog)
+    assert win._replace_tab is None
+    assert win._about_tab is None
+    assert win._tabs.count() == 7
+    assert [win._tabs.tabText(i) for i in range(7)] == [
+        "重命名",
+        "建文件夹",
+        "生成PDF",
+        "内容替换",
+        "考勤汇总",
+        "发票识别",
+        "关于",
+    ]
+
+
+def test_lazy_tab_materialized_on_switch(win):
+    """首次切换到懒 Tab:原位替换占位页,位置/标签不变且只构造一次。"""
+
+    win._tabs.setCurrentIndex(3)
+    assert isinstance(win._replace_tab, mw_mod.ContentReplaceDialog)
+    assert win._tabs.count() == 7
+    assert win._tabs.tabText(3) == "内容替换"
+    assert win._tabs.widget(3) is win._replace_tab
+    assert win._tabs.currentIndex() == 3
+    # 已构造的 Tab 不重复构造
+    before = win._replace_tab
+    win._tabs.setCurrentIndex(0)
+    win._tabs.setCurrentIndex(3)
+    assert win._replace_tab is before
+
+
+def test_close_event_skips_unconstructed_lazy_tabs(win, monkeypatch):
+    """存在未构造懒 Tab 时关闭主窗口:跳过未实例化 Tab,不抛错。"""
+
+    assert win._attendance_tab is None
+    win.closeEvent(QCloseEvent())  # 不抛错即通过
+    assert win._lazy_specs  # 未切换过的 Tab 仍未构造
+
+
+def test_about_tab_check_signal_wired_after_lazy_construction(win, monkeypatch):
+    """关于页懒构造后 check_requested 信号正确连接到手动检查流程。"""
+
+    starts: list[int] = []
+    monkeypatch.setattr(win._update_worker, "start", lambda: starts.append(1))
+    monkeypatch.setattr(win, "_trigger_check", lambda: None)
+    win._tabs.setCurrentIndex(6)
+    assert win._about_tab is not None
+    win._about_tab.check_requested.emit()
+    assert starts == [1]
+    assert win._manual_check_pending is True
+
+
 def test_trigger_check_noop_when_worker_not_running(win, monkeypatch):
     invoked: list[int] = []
     monkeypatch.setattr(QMetaObject, "invokeMethod", lambda *_args: invoked.append(1))
@@ -138,6 +193,7 @@ def test_close_event_stops_update_worker(win, monkeypatch):
     worker = MagicMock()
     worker.isRunning.return_value = True
     win._update_worker = worker
+    win._materialize_all_tabs()
     for tab in (
         win._rename_tab,
         win._mkdir_tab,
@@ -154,6 +210,7 @@ def test_close_event_stops_update_worker(win, monkeypatch):
 
 
 def test_close_event_respects_attendance_pending_state(win, monkeypatch):
+    win._materialize_all_tabs()
     for tab in (
         win._rename_tab,
         win._mkdir_tab,

@@ -81,23 +81,37 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
-        # 6 个功能 Tab + 关于
+        # 6 个功能 Tab + 关于:仅首屏 Tab 即时构造,其余懒构造。
+        # 打包形态下真实平台主窗口构造可达 ~1.7s,大头是首个控件初始化链
+        # 之后的各 Tab 陆续构造;懒掉非首屏 Tab 让首帧只付首 Tab 的成本。
         tabs = QTabWidget()
         self._tabs = tabs
         self._rename_tab = _construct_tab(FileRenamerDialog)
-        self._mkdir_tab = _construct_tab(BatchFolderCreatorDialog)
-        self._pdf_tab = _construct_tab(PDFGeneratorDialog)
-        self._replace_tab = _construct_tab(ContentReplaceDialog)
-        self._attendance_tab = _construct_tab(AttendanceTab)
-        self._invoice_tab = _construct_tab(InvoiceTab)
         tabs.addTab(self._rename_tab, "重命名")
-        tabs.addTab(self._mkdir_tab, "建文件夹")
-        tabs.addTab(self._pdf_tab, "生成PDF")
-        tabs.addTab(self._replace_tab, "内容替换")
-        tabs.addTab(self._attendance_tab, "考勤汇总")
-        tabs.addTab(self._invoice_tab, "发票识别")
-        self._about_tab = AboutTab()
-        tabs.addTab(self._about_tab, "关于")
+        self._mkdir_tab: BatchFolderCreatorDialog | None = None
+        self._pdf_tab: PDFGeneratorDialog | None = None
+        self._replace_tab: ContentReplaceDialog | None = None
+        self._attendance_tab: AttendanceTab | None = None
+        self._invoice_tab: InvoiceTab | None = None
+        self._about_tab: AboutTab | None = None
+        # 懒构造登记:index -> (标签文本, Tab 工厂, 属性名);占位页被真实 Tab 原位替换。
+        self._lazy_specs: dict[int, tuple[str, type[QWidget], str]] = {
+            index: (label, factory, attr)
+            for index, (label, factory, attr) in enumerate(
+                [
+                    ("", FileRenamerDialog, "_rename_tab"),
+                    ("建文件夹", BatchFolderCreatorDialog, "_mkdir_tab"),
+                    ("生成PDF", PDFGeneratorDialog, "_pdf_tab"),
+                    ("内容替换", ContentReplaceDialog, "_replace_tab"),
+                    ("考勤汇总", AttendanceTab, "_attendance_tab"),
+                    ("发票识别", InvoiceTab, "_invoice_tab"),
+                    ("关于", AboutTab, "_about_tab"),
+                ]
+            )
+            if index != 0
+        }
+        for label, _factory, _attr in self._lazy_specs.values():
+            tabs.addTab(QWidget(), label)
         # 各 Tab 对应的历史工具名;"关于"页无历史 → None(按钮禁用)
         self._tab_tools: list[str | None] = [
             "rename",
@@ -128,21 +142,51 @@ class MainWindow(QMainWindow):
         self._update_dialog: QProgressDialog | None = None
         self._download_cancelled = False  # 用户取消下载后抑制后续 verified/failed 弹窗
 
+        self._update_worker.checked.connect(self._on_update_checked)
+        self._manual_check_pending = False  # 区分手动 vs 自动检查(关于页懒构造后连接)
+
         if getattr(sys, "frozen", False):  # pragma: no cover
-            # 仅 PyInstaller/Velopack 形态自动检查；开发态仍可从关于页手动检查。
+            # 仅 PyInstaller/Velopack 形态自动检查;开发态仍可从关于页手动检查。
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
-
-        # 关于页手动检查更新:AboutTab 请求 → 投递 worker → 结果回显
-        self._about_tab.check_requested.connect(self._on_check_requested)
-        self._update_worker.checked.connect(self._on_update_checked)
-        self._manual_check_pending = False  # 区分手动 vs 自动检查
 
         # 历史按钮初始状态跟随当前(首个)标签页
         self._on_tab_changed(self._tabs.currentIndex())
 
+    def _ensure_tab(self, index: int) -> None:
+        """懒构造:用真实 Tab 原位替换占位页(标签与位置不变)。
+
+        blockSignals 防止 removeTab/insertTab 期间 currentChanged 跳到别的
+        占位页触发连锁构造;结束后恢复原 currentIndex(即被构造的 Tab)。
+        """
+
+        spec = self._lazy_specs.get(index)
+        if spec is None:
+            return
+        label, factory, attr = spec
+        del self._lazy_specs[index]
+        tab = _construct_tab(factory)
+        setattr(self, attr, tab)
+        current = self._tabs.currentIndex()
+        self._tabs.blockSignals(True)
+        self._tabs.removeTab(index)
+        self._tabs.insertTab(index, tab, label)
+        self._tabs.setCurrentIndex(current)
+        self._tabs.blockSignals(False)
+        if isinstance(tab, AboutTab):
+            # 关于页手动检查更新:AboutTab 请求 → 投递 worker → 结果回显
+            tab.check_requested.connect(self._on_check_requested)
+
+    def _materialize_all_tabs(self) -> None:
+        """立即构造全部懒 Tab(测试与预热场景使用)。"""
+
+        for index in sorted(self._lazy_specs):
+            self._ensure_tab(index)
+
     def _on_tab_changed(self, index: int) -> None:
-        """标签页切换:更新历史按钮可用状态(关于页无历史 → 禁用)。"""
+        """标签页切换:先补建懒 Tab,再更新历史按钮可用状态(关于页无历史 → 禁用)。"""
+
+        self._ensure_tab(index)
         tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
         self.btn_history.setEnabled(tool is not None)
 
@@ -181,16 +225,19 @@ class MainWindow(QMainWindow):
         if not self._manual_check_pending:
             return
         self._manual_check_pending = False
+        about = self._about_tab
+        if about is None:
+            return  # 手动检查必经关于页,理论上已构造;防御懒构造态异常路径
         if result.status is UpdateCheckStatus.AVAILABLE:
-            self._about_tab.display_check_result(
+            about.display_check_result(
                 "available", f"🆕 发现新版本 {result.version}(点击底部提示更新)"
             )
         elif result.status is UpdateCheckStatus.FAILED:
-            self._about_tab.display_check_result(
+            about.display_check_result(
                 "failed", f"⚠ {result.message or '检查更新失败,请检查网络或代理设置'}"
             )
         else:  # latest
-            self._about_tab.display_check_result("latest", f"✓ 当前为最新版本 v{VERSION}")
+            about.display_check_result("latest", f"✓ 当前为最新版本 v{VERSION}")
 
     def _on_update_ready(self, result: UpdateCheckResult) -> None:
         """检查到新版 → 状态栏 banner 提示。"""
@@ -277,13 +324,16 @@ class MainWindow(QMainWindow):
             self._invoice_tab,
             self._about_tab,
         ):
-            if hasattr(tab, "closeEvent"):
-                # 触发各 tab 的清理(吞掉异常避免一个 tab 清理失败影响其余)
-                try:
-                    tab.closeEvent(event)
-                except Exception:
-                    _logger.exception("关闭 Tab 失败 tab=%s", type(tab).__name__)
-        if self._attendance_tab.close_pending:
+            # 懒构造 Tab 可能尚未实例化(用户未切换过),无实例即无清理
+            if tab is None or not hasattr(tab, "closeEvent"):
+                continue
+            # 触发各 tab 的清理(吞掉异常避免一个 tab 清理失败影响其余)
+            try:
+                tab.closeEvent(event)
+            except Exception:
+                _logger.exception("关闭 Tab 失败 tab=%s", type(tab).__name__)
+        attendance = self._attendance_tab
+        if attendance is not None and attendance.close_pending:
             event.ignore()
             return
         super().closeEvent(event)
