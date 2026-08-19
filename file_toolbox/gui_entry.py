@@ -57,7 +57,10 @@ def main() -> None:
         # 日志必须最先就绪:偶发启动卡死时,最后一个完成的阶段日志即卡死位置。
         from file_toolbox.common.logging_config import configure_logging
 
-        logger = logging.getLogger(__name__)
+        # 不能用 __name__:作为入口执行(python -m file_toolbox.gui_entry 或
+        # PyInstaller 入口脚本)时 __name__ 是 "__main__",对应的 logger 不在配置了
+        # 文件 handler 的 file_toolbox 树下,启动各阶段留痕会静默丢失。
+        logger = logging.getLogger("file_toolbox.gui_entry")
         log_file = configure_logging(mode="gui")
         logger.info(
             "GUI 入口 frozen=%s pid=%s exe=%s log=%s",
