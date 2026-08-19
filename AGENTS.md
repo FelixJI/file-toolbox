@@ -65,7 +65,7 @@
 ## 项目架构与独特约束
 
 - 本仓是 Python CLI + PySide6 GUI 文件工具。批量重命名、PDF 等核心功能可跨平台；Word/Excel/PPT 转换及替换依赖 Windows Office/WPS COM，禁止把这部分宣称为跨平台或在非 Windows CI 伪造通过。
-- 权威自动化入口是 `scripts/automation.py`，由它读取 `.ci/project.json`：`uv sync --frozen --all-extras`，release contract、Ruff、mypy、UI 生成校验，两套 pytest 覆盖率门禁（不低于 90%）、测试数量基线、`uv build`，以及真实 PyInstaller release build/smoke。
+- 权威自动化入口是 `scripts/automation.py`，由它读取 `.ci/project.json`：`uv sync --frozen --all-extras`，release contract、Ruff、mypy、UI 生成校验，两套 pytest 覆盖率门禁（不低于 90%）、测试数量基线、`uv build`，以及真实 Nuitka release build/smoke。
 - `file_toolbox/gui/generated/` 由 `.ui` 经 `scripts/regen_ui.py` 生成，禁止手改或用全仓格式化破坏。UI 变更同时修改源 `.ui`、重新生成并执行 `--check`。
 - 唯一版本源是 `pyproject.toml [project].version`；`uv.lock` 的 editable package 版本和运行时 metadata 是派生值。不要新增 `version.txt` 或手打 tag。
 - Velopack 发布契约固定为 `FileToolbox-{version}-full.nupkg`、`FileToolbox-Portable.zip`、`releases.win.json`、`checksums.txt`、`SBOM.spdx.json`、`build-identity.json`；checksums/SBOM/identity 必须绑定同一精确资产集合。发行形态只有便携包（vpk `--noInst`，不生成 Setup 安装器）；应用内更新只使用 Velopack，便携运行态同样由 Velopack 自更新，不得重新引入安装器或自研下载链。

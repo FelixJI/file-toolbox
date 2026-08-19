@@ -146,7 +146,7 @@ class MainWindow(QMainWindow):
         self._manual_check_pending = False  # 区分手动 vs 自动检查(关于页懒构造后连接)
 
         if getattr(sys, "frozen", False):  # pragma: no cover
-            # 仅 PyInstaller/Velopack 形态自动检查;开发态仍可从关于页手动检查。
+            # 仅打包产物(Nuitka/Velopack)形态自动检查;开发态仍可从关于页手动检查。
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
 

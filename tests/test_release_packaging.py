@@ -1,4 +1,4 @@
-"""PyInstaller/vpk release exact-set packaging seam。"""
+"""Nuitka/vpk release exact-set packaging seam。"""
 
 import hashlib
 import json

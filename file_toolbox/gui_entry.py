@@ -1,4 +1,4 @@
-"""GUI 独立入口（供 PyInstaller/Velopack 打包）。"""
+"""GUI 独立入口（供 Nuitka/Velopack 打包）。"""
 
 from __future__ import annotations
 

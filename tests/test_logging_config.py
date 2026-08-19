@@ -81,7 +81,7 @@ def test_uncaught_exception_hook_writes_traceback(monkeypatch, tmp_path):
 def test_gui_entry_startup_trace_logged_when_run_as_main(monkeypatch, tmp_path):
     """gui_entry 以 __main__ 执行时启动留痕必须落在 file_toolbox 日志树。
 
-    python -m file_toolbox.gui_entry 与 PyInstaller 入口脚本都以 __main__ 执行
+    python -m file_toolbox.gui_entry 与 Nuitka 入口脚本都以 __main__ 执行
     gui_entry,若用 __name__ 取 logger 则挂在 root 下、文件 handler 收不到,
     启动卡死诊断留痕(GUI 入口/模块导入)会静默丢失。
     """
