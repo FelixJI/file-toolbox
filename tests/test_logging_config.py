@@ -76,3 +76,40 @@ def test_uncaught_exception_hook_writes_traceback(monkeypatch, tmp_path):
     content = log_file.read_text(encoding="utf-8")
     assert "未捕获异常" in content
     assert "RuntimeError: 顶层崩溃样本" in content
+
+
+def test_gui_entry_startup_trace_logged_when_run_as_main(monkeypatch, tmp_path):
+    """gui_entry 以 __main__ 执行时启动留痕必须落在 file_toolbox 日志树。
+
+    python -m file_toolbox.gui_entry 与 PyInstaller 入口脚本都以 __main__ 执行
+    gui_entry,若用 __name__ 取 logger 则挂在 root 下、文件 handler 收不到,
+    启动卡死诊断留痕(GUI 入口/模块导入)会静默丢失。
+    """
+
+    import runpy
+
+    import file_toolbox.common.logging_config as logging_config
+    import file_toolbox.gui.main_window as main_window
+
+    # 隔离:main() 内延迟导入引用同一模块对象,patch 生效;真实 GUI 不启动。
+    monkeypatch.setattr(logging_config, "configure_logging", lambda *, mode: tmp_path / "log")
+    monkeypatch.setattr(main_window, "run_gui", lambda: None)
+
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    app_logger = logging.getLogger("file_toolbox")
+    capture = _Capture()
+    monkeypatch.setattr(app_logger, "level", logging.DEBUG)
+    app_logger.addHandler(capture)
+    try:
+        runpy.run_module("file_toolbox.gui_entry", run_name="__main__")
+    finally:
+        app_logger.removeHandler(capture)
+
+    messages = [r.getMessage() for r in records if r.name == "file_toolbox.gui_entry"]
+    assert any("GUI 入口" in m for m in messages)
+    assert any("GUI 模块导入完成" in m for m in messages)
