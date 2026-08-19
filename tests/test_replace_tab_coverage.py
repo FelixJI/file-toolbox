@@ -1,4 +1,10 @@
-"""replace_tab GUI 测试:操作增删改、预览、执行、历史(mock 输入对话框)。"""
+"""replace_tab GUI 测试:操作增删改、预览、执行、历史(mock 输入对话框)。
+
+预览/执行已异步化(worker 后台线程):涉及 service 结果的断言需泵送事件
+等待 worker 完成信号(queued)回到主线程。
+"""
+
+import time
 
 import pytest
 
@@ -22,7 +28,21 @@ def app():
 def dlg(app, tmp_path):
     d = ContentReplaceDialog()
     d._history = JsonHistoryStore(tmp_path)
-    return d
+    yield d
+    # 异步 worker 兜底:确保测试结束时没有仍运行的线程(避免 QThread 随对话框
+    # 析构触发 Windows 堆损坏)
+    d._stop_worker(5000)
+
+
+def _pump_until(app, cond, timeout_s: float = 5.0) -> bool:
+    """泵送事件直到 cond() 为真(等待 worker 信号回主线程);超时返回 False。"""
+    deadline = time.monotonic() + timeout_s
+    while not cond():
+        if time.monotonic() > deadline:
+            return False
+        app.processEvents()
+        time.sleep(0.01)
+    return True
 
 
 SIMPLE = ReplaceOperationType.SIMPLE_REPLACE.value
@@ -158,13 +178,15 @@ def test_do_refresh_preview_invalid(dlg, monkeypatch):
     assert warned
 
 
-def test_do_refresh_preview_renders(dlg, monkeypatch, tmp_path):
+def test_do_refresh_preview_renders(dlg, app, monkeypatch, tmp_path):
     f1 = tmp_path / "a.txt"
     f1.write_text("hello world")
     dlg.selected_files = [f1]
     dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
     dlg._do_refresh_preview()
-    assert dlg.ui.table_preview.rowCount() == 1
+    assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1), (
+        "预览 worker 应完成并渲染"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +205,7 @@ def test_execute_no_files(dlg, monkeypatch):
     assert info_calls
 
 
-def test_execute_confirm(dlg, monkeypatch, tmp_path):
+def test_execute_confirm(dlg, app, monkeypatch, tmp_path):
     f1 = tmp_path / "a.txt"
     f1.write_text("hello")
     dlg.selected_files = [f1]
@@ -196,6 +218,7 @@ def test_execute_confirm(dlg, monkeypatch, tmp_path):
         lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
     )
     dlg._execute()
+    assert _pump_until(app, lambda: info_calls), "执行 worker 应完成并弹提示"
     assert f1.read_text() == "hi"
     assert info_calls
 
@@ -210,7 +233,7 @@ def test_execute_declined(dlg, monkeypatch, tmp_path):
     assert f1.read_text() == "hello"  # 未改
 
 
-def test_execute_with_errors(dlg, monkeypatch, tmp_path):
+def test_execute_with_errors(dlg, app, monkeypatch, tmp_path):
     """执行有错误 → 错误信息拼入提示(行 145-146)。"""
     f1 = tmp_path / "a.txt"
     f1.write_text("hello")
@@ -224,10 +247,11 @@ def test_execute_with_errors(dlg, monkeypatch, tmp_path):
         lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok,
     )
     dlg._execute()
+    assert _pump_until(app, lambda: info_calls), "执行 worker 应完成并弹提示"
     assert info_calls
 
 
-def test_execute_passes_keep_new_format_when_checked(dlg, monkeypatch, tmp_path):
+def test_execute_passes_keep_new_format_when_checked(dlg, app, monkeypatch, tmp_path):
     """勾选"转换后保留新格式" → execute_replace 收到 keep_new_format=True。
 
     回归:此前 _execute 从未读取该复选框,GUI 选项长期失效。
@@ -238,7 +262,12 @@ def test_execute_passes_keep_new_format_when_checked(dlg, monkeypatch, tmp_path)
     dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
     dlg.ui.chk_keep_new_format.setChecked(True)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    info_calls = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
+    )
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         dlg._svc,
@@ -246,10 +275,13 @@ def test_execute_passes_keep_new_format_when_checked(dlg, monkeypatch, tmp_path)
         lambda *a, **k: captured.update(k) or (0, 0, []),
     )
     dlg._execute()
+    # 泵送到完成框已弹(而非 service 已被调):确保 _on_execute_ok 已在补丁
+    # 有效期内执行,避免残余 queued 信号在 teardown 落到真实模态框上
+    assert _pump_until(app, lambda: info_calls), "worker 应调用 execute_replace 并完成"
     assert captured.get("keep_new_format") is True
 
 
-def test_execute_defaults_keep_new_format_false_when_unchecked(dlg, monkeypatch, tmp_path):
+def test_execute_defaults_keep_new_format_false_when_unchecked(dlg, app, monkeypatch, tmp_path):
     """未勾选 → keep_new_format=False(保持默认行为)。"""
     f1 = tmp_path / "a.txt"
     f1.write_text("hello")
@@ -257,7 +289,12 @@ def test_execute_defaults_keep_new_format_false_when_unchecked(dlg, monkeypatch,
     dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
     dlg.ui.chk_keep_new_format.setChecked(False)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    info_calls = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
+    )
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         dlg._svc,
@@ -265,6 +302,7 @@ def test_execute_defaults_keep_new_format_false_when_unchecked(dlg, monkeypatch,
         lambda *a, **k: captured.update(k) or (0, 0, []),
     )
     dlg._execute()
+    assert _pump_until(app, lambda: info_calls), "worker 应调用 execute_replace 并完成"
     assert captured.get("keep_new_format") is False
 
 
