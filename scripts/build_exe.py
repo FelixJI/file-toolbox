@@ -1,15 +1,23 @@
-"""PyInstaller 打包:onedir 产出 exe 目录 + 便携 zip。
+"""Nuitka 打包:standalone 产出 exe 目录 + 便携 zip。
 
 本地运行:
     uv run --extra gui --extra invoice --extra dev python scripts/build_exe.py [--ci]
 
-打包策略(详见 scripts/FileToolbox.spec):
-  - 用 .spec 文件配置,C 扩展/运行时 DLL 全由 PyInstaller hook + collect_all 自动收集。
-  - 关键差异(对比旧 Nuitka 方案):pywin32 的 pywin32_system32/ DLL、pypdfium2 的
-    PDFium 运行时、Pillow 的 _imaging.pyd 全部自动进产物,无需手工 copytree —— 这正是
-    旧 Nuitka 方案"批量转 PDF 缺少依赖"bug 的根治点。
+打包策略(Nuitka standalone,onedir 等价形态;Velopack 需要目录布局):
+  - PySide6:官方插件(--enable-plugin=pyside6)处理 Qt 插件/资源。
+  - pywin32:win32com 动态 Dispatch 运行期按 ProgID 解析,静态分析追不全 →
+    整包收;pythoncom/pywintypes 是带 DLL 的顶层模块,显式 --include-module 收,
+    standalone DLL 扫描据此把 pywin32_system32 的 pythoncom3XX.dll、
+    pywintypes3XX.dll 收进产物。这是旧 Nuitka 方案"批量转 PDF 缺依赖"bug 的
+    根治点(当时缺手工收这两个 DLL),回归契约见 tests/test_build_exe_nuitka.py。
+  - pypdfium2:PDFium 原生 DLL 在包数据里,--include-package-data 收运行时,
+    --include-distribution-metadata 同步许可证(发布物必须随二进制分发)。
+  - velopack:自更新原生绑定 DLL 在包数据里。
+  - CHANGELOG.md 随包:--include-data-files 放 exe 同级,供关于页
+    metadata.get_changelog() 回退链第 2 级命中。
 
-CI 复用同一脚本(带 --ci)。
+CI 复用同一脚本(带 --ci);--assume-yes-for-downloads 允许 Nuitka 在无交互
+环境自动下载 ccache/依赖分析工具。
 """
 
 from __future__ import annotations
@@ -38,11 +46,11 @@ _ROOT = Path(
 # canonical CI 通过绝对 AUTOMATION_ARTIFACTS_DIR 隔离构建输出；本地默认仍为仓库 dist/。
 _DIST = Path(os.environ.get("AUTOMATION_ARTIFACTS_DIR", _ROOT / "dist")).resolve()
 _BUILD = _ROOT / "build"
-_SPEC = _ROOT / "scripts" / "FileToolbox.spec"
+_ENTRY = _ROOT / "file_toolbox" / "gui_entry.py"
 _PRODUCT = "FileToolbox"
 _VPK_VERSION = "1.2.0"
 
-cli = typer.Typer(add_completion=False, help="file-toolbox PyInstaller 打包")
+cli = typer.Typer(add_completion=False, help="file-toolbox Nuitka 打包")
 
 
 def _current_version() -> str:
@@ -215,16 +223,56 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
     return copied
 
 
+def _nuitka_command(entry: Path, version: str, output_dir: Path) -> list[str]:
+    """构造 Nuitka standalone 编译命令(独立纯函数,供契约测试锁定关键旗标)。"""
+    return [
+        sys.executable,
+        "-m",
+        "nuitka",
+        # standalone = onedir 等价形态:exe + 依赖目录(Velopack 打包需要目录布局)
+        "--standalone",
+        # CI 无交互环境:允许自动下载 ccache/依赖分析工具(本地同样适用)
+        "--assume-yes-for-downloads",
+        # GUI 无黑框(等价旧 spec 的 console=False)
+        "--windows-console-mode=disable",
+        "--enable-plugin=pyside6",
+        # pywin32:win32com 动态 Dispatch 按 ProgID 运行期解析,静态追不全 → 整包收;
+        # pythoncom/pywintypes 是带 DLL 的顶层模块,standalone DLL 扫描据此收
+        # pywin32_system32 下的 pythoncom3XX.dll / pywintypes3XX.dll
+        "--include-package=win32com",
+        "--include-package=win32comext",
+        "--include-package=win32",
+        "--include-module=pythoncom",
+        "--include-module=pywintypes",
+        # pypdfium2:PDFium 原生 DLL(包数据)+ dist-info 许可证
+        "--include-package-data=pypdfium2",
+        "--include-distribution-metadata=pypdfium2",
+        # velopack:自更新原生绑定 DLL(包数据)
+        "--include-package=velopack",
+        "--include-package-data=velopack",
+        # CHANGELOG 随包:exe 同级,关于页 get_changelog() 回退链第 2 级
+        f"--include-data-files={_ROOT / 'CHANGELOG.md'}=CHANGELOG.md",
+        f"--output-dir={output_dir}",
+        f"--output-filename={_PRODUCT}.exe",
+        # Windows 版本资源(资源管理器/更新器"关于"显示)
+        f"--product-name={_PRODUCT}",
+        f"--product-version={version}",
+        f"--file-version={version}",
+        "--file-description=批量文件工具箱",
+        str(entry),
+    ]
+
+
 @cli.command()
 def build(
     ci: bool = typer.Option(False, "--ci", help="CI 模式:非交互,结构化输出"),
 ) -> None:
-    """PyInstaller 打包 → Velopack 发布物 → 生成 checksums。"""
+    """Nuitka 打包 → Velopack 发布物 → 生成 checksums。"""
     version = _current_version()
     typer.echo(f"打包版本: {version}")
 
-    if not _SPEC.exists():
-        typer.secho(f"✗ 未找到 spec 文件: {_SPEC}", fg=typer.colors.RED, err=True)
+    if not _ENTRY.exists():
+        typer.secho(f"✗ 未找到入口脚本: {_ENTRY}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
     # 清理旧产物（仅仓库声明的 build/dist 输出目录）
@@ -233,25 +281,19 @@ def build(
             shutil.rmtree(d)
     _DIST.mkdir(parents=True)
 
-    pyinstaller_dist = _BUILD / "pyinstaller-dist"
-    pyinstaller_work = _BUILD / "pyinstaller-work"
-    cmd = [
-        sys.executable,
-        "-m",
-        "PyInstaller",
-        str(_SPEC),
-        f"--distpath={pyinstaller_dist}",
-        f"--workpath={pyinstaller_work}",
-        "--noconfirm",  # 覆盖已有产物,CI 非交互必需
-    ]
-    typer.echo("运行 PyInstaller ...")
-    subprocess.run(cmd, cwd=str(_ROOT), check=True)
+    nuitka_out = _BUILD / "nuitka"
+    typer.echo("运行 Nuitka ...")
+    subprocess.run(_nuitka_command(_ENTRY, version, nuitka_out), cwd=str(_ROOT), check=True)
 
-    # PyInstaller onedir 产物 = dist/FileToolbox/(由 spec 的 COLLECT.name 决定)
-    product_dir = pyinstaller_dist / _PRODUCT
+    # Nuitka standalone 产物 = <output-dir>/gui_entry.dist/(以入口脚本 stem 命名);
+    # 规整为 FileToolbox/ 以保持 vpk --mainExe 与便携 zip 布局不变
+    product_dir = nuitka_out / "gui_entry.dist"
     if not product_dir.exists():
         typer.secho(f"✗ 未找到产物目录: {product_dir}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
+    target_dir = nuitka_out / _PRODUCT
+    product_dir.rename(target_dir)
+    product_dir = target_dir
 
     exe = product_dir / f"{_PRODUCT}.exe"
     if not exe.exists():
