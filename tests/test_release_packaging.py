@@ -18,7 +18,7 @@ def _sha256(path: Path) -> str:
 
 def _write_candidate(directory: Path, version: str) -> set[str]:
     directory.mkdir()
-    portable = directory / "FileToolbox-Portable.zip"
+    portable = directory / f"FileToolbox-v{version}-win-x64.zip"
     with zipfile.ZipFile(portable, "w") as package:
         package.writestr("FileToolbox.exe", b"smoke")
     full = directory / f"FileToolbox-{version}-full.nupkg"

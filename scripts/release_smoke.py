@@ -23,7 +23,7 @@ def _sha256(path: Path) -> str:
 def _payload_names(version: str) -> set[str]:
     return {
         f"FileToolbox-{version}-full.nupkg",
-        "FileToolbox-Portable.zip",
+        f"FileToolbox-v{version}-win-x64.zip",
         "releases.win.json",
     }
 
@@ -48,7 +48,7 @@ def check_release_smoke(artifacts_dir: Path, version: str) -> None:
             f"release build assets must be exact: expected={sorted(expected_names)!r}, "
             f"actual={sorted(actual_names)!r}"
         )
-    portable = artifacts_dir / "FileToolbox-Portable.zip"
+    portable = artifacts_dir / f"FileToolbox-v{version}-win-x64.zip"
     with zipfile.ZipFile(portable) as package:
         names = package.namelist()
         if "FileToolbox.exe" not in names and "FileToolbox/FileToolbox.exe" not in names:
