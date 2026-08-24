@@ -203,7 +203,7 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
     subprocess.run(cmd, cwd=str(_ROOT), check=True)
     sources = {
         f"{_PRODUCT}-{version}-full.nupkg": (f"{_PRODUCT}-{version}-full.nupkg",),
-        f"{_PRODUCT}-Portable.zip": (
+        f"{_PRODUCT}-v{version}-win-x64.zip": (
             f"{_PRODUCT}-Portable.zip",
             f"{_PRODUCT}-win-Portable.zip",
         ),

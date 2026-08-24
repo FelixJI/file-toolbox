@@ -36,7 +36,7 @@ CLI 命令默认只预览计划，只有显式传入 `--yes` 才会执行。
 ### 使用发布包
 
 1. 从 [Releases](https://github.com/FelixJI/file-toolbox/releases/latest) 下载
-   `FileToolbox-Portable.zip`，解压到可写目录后运行 `FileToolbox.exe`。
+   `FileToolbox-v<version>-win-x64.zip`，解压到可写目录后运行 `FileToolbox.exe`。
 2. 按同一 Release 的 `checksums.txt` 校验 SHA-256 后再运行。
 3. 便携版由 Velopack 在应用内检查、下载并应用更新；请将解压目录放在无需
    管理员权限的可写位置，以保证自动更新可写回文件。
@@ -44,7 +44,7 @@ CLI 命令默认只预览计划，只有显式传入 `--yes` 才会执行。
 PowerShell 校验示例：
 
 ```powershell
-Get-FileHash .\FileToolbox-Portable.zip -Algorithm SHA256
+Get-FileHash .\FileToolbox-v*-win-x64.zip -Algorithm SHA256
 ```
 
 ### 从源码运行

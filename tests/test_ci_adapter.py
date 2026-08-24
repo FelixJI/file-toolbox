@@ -59,7 +59,7 @@ def test_sync_version_updates_only_derived_lockfile(tmp_path: Path) -> None:
 
 def _archive(directory: Path, version: str) -> None:
     directory.mkdir(parents=True)
-    portable = directory / "FileToolbox-Portable.zip"
+    portable = directory / f"FileToolbox-v{version}-win-x64.zip"
     with zipfile.ZipFile(portable, "w") as package:
         package.writestr("FileToolbox.exe", b"smoke")
     full = directory / f"FileToolbox-{version}-full.nupkg"
