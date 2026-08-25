@@ -1,5 +1,8 @@
 """metadata 模块测试:元信息常量与 CHANGELOG 读取。"""
 
+import tomllib
+from pathlib import Path
+
 import file_toolbox
 from file_toolbox.common import metadata
 
@@ -30,8 +33,23 @@ def test_tech_stack_is_list_of_tuples():
         assert isinstance(item[1], str)
 
 
-def test_python_requirement_string():
-    assert "3.11" in metadata.PYTHON_REQUIREMENT
+def test_python_requirement_matches_pyproject():
+    """Python 要求须与 pyproject.toml 的 requires-python 完全一致,防止静默漂移。"""
+    repo_root = Path(metadata.__file__).resolve().parents[2]
+    data = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    assert data["project"]["requires-python"] == metadata.PYTHON_REQUIREMENT
+
+
+def test_app_description_covers_all_capabilities():
+    """关于页简介必须覆盖 GUI 全部六个功能 Tab,新增功能时同步更新描述。"""
+    for keyword in ("重命名", "建文件夹", "PDF", "内容替换", "考勤汇总", "发票识别"):
+        assert keyword in metadata.APP_DESCRIPTION
+
+
+def test_tech_stack_mentions_velopack_updater():
+    """应用内更新由 Velopack 提供(README 已声明),技术路线应向用户展示。"""
+    names = " ".join(name.lower() for name, _ in metadata.TECH_STACK)
+    assert "velopack" in names
 
 
 def test_get_changelog_finds_repo_root():

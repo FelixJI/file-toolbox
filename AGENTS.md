@@ -70,7 +70,7 @@
 - 唯一版本源是 `pyproject.toml [project].version`；`uv.lock` 的 editable package 版本和运行时 metadata 是派生值。不要新增 `version.txt` 或手打 tag。
 - Velopack 发布契约固定为 `FileToolbox-{version}-full.nupkg`、`FileToolbox-v{version}-win-x64.zip`、`releases.win.json`、`checksums.txt`、`SBOM.spdx.json`、`build-identity.json`；checksums/SBOM/identity 必须绑定同一精确资产集合。发行形态只有便携包（vpk `--noInst`，不生成 Setup 安装器）；应用内更新只使用 Velopack，便携运行态同样由 Velopack 自更新，不得重新引入安装器或自研下载链。
 - 文件修改命令默认 dry-run，只有明确 `--yes` 才执行；不得为了简化调用移除此保险。应用更新由 Velopack 管理安装事务，项目不再维护 `.file_toolbox/` 更新备份、历史或自研 replacer 回滚链。
-- Ruff 使用双引号/100 列/Python 3.11，mypy strict 且以 win32 为目标。仓库提供 pre-commit 配置（Ruff fix/format 与 mypy）；不在文档中假定某个 clone 是否安装 hook，按工作开始时的实际检查执行，未安装时运行等价命令。
+- Ruff 使用双引号/100 列/Python 3.13，mypy strict 且以 win32 为目标。仓库提供 pre-commit 配置（Ruff fix/format 与 mypy）；不在文档中假定某个 clone 是否安装 hook，按工作开始时的实际检查执行，未安装时运行等价命令。
 
 ## 六仓关系
 
