@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.10
+
+### Bug Fixes
+
+- **release:** 规范便携包文件名 (#56) (166b436)
+
+### Performance
+
+- **gui:** 加快启动并修复窗口高度被钉死 (#57) (43a7c73)
+
 ## 0.2.9
 
 ### Bug Fixes
