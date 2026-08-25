@@ -8,8 +8,8 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
-from PySide6.QtCore import QMetaObject, Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QByteArray, QMetaObject, QRect, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
@@ -48,6 +48,9 @@ if TYPE_CHECKING:
     from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
 
 _logger = logging.getLogger(__name__)
+
+# 窗口几何持久化 key(settings.json):base64(saveGeometry)。
+_GEOMETRY_KEY = "window/geometry"
 
 
 def _make_rename_tab() -> FileRenamerDialog:
@@ -106,7 +109,7 @@ class MainWindow(QMainWindow):
     def __init__(self, coordinator: UpdateCoordinator | None = None) -> None:
         super().__init__()
         self.setWindowTitle("File Toolbox")
-        self.resize(950, 720)
+        self._restore_window_geometry()
 
         self._history = JsonHistoryStore()
 
@@ -354,7 +357,44 @@ class MainWindow(QMainWindow):
 
         QApplication.quit()
 
+    # --- 窗口几何 ---
+
+    def _restore_window_geometry(self) -> None:
+        """恢复上次窗口几何;无记录/记录越界(如换了显示器)时回退屏幕自适应默认值。"""
+        from file_toolbox.common import settings
+
+        blob = settings.get(_GEOMETRY_KEY)
+        restored = False
+        if isinstance(blob, str) and blob:
+            try:
+                restored = self.restoreGeometry(QByteArray.fromBase64(blob.encode("ascii")))
+            except ValueError:  # 损坏/非 base64 记录 → 当作无记录
+                restored = False
+        if restored and self._frame_on_some_screen():
+            if not self.isMaximized():
+                avail = self._available_geometry()
+                self.resize(min(self.width(), avail.width()), min(self.height(), avail.height()))
+            return
+        self._apply_default_geometry()
+
+    def _frame_on_some_screen(self) -> bool:
+        """窗口是否与任一屏幕可视区有交集(防恢复到已拔掉的显示器上)。"""
+        frame = self.frameGeometry()
+        return any(frame.intersects(s.availableGeometry()) for s in QGuiApplication.screens())
+
+    def _available_geometry(self) -> QRect:
+        return (self.screen() or QGuiApplication.primaryScreen()).availableGeometry()
+
+    def _apply_default_geometry(self) -> None:
+        """默认尺寸 950×640,且不超过当前屏幕可视区(高分屏缩放/小屏自动收窄)。"""
+        avail = self._available_geometry()
+        self.resize(min(950, avail.width() - 40), min(640, avail.height() - 60))
+
     def closeEvent(self, event: QCloseEvent) -> None:
+        # 记住窗口几何(含最大化状态),下次启动恢复
+        from file_toolbox.common import settings
+
+        settings.set(_GEOMETRY_KEY, bytes(self.saveGeometry().toBase64().data()).decode("ascii"))
         # 退出自更新 worker 线程(若有)
         try:
             if self._update_worker.isRunning():

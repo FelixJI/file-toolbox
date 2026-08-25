@@ -270,6 +270,63 @@ def test_main_window_import_stays_light():
     assert proc.stdout.strip() == "", f"启动链被污染: {proc.stdout.strip()}"
 
 
+def test_geometry_roundtrip_persists_across_sessions(app, monkeypatch, tmp_path):
+    """关闭主窗口保存几何,下次启动恢复同一尺寸。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    win = MainWindow(LatestCoordinator())
+    win.resize(640, 480)
+    win.closeEvent(QCloseEvent())
+    blob = settings.get("window/geometry")
+    assert isinstance(blob, str) and blob
+
+    win2 = MainWindow(LatestCoordinator())
+    assert (win2.width(), win2.height()) == (640, 480)
+
+
+def test_default_geometry_fits_screen_without_settings(app, monkeypatch, tmp_path):
+    """无保存记录时按屏幕可视区自适应,高度不超过默认上限 640。"""
+    monkeypatch.chdir(tmp_path)
+    win = MainWindow(LatestCoordinator())
+    avail = win._available_geometry()
+    assert win.width() <= avail.width()
+    assert win.height() <= min(640, avail.height())
+
+
+def test_corrupt_geometry_falls_back_to_default(app, monkeypatch, tmp_path):
+    """损坏的几何记录按无记录处理,不抛错并回退默认尺寸。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    settings.set("window/geometry", "!!!这不是合法的base64###")
+    win = MainWindow(LatestCoordinator())
+    assert win.height() <= 640
+
+
+def test_window_min_height_not_pinned_by_tabs(app, monkeypatch, tmp_path):
+    """布局回归:全部 Tab 构造后主窗口最小高度不再被钉到 ~963px。
+
+    曾由 PDF 页显式 setMinimumSize(800×600) 与关于页 886px 最小高度叠加导致,
+    小屏/高分屏缩放下窗口无法缩小到屏幕内。
+    """
+    win = MainWindow(LatestCoordinator())
+    win._materialize_all_tabs()
+    assert win._pdf_tab is not None and win._pdf_tab.minimumSize().isEmpty()
+    assert win.minimumSizeHint().height() < 700
+
+
+def test_about_tab_content_scrollable(app):
+    """关于页内容包在 QScrollArea 中:页最小尺寸由滚动区而非内容总高度决定。"""
+    from PySide6.QtWidgets import QScrollArea
+
+    from file_toolbox.gui.dialogs.about_tab import AboutTab
+
+    tab = AboutTab()
+    assert tab.findChild(QScrollArea) is not None
+    assert tab.minimumSizeHint().height() < 300
+
+
 def test_run_gui_creates_and_shows_window(monkeypatch, tmp_path):
     import sys
 
