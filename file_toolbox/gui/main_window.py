@@ -1,8 +1,12 @@
 """File Toolbox 主窗口：QMainWindow + 6 个功能 Tab。"""
 
+from __future__ import annotations
+
 import logging
 import sys
 import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
 from PySide6.QtCore import QMetaObject, Qt, QTimer
 from PySide6.QtGui import QCloseEvent
@@ -21,16 +25,6 @@ from PySide6.QtWidgets import (
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.logging_config import configure_logging
 from file_toolbox.common.metadata import VERSION
-from file_toolbox.gui.dialogs import (
-    AboutTab,
-    AttendanceTab,
-    BatchFolderCreatorDialog,
-    ContentReplaceDialog,
-    FileRenamerDialog,
-    HistoryDialog,
-    InvoiceTab,
-    PDFGeneratorDialog,
-)
 from file_toolbox.gui.freeze_watchdog import FreezeWatchdog
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
 from file_toolbox.updater import create_update_coordinator
@@ -42,16 +36,67 @@ from file_toolbox.updater.models import (
     UpdateCheckStatus,
 )
 
+if TYPE_CHECKING:
+    # Tab 类仅在类型标注中使用;运行时导入延迟到各 _make_*_tab 工厂,
+    # 避免 dialogs 包(及其重依赖 pypdfium2/pypdf/chardet/cattrs)进入启动链。
+    from file_toolbox.gui.dialogs.about_tab import AboutTab
+    from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab
+    from file_toolbox.gui.dialogs.invoice_tab import InvoiceTab
+    from file_toolbox.gui.dialogs.mkdir_tab import BatchFolderCreatorDialog
+    from file_toolbox.gui.dialogs.pdf_tab import PDFGeneratorDialog
+    from file_toolbox.gui.dialogs.rename_tab import FileRenamerDialog
+    from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
+
 _logger = logging.getLogger(__name__)
 
 
-def _construct_tab[T](cls: type[T]) -> T:
+def _make_rename_tab() -> FileRenamerDialog:
+    from file_toolbox.gui.dialogs.rename_tab import FileRenamerDialog
+
+    return FileRenamerDialog()
+
+
+def _make_mkdir_tab() -> BatchFolderCreatorDialog:
+    from file_toolbox.gui.dialogs.mkdir_tab import BatchFolderCreatorDialog
+
+    return BatchFolderCreatorDialog()
+
+
+def _make_pdf_tab() -> PDFGeneratorDialog:
+    from file_toolbox.gui.dialogs.pdf_tab import PDFGeneratorDialog
+
+    return PDFGeneratorDialog()
+
+
+def _make_replace_tab() -> ContentReplaceDialog:
+    from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
+
+    return ContentReplaceDialog()
+
+
+def _make_attendance_tab() -> AttendanceTab:
+    from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab
+
+    return AttendanceTab()
+
+
+def _make_invoice_tab() -> InvoiceTab:
+    from file_toolbox.gui.dialogs.invoice_tab import InvoiceTab
+
+    return InvoiceTab()
+
+
+def _make_about_tab() -> AboutTab:
+    from file_toolbox.gui.dialogs.about_tab import AboutTab
+
+    return AboutTab()
+
+
+def _construct_tab(factory: Callable[[], QWidget], name: str) -> QWidget:
     """构造一个功能 Tab 并记录耗时(偶发启动卡顿时定位到具体 Tab)。"""
     t0 = time.perf_counter()
-    tab = cls()
-    _logger.debug(
-        "Tab 构造完成 tab=%s 耗时=%.0fms", cls.__name__, (time.perf_counter() - t0) * 1000
-    )
+    tab = factory()
+    _logger.debug("Tab 构造完成 tab=%s 耗时=%.0fms", name, (time.perf_counter() - t0) * 1000)
     return tab
 
 
@@ -81,13 +126,13 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
-        # 6 个功能 Tab + 关于:仅首屏 Tab 即时构造,其余懒构造。
+        # 6 个功能 Tab + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
+        # 均懒导入,首次构造某 Tab 时才 import;首屏只构造重命名 Tab。
         # 打包形态下真实平台主窗口构造可达 ~1.7s,大头是首个控件初始化链
         # 之后的各 Tab 陆续构造;懒掉非首屏 Tab 让首帧只付首 Tab 的成本。
         tabs = QTabWidget()
         self._tabs = tabs
-        self._rename_tab = _construct_tab(FileRenamerDialog)
-        tabs.addTab(self._rename_tab, "重命名")
+        self._rename_tab: FileRenamerDialog | None = None
         self._mkdir_tab: BatchFolderCreatorDialog | None = None
         self._pdf_tab: PDFGeneratorDialog | None = None
         self._replace_tab: ContentReplaceDialog | None = None
@@ -95,20 +140,20 @@ class MainWindow(QMainWindow):
         self._invoice_tab: InvoiceTab | None = None
         self._about_tab: AboutTab | None = None
         # 懒构造登记:index -> (标签文本, Tab 工厂, 属性名);占位页被真实 Tab 原位替换。
-        self._lazy_specs: dict[int, tuple[str, type[QWidget], str]] = {
+        # 含首屏(重命名):由 __init__ 末尾的 _on_tab_changed 统一触发构造。
+        self._lazy_specs: dict[int, tuple[str, Callable[[], QWidget], str]] = {
             index: (label, factory, attr)
             for index, (label, factory, attr) in enumerate(
                 [
-                    ("", FileRenamerDialog, "_rename_tab"),
-                    ("建文件夹", BatchFolderCreatorDialog, "_mkdir_tab"),
-                    ("生成PDF", PDFGeneratorDialog, "_pdf_tab"),
-                    ("内容替换", ContentReplaceDialog, "_replace_tab"),
-                    ("考勤汇总", AttendanceTab, "_attendance_tab"),
-                    ("发票识别", InvoiceTab, "_invoice_tab"),
-                    ("关于", AboutTab, "_about_tab"),
+                    ("重命名", _make_rename_tab, "_rename_tab"),
+                    ("建文件夹", _make_mkdir_tab, "_mkdir_tab"),
+                    ("生成PDF", _make_pdf_tab, "_pdf_tab"),
+                    ("内容替换", _make_replace_tab, "_replace_tab"),
+                    ("考勤汇总", _make_attendance_tab, "_attendance_tab"),
+                    ("发票识别", _make_invoice_tab, "_invoice_tab"),
+                    ("关于", _make_about_tab, "_about_tab"),
                 ]
             )
-            if index != 0
         }
         for label, _factory, _attr in self._lazy_specs.values():
             tabs.addTab(QWidget(), label)
@@ -165,7 +210,7 @@ class MainWindow(QMainWindow):
             return
         label, factory, attr = spec
         del self._lazy_specs[index]
-        tab = _construct_tab(factory)
+        tab = _construct_tab(factory, label)
         setattr(self, attr, tab)
         current = self._tabs.currentIndex()
         self._tabs.blockSignals(True)
@@ -173,9 +218,9 @@ class MainWindow(QMainWindow):
         self._tabs.insertTab(index, tab, label)
         self._tabs.setCurrentIndex(current)
         self._tabs.blockSignals(False)
-        if isinstance(tab, AboutTab):
+        if attr == "_about_tab":
             # 关于页手动检查更新:AboutTab 请求 → 投递 worker → 结果回显
-            tab.check_requested.connect(self._on_check_requested)
+            cast("AboutTab", tab).check_requested.connect(self._on_check_requested)
 
     def _materialize_all_tabs(self) -> None:
         """立即构造全部懒 Tab(测试与预热场景使用)。"""
@@ -196,6 +241,8 @@ class MainWindow(QMainWindow):
         tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
         if tool is None:
             return
+        from file_toolbox.gui.dialogs.history_dialog import HistoryDialog
+
         dlg = HistoryDialog(self._history, tool, self)
         dlg.exec()
 
