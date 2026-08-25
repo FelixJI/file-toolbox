@@ -38,7 +38,9 @@ class Ui_PDFGeneratorDialog:
         if not PDFGeneratorDialog.objectName():
             PDFGeneratorDialog.setObjectName("PDFGeneratorDialog")
         PDFGeneratorDialog.resize(900, 700)
-        PDFGeneratorDialog.setMinimumSize(QSize(800, 600))
+        # 不设页级 setMinimumSize:嵌入 QTabWidget 后页最小尺寸会抬高整个主窗口的
+        # 最小高度(曾为 800×600 → 全部 Tab 构造后主窗口最小高度被钉到 ~963px)。
+        # 可收缩性交给各控件自身的 minimumSize 与布局推导。
         self.mainLayout = QVBoxLayout(PDFGeneratorDialog)
         self.mainLayout.setSpacing(6)
         self.mainLayout.setObjectName("mainLayout")
@@ -484,9 +486,7 @@ class Ui_PDFGeneratorDialog:
             QCoreApplication.translate("PDFGeneratorDialog", "图片型", None)
         )
         self.radio_type_image.setToolTip(
-            QCoreApplication.translate(
-                "PDFGeneratorDialog", "生成扫描/图片型 PDF,不可编辑", None
-            )
+            QCoreApplication.translate("PDFGeneratorDialog", "生成扫描/图片型 PDF,不可编辑", None)
         )
         self.label_dpi.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u6e05\u6670\u5ea6:", None)

@@ -9,6 +9,7 @@ import platform
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -37,7 +39,18 @@ class AboutTab(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        # 内容整体包进 QScrollArea:关于页是长竖排(标题+信息+代理+技术栈+日志+快捷方式),
+        # 不加滚动时 minimumSizeHint 高达 ~886px,会把主窗口最小高度钉到小屏放不下。
+        # 滚动容器把页最小尺寸压到滚动区级别,窗口可自由缩小、内容滚动查看。
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
         # --- 标题区 ---
         title = QLabel(metadata.APP_NAME)

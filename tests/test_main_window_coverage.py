@@ -12,6 +12,8 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from file_toolbox.gui import main_window as mw_mod
+from file_toolbox.gui.dialogs.rename_tab import FileRenamerDialog
+from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
 from file_toolbox.gui.main_window import MainWindow
 from file_toolbox.updater import (
     UpdateApplyResult,
@@ -51,7 +53,7 @@ def test_history_button_opens_current_tab_history(win, monkeypatch):
         def exec(self):
             return 0
 
-    monkeypatch.setattr(mw_mod, "HistoryDialog", SpyDialog)
+    monkeypatch.setattr("file_toolbox.gui.dialogs.history_dialog.HistoryDialog", SpyDialog)
     win._tabs.setCurrentIndex(2)
     win._open_history_for_current_tab()
     assert opened == ["pdf"]
@@ -64,7 +66,7 @@ def test_history_button_disabled_on_about_tab(win):
 
 def test_history_button_noop_on_tab_without_history(win, monkeypatch):
     dialog = MagicMock()
-    monkeypatch.setattr(mw_mod, "HistoryDialog", dialog)
+    monkeypatch.setattr("file_toolbox.gui.dialogs.history_dialog.HistoryDialog", dialog)
     win._tabs.setCurrentIndex(6)
     win._open_history_for_current_tab()
     dialog.assert_not_called()
@@ -85,7 +87,7 @@ def test_tab_tools_mapping(win):
 def test_only_first_tab_constructed_initially(win):
     """首屏只构造重命名 Tab:其余 Tab 属性为 None,但占位页保持标签/数量。"""
 
-    assert isinstance(win._rename_tab, mw_mod.FileRenamerDialog)
+    assert isinstance(win._rename_tab, FileRenamerDialog)
     assert win._replace_tab is None
     assert win._about_tab is None
     assert win._tabs.count() == 7
@@ -104,7 +106,7 @@ def test_lazy_tab_materialized_on_switch(win):
     """首次切换到懒 Tab:原位替换占位页,位置/标签不变且只构造一次。"""
 
     win._tabs.setCurrentIndex(3)
-    assert isinstance(win._replace_tab, mw_mod.ContentReplaceDialog)
+    assert isinstance(win._replace_tab, ContentReplaceDialog)
     assert win._tabs.count() == 7
     assert win._tabs.tabText(3) == "内容替换"
     assert win._tabs.widget(3) is win._replace_tab
@@ -226,6 +228,103 @@ def test_close_event_respects_attendance_pending_state(win, monkeypatch):
     win.closeEvent(event)
     assert event.isAccepted() is False
     win._attendance_tab._close_pending = False
+
+
+def test_main_window_import_stays_light():
+    """启动导入契约:构造首屏后启动链不得拉入非首屏 Tab 及其重依赖。
+
+    回归:dialogs 包 __init__ 曾顶层导入全部 8 个 Tab,首屏 Tab 构造会连带把
+    pypdfium2+pypdf+chardet+cattrs(~440ms dev)全部带入启动链。子进程隔离
+    验证,避免本会话已导入模块干扰。
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import file_toolbox
+
+    repo_root = Path(file_toolbox.__file__).resolve().parents[1]
+    code = (
+        "import os, sys\n"
+        "os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')\n"
+        "os.environ.setdefault('FILE_TOOLBOX_NO_COM_DETECT', '1')\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "app = QApplication([])\n"
+        "from file_toolbox.gui.main_window import MainWindow\n"
+        "MainWindow()\n"
+        "mods = sys.modules\n"
+        "leaked = {m for m in mods\n"
+        "          if m.split('.')[0] in {'pypdfium2', 'pypdf', 'chardet', 'cattrs', 'attr', 'PIL'}}\n"
+        "leaked |= {m for m in mods\n"
+        "           if m.startswith('file_toolbox.gui.dialogs.')\n"
+        "           and m != 'file_toolbox.gui.dialogs.rename_tab'}\n"
+        "print(','.join(sorted(leaked)))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        check=True,
+    )
+    assert proc.stdout.strip() == "", f"启动链被污染: {proc.stdout.strip()}"
+
+
+def test_geometry_roundtrip_persists_across_sessions(app, monkeypatch, tmp_path):
+    """关闭主窗口保存几何,下次启动恢复同一尺寸。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    win = MainWindow(LatestCoordinator())
+    win.resize(640, 480)
+    win.closeEvent(QCloseEvent())
+    blob = settings.get("window/geometry")
+    assert isinstance(blob, str) and blob
+
+    win2 = MainWindow(LatestCoordinator())
+    assert (win2.width(), win2.height()) == (640, 480)
+
+
+def test_default_geometry_fits_screen_without_settings(app, monkeypatch, tmp_path):
+    """无保存记录时按屏幕可视区自适应,高度不超过默认上限 640。"""
+    monkeypatch.chdir(tmp_path)
+    win = MainWindow(LatestCoordinator())
+    avail = win._available_geometry()
+    assert win.width() <= avail.width()
+    assert win.height() <= min(640, avail.height())
+
+
+def test_corrupt_geometry_falls_back_to_default(app, monkeypatch, tmp_path):
+    """损坏的几何记录按无记录处理,不抛错并回退默认尺寸。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    settings.set("window/geometry", "!!!这不是合法的base64###")
+    win = MainWindow(LatestCoordinator())
+    assert win.height() <= 640
+
+
+def test_window_min_height_not_pinned_by_tabs(app, monkeypatch, tmp_path):
+    """布局回归:全部 Tab 构造后主窗口最小高度不再被钉到 ~963px。
+
+    曾由 PDF 页显式 setMinimumSize(800×600) 与关于页 886px 最小高度叠加导致,
+    小屏/高分屏缩放下窗口无法缩小到屏幕内。
+    """
+    win = MainWindow(LatestCoordinator())
+    win._materialize_all_tabs()
+    assert win._pdf_tab is not None and win._pdf_tab.minimumSize().isEmpty()
+    assert win.minimumSizeHint().height() < 700
+
+
+def test_about_tab_content_scrollable(app):
+    """关于页内容包在 QScrollArea 中:页最小尺寸由滚动区而非内容总高度决定。"""
+    from PySide6.QtWidgets import QScrollArea
+
+    from file_toolbox.gui.dialogs.about_tab import AboutTab
+
+    tab = AboutTab()
+    assert tab.findChild(QScrollArea) is not None
+    assert tab.minimumSizeHint().height() < 300
 
 
 def test_run_gui_creates_and_shows_window(monkeypatch, tmp_path):
