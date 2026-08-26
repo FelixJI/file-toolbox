@@ -6,30 +6,33 @@
 
 [![CI](https://github.com/FelixJI/file-toolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/FelixJI/file-toolbox/actions/workflows/ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/FelixJI/file-toolbox?display_name=tag)](https://github.com/FelixJI/file-toolbox/releases/latest)
-[![Python](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.13-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/github/license/FelixJI/file-toolbox)](LICENSE)
 
 [下载](#下载与使用) · [功能](#主要功能) · [开发](#从源码运行) · [源码导读](SOURCE_READING_GUIDE.md) · [贡献](#参与贡献)
 
 </div>
 
-File Toolbox 把批量重命名、目录创建、图片转 PDF、文本整理，以及 Windows 上的
-Word / Excel / PowerPoint 转换集中到同一个 CLI 与 PySide6 桌面界面中。所有会修改文件的
-CLI 命令默认只预览计划，只有显式传入 `--yes` 才会执行。
+File Toolbox 把批量重命名、批量建文件夹、生成 PDF、内容替换、考勤汇总和发票识别集中到
+同一个 CLI 与 PySide6 桌面界面中。批量重命名、内容替换和发票识别默认只预览结果，显式
+传入 `--yes` 才会执行；建文件夹会先列出将要创建的目录清单，生成 PDF 在执行过程中逐文件
+报告进度。
 
 > [!IMPORTANT]
-> Word、Excel 和 PowerPoint 转换依赖 Windows 与对应的 Microsoft Office；其余功能可在
-> Windows、macOS 和 Linux 上使用。
+> Word / Excel / PowerPoint 转 PDF、Word / Excel 内容替换和考勤汇总依赖 Windows 上的
+> Microsoft Office（转 PDF 亦支持 WPS）；批量重命名、建文件夹、图片转 PDF、txt 替换和
+> 发票识别可在 Windows、macOS 和 Linux 上使用。
 
 ## 主要功能
 
 | 能力 | CLI | GUI | 说明 |
 | --- | :---: | :---: | --- |
-| 批量重命名 | ✓ | ✓ | 规则预览、冲突检测、历史与恢复 |
-| 批量创建目录 | ✓ | ✓ | 从文本或表格生成目录结构 |
-| 图片合并为 PDF | ✓ | ✓ | 支持排序与基础输出设置 |
-| 文本批处理 | ✓ | ✓ | 编码、合并、拆分等常用操作 |
-| Office 格式转换 | ✓ | ✓ | 仅 Windows + Microsoft Office |
+| 批量重命名 | ✓ | ✓ | 默认预览、冲突检测、历史与恢复 |
+| 批量创建目录 | ✓ | ✓ | 从层级文本或表格生成目录结构，预览后创建 |
+| 生成 PDF | ✓ | ✓ | Word/Excel/PPT/图片转 PDF，可合并；Office 转换仅 Windows + Office/WPS |
+| 内容替换 | ✓ | ✓ | Word/Excel/txt 批量替换，默认预览、执行前自动备份 |
+| 考勤汇总 | — | ✓ | 按 Excel 考勤表方案汇总，预览后另存；仅 Windows + Excel |
+| 发票识别 | ✓ | ✓ | 解析 PDF/OFD/XML 电子发票，导出 Excel/JSON，支持去重 |
 
 ## 下载与使用
 

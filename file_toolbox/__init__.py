@@ -1,9 +1,6 @@
-"""File Toolbox - 批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换。"""
+"""File Toolbox - 批量文件工具箱(名称/描述等元信息统一见 common.metadata)。"""
 
 from importlib.metadata import PackageNotFoundError, version
-
-APP_NAME = "File Toolbox"
-APP_DESCRIPTION = "批量文件工具箱"
 
 try:
     __version__ = version("file-toolbox")

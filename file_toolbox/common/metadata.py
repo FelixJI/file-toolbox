@@ -9,11 +9,11 @@ from pathlib import Path
 from file_toolbox import __version__
 
 APP_NAME = "File Toolbox"
-APP_DESCRIPTION = "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、发票识别"
+APP_DESCRIPTION = "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、考勤汇总、发票识别"
 VERSION = __version__
 REPO_URL = "https://github.com/FelixJI/file-toolbox"
 LICENSE = "MIT"
-PYTHON_REQUIREMENT = ">=3.11"
+PYTHON_REQUIREMENT = ">=3.13"
 
 # (组件名, 说明)元组列表 —— UI 控制格式化,数据不绑死呈现方式
 # 说明只写用途,不写版本(版本随依赖漂移,易过期;版本要求见"基本信息"区)
@@ -22,8 +22,10 @@ TECH_STACK: list[tuple[str, str]] = [
     ("PySide6", "(GUI 框架)"),
     ("typer", "(CLI 框架)"),
     ("pypdf + pypdfium2", "(PDF 处理)"),
+    ("Pillow", "(图片处理)"),
     ("pdfplumber + openpyxl", "(发票识别,可选)"),
     ("pywin32", "(Windows COM 自动化,仅 Windows)"),
+    ("velopack", "(应用内自动更新)"),
 ]
 
 
