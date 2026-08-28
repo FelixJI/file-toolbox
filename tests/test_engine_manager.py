@@ -10,7 +10,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from file_toolbox.core.batch_pdf import engine_cache
 from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+
+@pytest.fixture
+def engine_cache_stub(monkeypatch):
+    """隔离持久引擎缓存:load 可编程返回,save 只记录不落盘。
+
+    没有此 stub 时 ensure_verified 会真读写 cwd 下 .file_toolbox/settings.json,
+    既污染仓库工作树,也让断言依赖文件系统。
+    """
+    state = {"load": None, "saved": []}
+    monkeypatch.setattr(engine_cache, "load", lambda *a, **k: state["load"])
+    monkeypatch.setattr(
+        engine_cache, "save", lambda engines, *a, **k: state["saved"].append(dict(engines)) or True
+    )
+    return state
 
 
 def test_probe_registry_returns_true_when_key_exists(monkeypatch):
@@ -93,7 +109,7 @@ def test_detect_force_refresh_uses_real_dispatch(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_ensure_verified_only_verifies_available_engines(monkeypatch):
+def test_ensure_verified_only_verifies_available_engines(monkeypatch, engine_cache_stub):
     """首次兑现:只对缓存判定可用的引擎做真 Dispatch(不双引擎全量启动)。
 
     缓存 office=True、wps=False → 只 Dispatch Word.Application,不碰 KWPS。
@@ -116,7 +132,7 @@ def test_ensure_verified_only_verifies_available_engines(monkeypatch):
     EngineManager._verified = False
 
 
-def test_ensure_verified_dedupes_within_process(monkeypatch):
+def test_ensure_verified_dedupes_within_process(monkeypatch, engine_cache_stub):
     """_verified 标志:第二次 ensure_verified 直接返回,不再 Dispatch。"""
     EngineManager._cached_engines = {"office": True, "wps": True}
     EngineManager._verified = False
@@ -135,12 +151,13 @@ def test_ensure_verified_dedupes_within_process(monkeypatch):
     EngineManager._verified = False
 
 
-def test_ensure_verified_no_op_when_cache_empty(monkeypatch):
-    """缓存为空(无可兑现引擎)→ 不 Dispatch,但仍置 _verified(无需再兑现)。"""
+def test_ensure_verified_no_op_when_no_engines(monkeypatch, engine_cache_stub):
+    """缓存为空 → 先补注册表预筛;预筛判定无可用引擎 → 不 Dispatch,仍置 _verified。"""
     EngineManager._cached_engines = None
     EngineManager._verified = False
     em = EngineManager()
 
+    monkeypatch.setattr(EngineManager, "_probe_registry", lambda prog_id: False)
     monkeypatch.setattr(
         EngineManager, "_try_detect", lambda *a, **k: pytest.fail("无可兑现引擎不应 Dispatch")
     )
@@ -148,11 +165,12 @@ def test_ensure_verified_no_op_when_cache_empty(monkeypatch):
     em.ensure_verified()
 
     assert EngineManager._verified is True
+    assert EngineManager._cached_engines == {"office": False, "wps": False}
     EngineManager._cached_engines = None
     EngineManager._verified = False
 
 
-def test_ensure_verified_updates_cache_with_dispatch_result(monkeypatch):
+def test_ensure_verified_updates_cache_with_dispatch_result(monkeypatch, engine_cache_stub):
     """兑现结果(Dispatch 失败 → False)精确写回缓存,不污染其他引擎键。"""
     EngineManager._cached_engines = {"office": True, "wps": True}
     EngineManager._verified = False
@@ -166,6 +184,141 @@ def test_ensure_verified_updates_cache_with_dispatch_result(monkeypatch):
 
     em.ensure_verified()
 
+    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+# ---------------------------------------------------------------------------
+# ensure_verified × engine_cache 持久缓存:有效期内且与注册表一致 → 跨进程零 Dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_verified_adopts_matching_persistent_cache(monkeypatch, engine_cache_stub):
+    """持久缓存有效期内且与实时注册表探测一致 → 直接采信,零 Dispatch、不回写。"""
+    EngineManager._cached_engines = {"office": True, "wps": False}
+    EngineManager._verified = False
+    engine_cache_stub["load"] = {"office": True, "wps": False}
+    em = EngineManager()
+
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda *a, **k: pytest.fail("持久缓存命中不应 Dispatch")
+    )
+
+    em.ensure_verified()
+
+    assert EngineManager._verified is True
+    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    assert engine_cache_stub["saved"] == []
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_rejects_mismatched_persistent_cache(monkeypatch, engine_cache_stub):
+    """持久缓存与实时注册表不一致(安装变化)→ 不采信,重新兑现并回写新结果。"""
+    EngineManager._cached_engines = {"office": True, "wps": False}
+    EngineManager._verified = False
+    engine_cache_stub["load"] = {"office": False, "wps": False}  # 旧结论:office 不可用
+    em = EngineManager()
+
+    monkeypatch.setattr(EngineManager, "_try_detect", lambda prog_id, log: True)
+
+    em.ensure_verified()
+
+    assert EngineManager._verified is True
+    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    assert engine_cache_stub["saved"] == [{"office": True, "wps": False}]
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_saves_result_after_dispatch(monkeypatch, engine_cache_stub):
+    """无持久缓存(首跑/过期)→ 兑现结果回写持久缓存,供后续进程采信。"""
+    EngineManager._cached_engines = {"office": True, "wps": False}
+    EngineManager._verified = False
+    engine_cache_stub["load"] = None
+    em = EngineManager()
+
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda prog_id, log: prog_id == "Word.Application"
+    )
+
+    em.ensure_verified()
+
+    assert engine_cache_stub["saved"] == [{"office": True, "wps": False}]
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_save_failure_is_not_fatal(monkeypatch, engine_cache_stub):
+    """持久缓存写入失败 → 仅告警降级(本进程内缓存仍生效),不抛异常。"""
+    EngineManager._cached_engines = {"office": True, "wps": False}
+    EngineManager._verified = False
+    engine_cache_stub["load"] = None
+    em = EngineManager()
+    monkeypatch.setattr(engine_cache, "save", lambda *a, **k: False)
+    monkeypatch.setattr(EngineManager, "_try_detect", lambda prog_id, log: True)
+
+    em.ensure_verified()  # 不抛
+
+    assert EngineManager._verified is True
+    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_probes_registry_when_cache_empty(monkeypatch, engine_cache_stub):
+    """缓存未填充(未经启动探测直接生成)→ 先补注册表预筛,再按预筛结果兑现。"""
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+    em = EngineManager()
+
+    probed = []
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda prog_id: probed.append(prog_id) or True
+    )
+    detected = []
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda prog_id, log: detected.append(prog_id) or False
+    )
+
+    em.ensure_verified()
+
+    assert "Word.Application" in probed and "KWPS.Application" in probed
+    assert detected == ["Word.Application", "KWPS.Application"]  # 预筛可用 → 逐个兑现
+    assert EngineManager._cached_engines == {"office": False, "wps": False}
+    assert engine_cache_stub["saved"] == [{"office": False, "wps": False}]
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+
+
+def test_ensure_verified_cross_process_roundtrip(tmp_path, monkeypatch):
+    """集成回归:首跑兑现并落盘 → 第二个"进程"(重置类状态)命中持久缓存,零 Dispatch。
+
+    在旧实现(仅进程内缓存)上本测试必败:第二个 ensure_verified 会再次触发
+    _try_detect → pytest.fail。走真实 engine_cache + settings 文件(chdir 隔离)。
+    """
+    monkeypatch.chdir(tmp_path)
+
+    # 第一个"进程":预筛 office 可用 → 真 Dispatch 兑现(此处 stub 成功)→ 落盘
+    EngineManager._cached_engines = {"office": True, "wps": False}
+    EngineManager._verified = False
+    monkeypatch.setattr(EngineManager, "_try_detect", lambda prog_id, log: True)
+    EngineManager().ensure_verified()
+    assert (tmp_path / ".file_toolbox" / "settings.json").is_file()
+
+    # 第二个"进程":重置进程内状态;注册表预筛得到相同结果
+    EngineManager._cached_engines = None
+    EngineManager._verified = False
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda prog_id: prog_id == "Word.Application"
+    )
+    monkeypatch.setattr(
+        EngineManager, "_try_detect", lambda *a, **k: pytest.fail("持久缓存应命中,不应 Dispatch")
+    )
+    EngineManager().ensure_verified()
+
+    assert EngineManager._verified is True
     assert EngineManager._cached_engines == {"office": True, "wps": False}
     EngineManager._cached_engines = None
     EngineManager._verified = False

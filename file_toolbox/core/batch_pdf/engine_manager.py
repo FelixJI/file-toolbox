@@ -13,6 +13,7 @@ from typing import Any
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.office_session import init_office_app
 
+from . import engine_cache
 from .constants import ENGINE_AUTO, ENGINE_WPS
 
 
@@ -60,6 +61,7 @@ class EngineManager(LoggableMixin):
     # 缓存是否已通过真 Dispatch "兑现"(force_refresh 路径)验证过。
     # 进程内只兑现一次,避免每次生成都重新 Dispatch Word/WPS(冷启动每个数秒)。
     # 注册表探测(force_refresh=False)不置此标志——它只是快速预筛,仍需兑现。
+    # 跨进程的兑现记忆由 engine_cache 持久缓存(带 TTL)承担,命中时无需兑现。
     _verified: bool = False
 
     def __init__(self) -> None:
@@ -146,19 +148,33 @@ class EngineManager(LoggableMixin):
         """进程内一次性"兑现":把注册表预筛结果用真 COM Dispatch 验证一次。
 
         设计目标:消除 worker 每次生成都全量 Dispatch Word+WPS 的数秒级冷启动开销。
-        - 进程内只兑现一次(`_verified` 标志);后续生成直接命中缓存,零 Dispatch。
+        - 缓存尚未填充(未经对话框探测直接生成)时,先补一次注册表预筛(毫秒级)。
+        - **持久缓存优先**:有效期内的既有兑现结果(engine_cache 落盘,默认 7 天)
+          与实时注册表探测**一致**时直接采信,跨进程零 Dispatch;不一致(安装发生
+          变化)或已过期才走真 Dispatch,不采信安装变更前的旧结论。
         - 只对**缓存判定可用**的引擎做真 Dispatch(注册表说没装就不启动该引擎),
           避免无条件双引擎全量启动。
         - 精确更新被验证的引擎键,不污染整份缓存。
         - 兑现失败(如 Office 临时忙)时:该引擎回退为缓存原值,不抛出——转换时
           `_prog_ids_to_try` 仍会逐个 ProgID 尝试并回退兜底。
+        - 兑现完成后把结果写回持久缓存(写入失败仅告警,不影响生成本身)。
 
         此方法在后台线程(由 PdfGenerateWorker)调用,COM 线程初始化由调用方负责。
         """
         if EngineManager._verified:
             return  # 进程内已兑现,直接返回
 
+        # 兑现前提是先有注册表预筛结果;未探测过时补一次(毫秒级,不启动 Office)。
+        if EngineManager._cached_engines is None:
+            self._detect_available_engines()
         cached = EngineManager._cached_engines or {"office": False, "wps": False}
+
+        # 持久缓存命中且与实时注册表一致 → 采信,跳过全部 Dispatch。
+        persisted = engine_cache.load()
+        if persisted is not None and persisted == cached:
+            EngineManager._verified = True
+            return
+
         verified = dict(cached)
         # 仅兑现预筛判定的可用引擎,避免无谓启动未安装的 Office。
         # 经类访问调用 staticmethod(与 _probe_registry 一致),避免 self 绑定歧义。
@@ -174,6 +190,8 @@ class EngineManager(LoggableMixin):
             )
         EngineManager._cached_engines = verified
         EngineManager._verified = True
+        if not engine_cache.save(verified):
+            self.logger.warning("引擎验证缓存写入失败(不影响本次生成)")
 
     def get_engine_info(self, use_cache: bool = True) -> str:
         """获取当前引擎信息"""
@@ -198,8 +216,9 @@ class EngineManager(LoggableMixin):
 
         启动检测走**注册表探测**(force_refresh=False):毫秒级、不启动任何 Office
         进程,仅查 HKCR 下是否注册了 ProgID。真正的 COM Dispatch "兑现"留到生成时
-        (PdfGenerateWorker.run() 会以 force_refresh=True 再验一次)。这避免了每次
-        打开对话框都 Dispatch Word/WPS 导致的启动卡顿与进程泄漏(本特性核心目标)。
+        (PdfGenerateWorker.run() 调用 ensure_verified;持久缓存命中时免 Dispatch)。
+        这避免了每次打开对话框都 Dispatch Word/WPS 导致的启动卡顿与进程泄漏(本特性
+        核心目标)。
 
         把检测放后台线程是为了:既不冻结 GUI 主线程,也让回调异步切回主线程
         (pdf_tab 用 QTimer.singleShot(0,...) 处理)。
@@ -238,8 +257,8 @@ class EngineManager(LoggableMixin):
         """detect_engines_async 的可测核心体(同步可调用,不依赖 COM)。
 
         - 默认走注册表探测(force_refresh=False),不启动 Office。
-        - 真正的 COM Dispatch 兑现由 PdfGenerateWorker.run() 在生成时以
-          force_refresh=True 完成。
+        - 真正的 COM Dispatch 兑现由 PdfGenerateWorker.run() 在生成时调用
+          ensure_verified 完成(持久缓存命中时免 Dispatch)。
         """
         try:
             self._detect_available_engines()  # force_refresh=False → 注册表探测

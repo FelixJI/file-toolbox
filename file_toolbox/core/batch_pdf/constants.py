@@ -56,6 +56,10 @@ ENGINE_AUTO = "auto"  # 自动检测
 ENGINE_MS_OFFICE = "office"  # Microsoft Office
 ENGINE_WPS = "wps"  # WPS Office
 
+# 引擎验证缓存有效期(秒,7天):ensure_verified 的真 Dispatch 兑现结果跨进程落盘,
+# 有效期内且与实时注册表探测一致时免再次 Dispatch,过期后首次生成重新兑现。
+ENGINE_CACHE_TTL = 7 * 24 * 60 * 60
+
 # 图片型PDF清晰度选项 (DPI)
 DPI_OPTIONS = [150, 300, 600]
 DPI_DEFAULT = 300  # 默认300dpi
