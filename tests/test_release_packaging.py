@@ -150,3 +150,144 @@ def test_release_smoke_rejects_feed_that_does_not_bind_full_package(tmp_path: Pa
 
     with pytest.raises(ValueError, match="feed"):
         release_smoke.check_release_smoke(artifacts, "1.2.3")
+
+
+def _rebind_feed(artifacts: Path) -> None:
+    """feed 内容被测试改动后,把 feed 自身的新哈希重绑进三份清单。"""
+    feed = artifacts / "releases.win.json"
+    feed_sha = _sha256(feed)
+    checksums = artifacts / "checksums.txt"
+    checksums.write_text(
+        "\n".join(
+            f"{feed_sha}  releases.win.json" if line.endswith("  releases.win.json") else line
+            for line in checksums.read_text(encoding="utf-8").splitlines()
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    identity_path = artifacts / "build-identity.json"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    identity["build"]["assets"]["releases.win.json"] = {
+        "sha256": feed_sha,
+        "size": feed.stat().st_size,
+    }
+    identity_path.write_text(json.dumps(identity), encoding="utf-8")
+    sbom_path = artifacts / "SBOM.spdx.json"
+    sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+    feed_record = next(item for item in sbom["files"] if item["fileName"] == feed.name)
+    feed_record["checksums"] = [{"algorithm": "SHA256", "checksumValue": feed_sha}]
+    sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
+
+
+def _rewrite_binding_manifests(artifacts: Path, version: str, payloads: set[str]) -> None:
+    """按新的 payload 集合整体重写 build-identity 与 SBOM(checksums 由调用方处理)。"""
+    records = {
+        name: {"sha256": _sha256(artifacts / name), "size": (artifacts / name).stat().st_size}
+        for name in sorted(payloads)
+    }
+    identity_path = artifacts / "build-identity.json"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    identity["project"]["version"] = version
+    identity["build"]["assets"] = records
+    identity_path.write_text(json.dumps(identity), encoding="utf-8")
+    sbom_path = artifacts / "SBOM.spdx.json"
+    sbom = json.loads(sbom_path.read_text(encoding="utf-8"))
+    sbom["packages"][0]["versionInfo"] = version
+    sbom["files"] = [
+        {
+            "SPDXID": f"SPDXRef-File-{index}",
+            "fileName": name,
+            "checksums": [{"algorithm": "SHA256", "checksumValue": record["sha256"]}],
+        }
+        for index, (name, record) in enumerate(records.items())
+    ]
+    sbom_path.write_text(json.dumps(sbom), encoding="utf-8")
+
+
+def _add_delta(artifacts: Path, version: str, previous: str) -> None:
+    """在既有候选上补齐 delta 资产并重写全部绑定清单(模拟 vpk 差量构建)。"""
+    delta = artifacts / f"FileToolbox-{version}-delta.nupkg"
+    with zipfile.ZipFile(delta, "w") as package:
+        package.writestr("delta", b"d")
+    payloads = {
+        f"FileToolbox-v{version}-win-x64.zip",
+        f"FileToolbox-{version}-full.nupkg",
+        delta.name,
+        "releases.win.json",
+    }
+    feed = json.loads((artifacts / "releases.win.json").read_text(encoding="utf-8"))
+    feed["Assets"].extend(
+        [
+            {
+                "PackageId": "FileToolbox",
+                "Version": version,
+                "Type": "Delta",
+                "FileName": delta.name,
+                "SHA256": _sha256(delta).upper(),
+                "Size": delta.stat().st_size,
+            },
+            {
+                "PackageId": "FileToolbox",
+                "Version": previous,
+                "Type": "Full",
+                "FileName": f"FileToolbox-{previous}-full.nupkg",
+                "SHA256": "0" * 64,
+                "Size": 1,
+            },
+        ]
+    )
+    (artifacts / "releases.win.json").write_text(json.dumps(feed), encoding="utf-8")
+    (artifacts / "checksums.txt").write_text(
+        "".join(f"{_sha256(artifacts / name)}  {name}\n" for name in sorted(payloads)),
+        encoding="utf-8",
+    )
+    _rewrite_binding_manifests(artifacts, version, payloads)
+
+
+def test_release_smoke_accepts_delta_package_and_history_feed(tmp_path: Path) -> None:
+    """差量构建形态:当前 full+delta、feed 带上一版 full 历史条目,整体通过。"""
+    artifacts = tmp_path / "artifacts"
+    _write_candidate(artifacts, "1.2.3")
+    _add_delta(artifacts, "1.2.3", "1.2.2")
+
+    release_smoke.check_release_smoke(artifacts, "1.2.3")
+
+
+def test_release_smoke_rejects_delta_file_without_feed_entry(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    _write_candidate(artifacts, "1.2.3")
+    _add_delta(artifacts, "1.2.3", "1.2.2")
+    feed = json.loads((artifacts / "releases.win.json").read_text(encoding="utf-8"))
+    feed["Assets"] = [asset for asset in feed["Assets"] if asset["Type"] != "Delta"]
+    (artifacts / "releases.win.json").write_text(json.dumps(feed), encoding="utf-8")
+    _rebind_feed(artifacts)
+
+    with pytest.raises(ValueError, match="[Dd]elta"):
+        release_smoke.check_release_smoke(artifacts, "1.2.3")
+
+
+def test_release_smoke_rejects_delta_entry_with_wrong_binding(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    _write_candidate(artifacts, "1.2.3")
+    _add_delta(artifacts, "1.2.3", "1.2.2")
+    feed = json.loads((artifacts / "releases.win.json").read_text(encoding="utf-8"))
+    next(asset for asset in feed["Assets"] if asset["Type"] == "Delta")["SHA256"] = "0" * 64
+    (artifacts / "releases.win.json").write_text(json.dumps(feed), encoding="utf-8")
+    _rebind_feed(artifacts)
+
+    with pytest.raises(ValueError, match="[Dd]elta"):
+        release_smoke.check_release_smoke(artifacts, "1.2.3")
+
+
+def test_release_smoke_rejects_unexpected_delta_version_entry(tmp_path: Path) -> None:
+    """feed 里不允许出现非当前版本的 Delta 条目(vpk 只对上一版做差量)。"""
+    artifacts = tmp_path / "artifacts"
+    _write_candidate(artifacts, "1.2.3")
+    _add_delta(artifacts, "1.2.3", "1.2.2")
+    feed = json.loads((artifacts / "releases.win.json").read_text(encoding="utf-8"))
+    next(asset for asset in feed["Assets"] if asset["Type"] == "Delta")["Version"] = "1.2.2"
+    (artifacts / "releases.win.json").write_text(json.dumps(feed), encoding="utf-8")
+    _rebind_feed(artifacts)
+
+    with pytest.raises(ValueError, match="[Dd]elta"):
+        release_smoke.check_release_smoke(artifacts, "1.2.3")
