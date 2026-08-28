@@ -195,6 +195,8 @@ def test_project_config_has_required_protocol_steps_and_mirrors() -> None:
     assert config["release"]["identity_asset"] == "build-identity.json"
     assert "SHA256SUMS" not in config["release"]["required_assets"]
     assert "release-manifest.json" not in config["release"]["required_assets"]
+    # 差量更新契约:full 之后必须有同版本 delta 资产,feed 由 Velopack 生成
+    assert "FileToolbox-{version}-delta.nupkg" in config["release"]["required_assets"]
 
 
 def test_only_canonical_workflows_remain() -> None:

@@ -30,6 +30,7 @@
     "generated_commands": [["python", "scripts/sync_version.py", "--version", "{version}"]],
     "required_assets": [
       "FileToolbox-{version}-full.nupkg",
+      "FileToolbox-{version}-delta.nupkg",
       "FileToolbox-v{version}-win-x64.zip",
       "releases.win.json",
       "checksums.txt",

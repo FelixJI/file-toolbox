@@ -48,6 +48,7 @@ _DIST = Path(os.environ.get("AUTOMATION_ARTIFACTS_DIR", _ROOT / "dist")).resolve
 _BUILD = _ROOT / "build"
 _ENTRY = _ROOT / "file_toolbox" / "gui_entry.py"
 _PRODUCT = "FileToolbox"
+_REPOSITORY = "FelixJI/file-toolbox"
 _VPK_VERSION = "1.2.0"
 
 cli = typer.Typer(add_completion=False, help="file-toolbox Nuitka 打包")
@@ -81,7 +82,7 @@ def _write_build_identity(version: str, payloads: list[Path]) -> None:
         "schema_version": 2,
         "project": {
             "component": "file-toolbox",
-            "repository": "FelixJI/file-toolbox",
+            "repository": _REPOSITORY,
             "version": version,
             "source_sha": source_sha,
         },
@@ -170,11 +171,78 @@ def _dotnet_executable() -> str:
     return dotnet
 
 
-def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Path]:
-    """用固定 vpk 打包，并只物化声明的正式资产。"""
+def _latest_release_tag() -> str | None:
+    """返回最新正式 Release 的 tag;仓库尚无 Release 时返回 None。"""
 
-    cmd = [
-        _dotnet_executable(),
+    result = subprocess.run(
+        ["gh", "api", f"repos/{_REPOSITORY}/releases/latest"],
+        cwd=str(_ROOT),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode == 0:
+        return str(json.loads(result.stdout)["tag_name"])
+    if "Not Found" in result.stderr:
+        return None
+    raise RuntimeError(
+        f"查询 {_REPOSITORY} 最新 Release 失败(exit {result.returncode}): {result.stderr.strip()}"
+    )
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.lstrip("v").split("."))
+
+
+def _previous_full_nupkg(output_dir: Path, version: str) -> Path | None:
+    """把上一正式版本的 full.nupkg 下载到 vpk 输出目录,作为差量基线。
+
+    无任何正式 Release(首版引导)或最新版本不低于当前版本(本地重建已发布
+    版本)时返回 None,安全降级为仅 full;Release 存在但下载失败时 fail closed。
+    """
+
+    tag = _latest_release_tag()
+    if tag is None:
+        return None
+    previous = tag.lstrip("v")
+    try:
+        previous_tuple = _version_tuple(previous)
+    except ValueError:
+        previous_tuple = ()
+    if len(previous_tuple) != 3:
+        raise RuntimeError(f"最新 Release tag 不是稳定语义版本: {tag!r}")
+    if previous_tuple >= _version_tuple(version):
+        return None
+    target = output_dir / f"{_PRODUCT}-{previous}-full.nupkg"
+    result = subprocess.run(
+        [
+            "gh",
+            "release",
+            "download",
+            tag,
+            "-R",
+            _REPOSITORY,
+            "-p",
+            f"{_PRODUCT}-{previous}-full.nupkg",
+            "-O",
+            str(target),
+        ],
+        cwd=str(_ROOT),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.returncode != 0 or not target.is_file():
+        raise RuntimeError(f"下载 {previous} full.nupkg 作为差量基线失败: {result.stderr.strip()}")
+    return target
+
+
+def _velopack_command(dotnet: str, product_dir: Path, version: str, output_dir: Path) -> list[str]:
+    """构造 vpk 打包命令(独立纯函数,供契约测试锁定 --delta 差量旗标)。"""
+    return [
+        dotnet,
         "dnx",
         f"vpk@{_VPK_VERSION}",
         "--",
@@ -192,7 +260,7 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
         "--channel",
         "win",
         "--delta",
-        "None",
+        "1",
         "--noInst",
         "--packTitle",
         _PRODUCT,
@@ -200,8 +268,18 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
         "--skip-updates",
         "true",
     ]
-    subprocess.run(cmd, cwd=str(_ROOT), check=True)
-    sources = {
+
+
+def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Path]:
+    """用固定 vpk 打包,并只物化声明的正式资产(有差量基线时含 delta)。"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    baseline = _previous_full_nupkg(output_dir, version)
+    subprocess.run(
+        _velopack_command(_dotnet_executable(), product_dir, version, output_dir),
+        cwd=str(_ROOT),
+        check=True,
+    )
+    sources: dict[str, tuple[str, ...]] = {
         f"{_PRODUCT}-{version}-full.nupkg": (f"{_PRODUCT}-{version}-full.nupkg",),
         f"{_PRODUCT}-v{version}-win-x64.zip": (
             f"{_PRODUCT}-Portable.zip",
@@ -209,6 +287,8 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
         ),
         "releases.win.json": ("releases.win.json",),
     }
+    if baseline is not None:
+        sources[f"{_PRODUCT}-{version}-delta.nupkg"] = (f"{_PRODUCT}-{version}-delta.nupkg",)
     copied: list[Path] = []
     for target_name, source_names in sources.items():
         source = next(

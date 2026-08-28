@@ -147,7 +147,7 @@ uv run python scripts/regen_ui.py --check
 
 ## 发布资产
 
-正式 Release 精确包含 Portable ZIP、Velopack full nupkg/feed、`checksums.txt`、
+正式 Release 精确包含 Portable ZIP、Velopack full/delta nupkg/feed、`checksums.txt`、
 `build-identity.json` 与 SPDX SBOM，不生成 Setup 安装器。版本与资产由自动化脚本生成；
 贡献者不应手改派生版本或手工创建正式 tag。
 
