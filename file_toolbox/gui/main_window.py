@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.logging_config import configure_logging
 from file_toolbox.common.metadata import VERSION
+from file_toolbox.common.runtime import is_packaged_runtime
 from file_toolbox.gui.freeze_watchdog import FreezeWatchdog
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
 from file_toolbox.updater import create_update_coordinator
@@ -193,8 +193,10 @@ class MainWindow(QMainWindow):
         self._update_worker.checked.connect(self._on_update_checked)
         self._manual_check_pending = False  # 区分手动 vs 自动检查(关于页懒构造后连接)
 
-        if getattr(sys, "frozen", False):  # pragma: no cover
+        if is_packaged_runtime():
             # 仅打包产物(Nuitka/Velopack)形态自动检查;开发态仍可从关于页手动检查。
+            # 不能只看 sys.frozen:Nuitka standalone 不设置它,便携包曾因此
+            # 被当成开发态,自动检查从未运行。
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
 
@@ -350,11 +352,27 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "更新失败",
-                f"{result.message}\n\n原程序未受影响，可稍后重试。",
+                f"{result.message}\n\n原程序未受影响,可稍后重试。",
             )
             return
+        self._shutdown_for_restart()
+
+    def _shutdown_for_restart(self) -> None:
+        """更新已由 Velopack 接管:收尾并真正退出进程,让更新器立即替换重启。
+
+        裸 ``QApplication.quit()`` 不经过 ``closeEvent``,UpdateWorker 的事件
+        循环会让进程再活 60s,更新器只能等超时后强杀(0.2.9-0.2.11 的实际
+        故障:确认更新到新版本启动约 95s,其中 60s 在等旧进程退出)。
+        """
         from PySide6.QtWidgets import QApplication
 
+        self._persist_window_geometry()
+        try:
+            if self._update_worker.isRunning():
+                self._update_worker.quit()
+                self._update_worker.wait(2000)
+        except Exception:
+            _logger.exception("关闭更新 worker 失败")
         QApplication.quit()
 
     # --- 窗口几何 ---
@@ -390,11 +408,15 @@ class MainWindow(QMainWindow):
         avail = self._available_geometry()
         self.resize(min(950, avail.width() - 40), min(640, avail.height() - 60))
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        # 记住窗口几何(含最大化状态),下次启动恢复
+    def _persist_window_geometry(self) -> None:
+        """保存窗口几何(含最大化状态)到 settings。"""
         from file_toolbox.common import settings
 
         settings.set(_GEOMETRY_KEY, bytes(self.saveGeometry().toBase64().data()).decode("ascii"))
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        # 记住窗口几何(含最大化状态),下次启动恢复
+        self._persist_window_geometry()
         # 退出自更新 worker 线程(若有)
         try:
             if self._update_worker.isRunning():

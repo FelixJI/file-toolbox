@@ -172,10 +172,33 @@ def test_cancel_requests_worker_stop(win):
 
 
 def test_apply_started_quits_after_sdk_schedules_update(win, monkeypatch):
+    """APPLY_STARTED 收尾契约:存几何、停 worker、退出——裸 quit 会让进程
+    拖住 60s 后才被更新器强杀(0.2.9-0.2.11 的实际故障)。"""
+
     quit_calls: list[int] = []
+    settings_calls: list[tuple[str, str]] = []
+    worker_calls: list[object] = []
+
+    class RunningWorkerStub:
+        def isRunning(self) -> bool:
+            return True
+
+        def quit(self) -> None:
+            worker_calls.append("quit")
+
+        def wait(self, ms: int) -> None:
+            worker_calls.append(("wait", ms))
+
     monkeypatch.setattr(QApplication, "quit", lambda: quit_calls.append(1))
+    monkeypatch.setattr(
+        "file_toolbox.common.settings.set",
+        lambda key, value: settings_calls.append((key, value)),
+    )
+    win._update_worker = RunningWorkerStub()  # type: ignore[assignment]
     win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED))
     assert quit_calls == [1]
+    assert worker_calls == ["quit", ("wait", 2000)]
+    assert [key for key, _value in settings_calls] == ["window/geometry"]
 
 
 def test_apply_failure_warns_without_quitting(win, monkeypatch):
