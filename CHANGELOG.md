@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.11
+
+### Features
+
+- **release:** 发布 Velopack 差量更新包并校验 feed 绑定 (#61) (0de19db)
+
+### Bug Fixes
+
+- **gui:** 修正关于页与 README 的过时自描述 (#59) (2c53fe5)
+
+### Performance
+
+- **pdf:** 引擎兑现结果跨进程持久缓存并设7天有效期 (#60) (1897fc5)
+
 ## 0.2.10
 
 ### Bug Fixes
