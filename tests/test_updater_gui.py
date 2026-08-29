@@ -68,6 +68,34 @@ class TestUpdateBanner:
         QTest.mouseClick(banner, Qt.MouseButton.LeftButton)
         assert clicked == [1]
 
+    def test_banner_is_focusable_button(self, app):
+        """回归:横幅曾是 QLabel+mousePressEvent,键盘与 UIA 均无法触发。
+
+        必须是可聚焦的按钮类控件(QPushButton 暴露 UIA Invoke 模式)。
+        """
+        from PySide6.QtWidgets import QPushButton
+
+        assert isinstance(UpdateBanner(), QPushButton)
+        assert UpdateBanner().focusPolicy() != Qt.FocusPolicy.NoFocus
+
+    def test_keyboard_space_triggers_clicked(self, app):
+        """Space 键触发 clicked(标准按钮键盘语义;Enter 仅对话框默认按钮场景)。"""
+        banner = UpdateBanner()
+        banner.show_result(_available())
+        clicked: list[int] = []
+        banner.clicked.connect(lambda: clicked.append(1))
+        QTest.keyClick(banner, Qt.Key.Key_Space)
+        assert clicked == [1]
+
+    def test_programmatic_click_triggers_clicked(self, app):
+        """click() 触发信号 —— UIA Invoke 模式的等价调用路径(自动化可点击)。"""
+        banner = UpdateBanner()
+        banner.show_result(_available())
+        clicked: list[int] = []
+        banner.clicked.connect(lambda: clicked.append(1))
+        banner.click()
+        assert clicked == [1]
+
 
 class TestUpdateWorker:
     # 前 4 个用例在主线程直调 worker 方法验证信号载荷:worker 亲和性在自身
