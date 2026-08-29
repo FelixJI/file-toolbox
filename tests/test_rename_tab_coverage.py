@@ -225,6 +225,75 @@ def test_execute_confirm_and_rename(dlg, monkeypatch, tmp_path):
     assert info_calls
 
 
+def test_execute_syncs_files_and_preview_to_new_paths(dlg, monkeypatch, tmp_path):
+    """执行后文件列表/预览必须落到新路径(回归:曾仍持旧路径,预览误报冲突+未知)。
+
+    旧行为:selected_files 保持 a.txt(已不存在),刷新预览时 new P_a.txt 已存在
+    → 状态列"⚠️ 文件名冲突",大小/时间列"未知"。修复后列表与预览基于新路径,
+    状态列为就绪、大小/时间可读取。
+    """
+    f1 = tmp_path / "a.txt"
+    f1.write_text("x")
+    dlg.selected_files = [f1]
+    dlg.ui.list_files.addItem(str(f1))
+    dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    dlg._execute()
+
+    new_path = tmp_path / "P_a.txt"
+    assert new_path.exists()
+    assert dlg.selected_files == [new_path]
+    assert dlg.ui.list_files.item(0).text() == str(new_path)
+    # 预览基于新路径:旧文件名不再出现,状态不再误报冲突,大小/时间不再"未知"
+    assert dlg.ui.table_preview.item(0, 0).text() == "P_a.txt"
+    assert "冲突" not in dlg.ui.table_preview.item(0, 4).text()
+    assert dlg.ui.table_preview.item(0, 2).text() != "未知"
+    assert dlg.ui.table_preview.item(0, 3).text() != "未知"
+
+
+def test_execute_failure_keeps_old_paths(dlg, monkeypatch, tmp_path):
+    """执行全部失败(如权限) → 文件列表保持原路径,不误同步。"""
+    f1 = tmp_path / "a.txt"
+    f1.write_text("x")
+    dlg.selected_files = [f1]
+    dlg.ui.list_files.addItem(str(f1))
+    dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(dlg._svc, "execute_rename", lambda m: (0, ["权限不足: a.txt"]))
+    dlg._execute()
+    assert f1.exists()
+    assert dlg.selected_files == [f1]
+    assert dlg.ui.list_files.item(0).text() == str(f1)
+
+
+def test_sync_selected_paths_partial_success(dlg, tmp_path):
+    """_sync_selected_paths_after_rename:仅同步成功项(原路径消失且新路径存在)。"""
+    old1, new1 = tmp_path / "a.txt", tmp_path / "P_a.txt"
+    old2, new2 = tmp_path / "b.txt", tmp_path / "P_b.txt"
+    new1.write_text("1")  # 已改名成功:仅新路径存在
+    old2.write_text("2")  # 改名失败:old2 仍在,new2 不存在
+    dlg.selected_files = [old1, old2]
+    dlg.ui.list_files.addItem(str(old1))
+    dlg.ui.list_files.addItem(str(old2))
+    dlg._sync_selected_paths_after_rename({old1: new1, old2: new2})
+    assert dlg.selected_files == [new1, old2]
+    assert dlg.ui.list_files.item(0).text() == str(new1)
+    assert dlg.ui.list_files.item(1).text() == str(old2)
+
+
+def test_sync_selected_paths_nothing_renamed_is_noop(dlg, tmp_path):
+    """无成功项 → selected_files 与列表控件均不变。"""
+    f1 = tmp_path / "a.txt"
+    f1.write_text("x")
+    dlg.selected_files = [f1]
+    dlg.ui.list_files.addItem(str(f1))
+    dlg._sync_selected_paths_after_rename({f1: tmp_path / "P_a.txt"})
+    assert dlg.selected_files == [f1]
+    assert dlg.ui.list_files.item(0).text() == str(f1)
+
+
 def test_execute_declined(dlg, monkeypatch, tmp_path):
     """用户选 No → 不执行(行 173-175)。"""
     f1 = tmp_path / "a.txt"
