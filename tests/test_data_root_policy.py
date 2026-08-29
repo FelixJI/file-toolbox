@@ -1,6 +1,7 @@
 """GUI/CLI 持久数据根的公共契约。"""
 
 import sys
+import types
 from pathlib import Path
 
 from file_toolbox.common.paths import (
@@ -44,6 +45,7 @@ def test_program_dir_source_run_is_repo_root(monkeypatch) -> None:
     import file_toolbox
     from file_toolbox.gui_entry import _program_dir
 
+    monkeypatch.setitem(sys.modules, "__main__", types.ModuleType("__main__"))
     monkeypatch.delattr(sys, "frozen", raising=False)
     assert _program_dir() == Path(file_toolbox.__file__).resolve().parent.parent
 
@@ -67,7 +69,24 @@ def test_program_dir_frozen_velopack_current_dir(tmp_path: Path, monkeypatch) ->
     assert _program_dir() == tmp_path / "FileToolbox"
 
 
-def test_frozen_gui_bootstrap_pins_program_data_root_and_home_cwd(
+def test_program_dir_nuitka_velopack_current_dir(tmp_path: Path, monkeypatch) -> None:
+    """Nuitka standalone 回归:不设 sys.frozen,sys.executable 是合成的 current/python.exe。
+
+    0.2.9-0.2.11 的旧实现走源码分支(依赖 __file__ 巧合落在 root),数据根
+    不得再依赖该巧合,应按打包形态从 exe 目录推导。
+    """
+    from file_toolbox.gui_entry import _program_dir
+
+    main = types.ModuleType("__main__")
+    main.__compiled__ = {}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "__main__", main)
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    exe = tmp_path / "FileToolbox" / "current" / "python.exe"
+    monkeypatch.setattr(sys, "executable", str(exe))
+    assert _program_dir() == tmp_path / "FileToolbox"
+
+
+def test_packaged_gui_bootstrap_pins_program_data_root_and_home_cwd(
     tmp_path: Path, monkeypatch
 ) -> None:
     from file_toolbox.gui_entry import prepare_gui_runtime
@@ -78,7 +97,7 @@ def test_frozen_gui_bootstrap_pins_program_data_root_and_home_cwd(
     install.mkdir(parents=True)
     monkeypatch.chdir(install)
 
-    with prepare_gui_runtime(frozen=True, program_dir=program, home=home):
+    with prepare_gui_runtime(packaged=True, program_dir=program, home=home):
         assert Path.cwd() == home
         assert get_data_dir() == program / ".file_toolbox"
     assert Path.cwd() == install
@@ -95,6 +114,6 @@ def test_development_gui_bootstrap_uses_program_policy_without_changing_cwd(
     workspace.mkdir()
     monkeypatch.chdir(workspace)
 
-    with prepare_gui_runtime(frozen=False, program_dir=program, home=home):
+    with prepare_gui_runtime(packaged=False, program_dir=program, home=home):
         assert Path.cwd() == workspace
         assert get_data_dir() == program / ".file_toolbox"

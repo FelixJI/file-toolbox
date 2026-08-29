@@ -5,11 +5,14 @@
 派发,导致投递的 do_check 事件被主线程事件循环取出、在主线程同步执行网络
 检查,GUI 冻结直至网络超时(freeze watchdog 日志:冻结约 31.6s)。本测试锁定:
 frozen 自动检查路径上 coordinator.check() 必须不在主线程执行。
+另锁定:Nuitka standalone 不设置 sys.frozen,自动检查 gate 必须同样生效
+(0.2.9-0.2.11 的 Nuitka 便携包曾因只看 sys.frozen 而从未自动检查)。
 """
 
 import sys
 import threading
 import time
+import types
 from collections.abc import Callable
 
 import pytest
@@ -52,6 +55,20 @@ def app():
 
 def test_frozen_auto_check_runs_off_main_thread(app, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
+    _assert_auto_check_runs_off_main_thread(app)
+
+
+def test_nuitka_auto_check_runs_off_main_thread(app, monkeypatch):
+    """Nuitka standalone 回归:无 sys.frozen,靠 __main__.__compiled__ 识别打包形态。"""
+
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    main = types.ModuleType("__main__")
+    main.__compiled__ = {}  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "__main__", main)
+    _assert_auto_check_runs_off_main_thread(app)
+
+
+def _assert_auto_check_runs_off_main_thread(app) -> None:
     coordinator = ThreadRecordingCoordinator()
     win = MainWindow(coordinator)
     try:
