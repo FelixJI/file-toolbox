@@ -3,9 +3,10 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QTableWidget,
+    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
     QWidget,
@@ -34,6 +36,9 @@ _CONFLICT_OPTIONS = {
     "逐个确认": ConflictStrategy.CONFIRM,
 }
 
+# 粘贴表初始空行数:表格 0 行时既无法点击输入也没有粘贴落点,必须预置可编辑空行。
+_INITIAL_ROWS = 8
+
 
 class BatchFolderCreatorDialog(QDialog):
     """批量创建文件夹对话框(作为 Tab 嵌入)。"""
@@ -50,6 +55,12 @@ class BatchFolderCreatorDialog(QDialog):
         self.ui.btn_cancel.setVisible(False)
         # label_error 带红色边框样式,默认空内容时会显示一个空红框 -> 默认隐藏
         self.ui.label_error.setVisible(False)
+
+        # 生成的 UI 初始 0 行:没有可点击/可粘贴的单元格,整个 Tab 无法输入。
+        # 预置空行兜底手动输入;Ctrl+V 粘贴由 _paste_tsv_into_table 处理。
+        self._paste_table().setRowCount(_INITIAL_ROWS)
+        # QTableWidget 不自带多单元格粘贴:拦截粘贴快捷键,按 TSV 解析剪贴板
+        self._paste_table().installEventFilter(self)
 
         self._add_conflict_selector()
         self._connect_signals()
@@ -102,8 +113,68 @@ class BatchFolderCreatorDialog(QDialog):
 
         self._refresh_preview()
 
-    def _on_table_changed(self) -> None:
+    def _on_table_changed(self, row: int, column: int) -> None:
+        """cellChanged:末行有输入时追加一个空行(保证可继续向下输入),再刷新状态。"""
+        tbl = self._paste_table()
+        item = tbl.item(row, column)
+        if row == tbl.rowCount() - 1 and item is not None and item.text():
+            tbl.setRowCount(row + 2)
         self._refresh_ui_state()
+
+    # ---------- 粘贴(Excel/单元格区域的 TSV) ----------
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        """拦截粘贴表的 Ctrl+V:QTableWidget 原生不支持多单元格粘贴。"""
+        if (
+            obj is self.ui.table_paste
+            and event.type() == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+            and event.matches(QKeySequence.StandardKey.Paste)
+            and self._paste_tsv_into_table()
+        ):
+            return True
+        return super().eventFilter(obj, event)
+
+    def _paste_tsv_into_table(self) -> bool:
+        """把剪贴板 TSV 文本粘到当前单元格位置,按需扩行扩列。返回是否处理。
+
+        解析委托 MkdirController.parse_tsv_grid(纯逻辑);无选中单元格时落到
+        (0, 0)。填充期间阻塞 cellChanged,避免逐格触发预览重建,最后统一刷新。
+        """
+        clipboard = QApplication.clipboard()
+        text = clipboard.text() if clipboard is not None else ""
+        grid = self._controller.parse_tsv_grid(text)
+        if not grid:
+            return False
+
+        tbl = self._paste_table()
+        index = tbl.currentIndex()
+        start_row = index.row() if index.isValid() else 0
+        start_col = index.column() if index.isValid() else 0
+
+        tbl.setRowCount(max(tbl.rowCount(), start_row + len(grid)))
+        need_cols = start_col + max(len(cells) for cells in grid)
+        if tbl.columnCount() < need_cols:
+            tbl.setColumnCount(need_cols)
+            for col in range(3, need_cols):
+                if tbl.horizontalHeaderItem(col) is None:
+                    tbl.setHorizontalHeaderItem(
+                        col, QTableWidgetItem(self._controller.level_header(col + 1))
+                    )
+
+        tbl.blockSignals(True)
+        try:
+            for r, cells in enumerate(grid):
+                for c, value in enumerate(cells):
+                    item = tbl.item(start_row + r, start_col + c)
+                    if item is None:
+                        tbl.setItem(start_row + r, start_col + c, QTableWidgetItem(value))
+                    else:
+                        item.setText(value)
+        finally:
+            tbl.blockSignals(False)
+        self._refresh_ui_state()
+        return True
 
     # ---------- 错误提示 ----------
 
@@ -123,7 +194,8 @@ class BatchFolderCreatorDialog(QDialog):
 
     def _clear(self) -> None:
         self._paste_table().clearContents()
-        self._paste_table().setRowCount(0)
+        # 清空后回到初始空行数(而非 0 行),保持可继续手动输入/粘贴
+        self._paste_table().setRowCount(_INITIAL_ROWS)
         self._show_error("")
         self._refresh_ui_state()
 
