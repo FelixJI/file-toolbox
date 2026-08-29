@@ -12,6 +12,7 @@ from typing import Any
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
 
+from file_toolbox.common import settings
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.invoice.service import InvoiceService
 from file_toolbox.core.invoice.types import ParseResult
@@ -22,6 +23,8 @@ from file_toolbox.gui.workers.invoice_worker import InvoiceParseWorker
 _DUP_COLOR = QColor(255, 242, 204)  # 浅黄(重复)
 _PDF_COLOR = QColor(230, 230, 230)  # 浅灰(PDF 弱解析)
 _INVOICE_EXTS = (".zip", ".xml", ".ofd", ".pdf")
+# 上次导出目录的 settings key:输出框留空时默认复用,避免每次落到程序目录
+_LAST_OUTDIR_KEY = "invoice/last_output_dir"
 _logger = logging.getLogger(__name__)
 
 
@@ -189,12 +192,27 @@ class InvoiceTab(QWidget):
                 self.ui.table.setItem(r, c, item)
 
     # --- 导出 ---
+    def _resolve_outdir(self) -> Path:
+        """导出目录解析:输出框内容 > 上次导出目录(仍存在) > 首个源文件所在目录 > 当前目录。
+
+        输出框留空时不再落到 "."(GUI 双击启动时即程序目录),默认跟随上次导出
+        或源文件所在目录。
+        """
+        text = self.ui.edit_outdir.text().strip()
+        if text:
+            return Path(text)
+        last = settings.get(_LAST_OUTDIR_KEY)
+        if isinstance(last, str) and last.strip() and Path(last.strip()).is_dir():
+            return Path(last.strip())
+        if self._files:
+            return self._files[0].parent
+        return Path(".")
+
     def _export(self) -> None:
         if not self._result or not self._result.invoices:
             QMessageBox.warning(self, "提示", "无数据可导出")
             return
-        outdir = self.ui.edit_outdir.text().strip() or "."
-        outdir_path = Path(outdir)
+        outdir_path = self._resolve_outdir()
         outdir_path.mkdir(parents=True, exist_ok=True)
         base = outdir_path / "发票结果"
         xlsx_path = base.with_suffix(".xlsx")
@@ -214,4 +232,5 @@ class InvoiceTab(QWidget):
             QMessageBox.critical(self, "导出失败", str(e))
             return
         # 历史记录已下沉 InvoiceService.export(注入了 history_store)
+        settings.set(_LAST_OUTDIR_KEY, str(outdir_path))
         QMessageBox.information(self, "完成", "已导出:\n" + "\n".join(str(w) for w in written))

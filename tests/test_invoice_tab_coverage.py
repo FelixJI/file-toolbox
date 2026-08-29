@@ -345,13 +345,15 @@ def test_export_failure_critical(tab, monkeypatch, tmp_path):
 
 
 def test_export_default_outdir(tab, monkeypatch, tmp_path):
-    """outdir 为空 → 默认 '.'(行 146)。"""
-    f1 = _xml(tmp_path / "1.xml", "1")
+    """输出框为空且无上次目录 → 默认首个源文件所在目录(回归:曾落到"."即程序目录)。"""
+    monkeypatch.chdir(tmp_path)  # settings(cwd-scoped)与回退目录均隔离在 tmp_path
+    src = tmp_path / "src"
+    src.mkdir()
+    f1 = _xml(src / "1.xml", "1")
     tab._files = [f1]
     tab._parse()
     _wait_parse(tab)
-    tab.ui.edit_outdir.setText("")  # 空
-    monkeypatch.chdir(tmp_path)
+    tab.ui.edit_outdir.setText("")
     info_calls = []
     monkeypatch.setattr(
         QMessageBox,
@@ -359,7 +361,64 @@ def test_export_default_outdir(tab, monkeypatch, tmp_path):
         lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
     )
     tab._export()
-    assert (tmp_path / "发票结果.xlsx").exists()
+    assert (src / "发票结果.xlsx").exists()
+    assert info_calls
+
+
+def test_export_reuses_last_output_dir(tab, monkeypatch, tmp_path):
+    """输出框为空 → 复用上次成功导出的目录(chdir 隔离 settings)。"""
+    monkeypatch.chdir(tmp_path)
+    f1 = _xml(tmp_path / "1.xml", "1")
+    tab._files = [f1]
+    tab._parse()
+    _wait_parse(tab)
+    out1 = tmp_path / "out1"
+    tab.ui.edit_outdir.setText(str(out1))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    tab._export()
+    assert (out1 / "发票结果.xlsx").exists()
+
+    # 第二次导出清空输入框:应落回上次目录 out1,而非 "." 或源文件目录
+    tab.ui.edit_outdir.setText("")
+    tab._export()
+    assert (out1 / "发票结果.xlsx").exists()
+    assert not (tmp_path / "发票结果.xlsx").exists()
+
+
+def test_export_stale_last_dir_falls_back_to_source_dir(tab, monkeypatch, tmp_path):
+    """上次目录已被删除 → 回退到首个源文件所在目录。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    settings.set("invoice/last_output_dir", str(tmp_path / "gone"))
+    src = tmp_path / "src"
+    src.mkdir()
+    f1 = _xml(src / "1.xml", "1")
+    tab._files = [f1]
+    tab._parse()
+    _wait_parse(tab)
+    tab.ui.edit_outdir.setText("")
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    tab._export()
+    assert (src / "发票结果.xlsx").exists()
+
+
+def test_export_failure_does_not_persist_outdir(tab, monkeypatch, tmp_path):
+    """导出失败 → 不记住目录(下次仍按默认解析)。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.common import settings
+
+    f1 = _xml(tmp_path / "1.xml", "1")
+    tab._files = [f1]
+    tab._parse()
+    _wait_parse(tab)
+    tab.ui.edit_outdir.setText(str(tmp_path / "bad"))
+    monkeypatch.setattr(
+        tab._svc, "export", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    tab._export()
+    assert settings.get("invoice/last_output_dir") is None
 
 
 # ---------------------------------------------------------------------------
