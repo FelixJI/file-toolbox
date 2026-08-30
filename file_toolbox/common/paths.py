@@ -65,6 +65,12 @@ def _data_dir() -> Path:
     return (policy or CliDataRootPolicy()).data_root()
 
 
+def current_data_root() -> Path:
+    """当前 policy 的数据根目录(只读,不创建)。单实例服务等身份派生场景使用。"""
+
+    return _data_dir()
+
+
 def get_data_dir() -> Path:
     """获取(并创建)数据根目录。供模板等持久化文件落位。"""
     d = _data_dir()

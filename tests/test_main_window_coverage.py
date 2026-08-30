@@ -353,6 +353,11 @@ def test_about_tab_content_scrollable(app):
 def test_run_gui_creates_and_shows_window(monkeypatch, tmp_path):
     import sys
 
+    from file_toolbox.gui.single_instance import SingleInstanceGuard
+
+    # 恒为主实例:本机若恰有同数据根的 GUI 在跑,真实守卫会把本测试导向
+    # secondary 早退分支,窗口断言随之失败 —— 单例行为另由 test_single_instance 覆盖。
+    monkeypatch.setattr(SingleInstanceGuard, "acquire", lambda self: True)
     modes: list[str] = []
     shown: list[int] = []
     fake_window = MagicMock()
