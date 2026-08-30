@@ -448,11 +448,25 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
+def _activate_window(window: QWidget) -> None:
+    """把既有主窗口取消最小化并提前(单实例守卫收到重复启动请求时调用)。"""
+
+    window.setWindowState(
+        (window.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive
+    )
+    window.show()
+    window.raise_()
+    window.activateWindow()
+
+
 def run_gui() -> None:
     """启动 GUI(供 cli gui 子命令调用)。"""
     import sys
 
     from PySide6.QtWidgets import QApplication
+
+    from file_toolbox.common.paths import current_data_root
+    from file_toolbox.gui.single_instance import SingleInstanceGuard, server_name_for
 
     log_file = configure_logging(mode="gui")
     _logger.info("GUI 初始化")
@@ -461,8 +475,15 @@ def run_gui() -> None:
     app = QApplication.instance() or QApplication(sys.argv)
     _logger.info("QApplication 就绪 耗时=%.0fms", (time.perf_counter() - t0) * 1000)
     watchdog.start(app)
+    guard = SingleInstanceGuard(server_name_for(current_data_root()))
+    if not guard.acquire():
+        # 重复启动:激活既有实例窗口后本进程退出,避免两个 GUI 抢写同一份
+        # settings/历史,也避免用户看到"程序打开了两次"。
+        _logger.info("检测到已运行的 GUI 实例,本次启动退出")
+        return
     t0 = time.perf_counter()
     win = MainWindow()
+    guard.activateRequested.connect(lambda: _activate_window(win))
     _logger.info("主窗口构造完成 耗时=%.0fms", (time.perf_counter() - t0) * 1000)
     win.show()
     _logger.info("进入事件循环")
