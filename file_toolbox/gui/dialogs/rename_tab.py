@@ -167,12 +167,35 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
             return
         count, errors = self._svc.execute_rename(ready)
         # 历史记录已下沉 FileRenameService.execute_rename(注入了 history_store)
+        self._sync_selected_paths_after_rename(ready)
         QMessageBox.information(
             self,
             "完成",
             f"已重命名 {count} 个文件。" + ("\n" + "\n".join(errors) if errors else ""),
         )
         self._do_refresh_preview()
+
+    def _sync_selected_paths_after_rename(self, rename_map: dict[Path, Path]) -> None:
+        """执行后把 selected_files 与文件列表控件同步到重命名后的新路径。
+
+        成功项判定为"原路径已消失且新路径存在"(失败/目标已存在项保持原路径)。
+        不同步的话,随后刷新的预览会基于已不存在的旧路径计算:状态列误报
+        "文件名冲突",大小/时间列显示"未知"(与内容替换 Tab 执行后即刷新的行为
+        不一致)。
+        """
+        renamed = {
+            str(old): str(new)
+            for old, new in rename_map.items()
+            if not old.exists() and new.exists()
+        }
+        if not renamed:
+            return
+        self.selected_files = [Path(renamed.get(str(p), str(p))) for p in self.selected_files]
+        for row in range(self.ui.list_files.count()):
+            item = self.ui.list_files.item(row)
+            new_text = renamed.get(item.text())
+            if new_text is not None:
+                item.setText(new_text)
 
     def _show_history(self) -> None:
         records = self._history.get_records("rename")

@@ -14,12 +14,34 @@ from file_toolbox.core.batch_mkdir import FolderCreatorService
 class MkdirController:
     """建文件夹 Tab 的业务编排(纯 Python)。
 
-    - collect_structures:从粘贴表读取的二维文本构建层级结构元组。
+    - collect_structures:从粘贴表的二维文本构建层级结构元组。
     - find_invalid_names:找出含非法字符的文件夹名。
+    - parse_tsv_grid / level_header:粘贴(Ctrl+V)输入的解析与列头生成。
     """
 
     def __init__(self, svc: FolderCreatorService | None = None):
         self._svc = svc or FolderCreatorService()
+
+    _CN_NUMERALS = "一二三四五六七八九十"
+
+    @classmethod
+    def level_header(cls, level: int) -> str:
+        """层级 level(从 1 起)的列头文本,如"一级文件夹"。超过十退回阿拉伯数字。"""
+        numeral = cls._CN_NUMERALS[level - 1] if 1 <= level <= len(cls._CN_NUMERALS) else str(level)
+        return f"{numeral}级文件夹"
+
+    @staticmethod
+    def parse_tsv_grid(text: str) -> list[list[str]]:
+        """解析剪贴板 TSV 文本(Excel/单元格区域复制)为二维网格。
+
+        按 \\n 分行、\\t 分列;行尾 \\r 归一化;去掉末尾的空行(复制操作通常
+        带一个尾随换行,Excel 选区末尾的空行不是结构的一部分)。
+        整体为空 → 返回 []。行长度可以不齐(锯齿网格由调用方逐行填充)。
+        """
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        while lines and not lines[-1].strip():
+            lines.pop()
+        return [line.split("\t") for line in lines]
 
     def collect_structures(self, rows: list[list[str]]) -> list[tuple[str, ...]]:
         """从粘贴表的二维文本(每行一个 list[cell_text])构建层级结构。

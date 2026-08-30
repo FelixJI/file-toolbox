@@ -17,9 +17,8 @@ from __future__ import annotations
 import logging
 from threading import Event
 
-from PySide6.QtCore import QThread, Signal, Slot
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtCore import Qt, QThread, Signal, Slot
+from PySide6.QtWidgets import QPushButton, QWidget
 
 from file_toolbox.updater.coordinator import UpdateCancelled, UpdateCoordinator
 from file_toolbox.updater.models import (
@@ -32,27 +31,29 @@ from file_toolbox.updater.models import (
 _logger = logging.getLogger(__name__)
 
 
-class UpdateBanner(QLabel):
-    """状态栏更新提示条。默认隐藏,有新版时 show_release() 显示。
+class UpdateBanner(QPushButton):
+    """状态栏更新提示按钮。默认隐藏,有新版时 show_result() 显示。
 
-    点击触发 clicked 信号(主窗口据此启动下载)。
+    用 QPushButton 而非 QLabel + mousePressEvent:可 Tab 聚焦、Enter/Space 可
+    触发,UIA 暴露 Invoke 模式 —— 键盘用户与 UI 自动化均能点击(内置 clicked
+    信号,主窗口据此启动下载)。
     """
-
-    clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setFlat(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("下载并安装新版本")
         self.setStyleSheet(
-            "color: #0969da; padding: 2px 8px; cursor: pointer; text-decoration: underline;"
+            "QPushButton { color: #0969da; padding: 2px 8px; border: none; "
+            "background: transparent; text-decoration: underline; }"
         )
         self.hide()
 
     def show_result(self, result: UpdateCheckResult) -> None:
         self.setText(f"🆕 发现新版本 {result.version} · 点击更新")
         self.show()
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt 命名)
-        self.clicked.emit()
 
 
 class UpdateWorker(QThread):
