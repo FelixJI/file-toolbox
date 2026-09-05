@@ -404,6 +404,36 @@ def png_sample(tmp_path) -> Path:
     return p
 
 
+# --- 虚构 Excel 工厂 fixture(openpyxl 生成,供 excel merge 的 core/CLI/GUI/worker 测试共享) ---
+@pytest.fixture
+def make_xlsx(tmp_path):
+    """工厂 fixture:make_xlsx(名称, {工作表名: 行数据}) -> Path,生成虚构 xlsx。
+
+    extra_sheets 参数可传 {工作表名: sheet_state} 额外建空表(如 hidden)。
+    """
+
+    def _make(
+        name: str,
+        sheets: dict[str, list[list[object]]],
+        extra_sheets: dict[str, str] | None = None,
+    ) -> Path:
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        wb.remove(wb.active)
+        for title, rows in sheets.items():
+            ws = wb.create_sheet(title)
+            for row in rows:
+                ws.append(row)
+        for title, state in (extra_sheets or {}).items():
+            wb.create_sheet(title).sheet_state = state
+        path = tmp_path / name
+        wb.save(path)
+        return path
+
+    return _make
+
+
 # --- 虚构 PDF fixture:模拟真实发票形态(拆字表头+长单价+购/销标签) ---
 @pytest.fixture
 def pdf_sample_realistic(tmp_path) -> Path:

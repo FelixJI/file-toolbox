@@ -9,6 +9,7 @@ pypdfium2/pypdf)与 replace_controller(core.batch_replace → chardet)会随
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from file_toolbox.gui.controllers.excel_merge_controller import ExcelMergeController
     from file_toolbox.gui.controllers.invoice_controller import InvoiceController
     from file_toolbox.gui.controllers.mkdir_controller import MkdirController
     from file_toolbox.gui.controllers.pdf_controller import PDFConfigState, PDFController
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from file_toolbox.gui.controllers.replace_controller import ReplaceController
 
 __all__ = [
+    "ExcelMergeController",
     "InvoiceController",
     "MkdirController",
     "PDFConfigState",
@@ -26,6 +28,7 @@ __all__ = [
 
 # 属性名 -> (子模块名, 子模块内属性名)。
 _LAZY_ATTRS: dict[str, tuple[str, str]] = {
+    "ExcelMergeController": ("excel_merge_controller", "ExcelMergeController"),
     "InvoiceController": ("invoice_controller", "InvoiceController"),
     "MkdirController": ("mkdir_controller", "MkdirController"),
     "PDFConfigState": ("pdf_controller", "PDFConfigState"),

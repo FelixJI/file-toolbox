@@ -1,4 +1,4 @@
-"""File Toolbox 主窗口：QMainWindow + 6 个功能 Tab。"""
+"""File Toolbox 主窗口：QMainWindow + 7 个功能 Tab。"""
 
 from __future__ import annotations
 
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     # 避免 dialogs 包(及其重依赖 pypdfium2/pypdf/chardet/cattrs)进入启动链。
     from file_toolbox.gui.dialogs.about_tab import AboutTab
     from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab
+    from file_toolbox.gui.dialogs.excel_merge_tab import ExcelMergeTab
     from file_toolbox.gui.dialogs.invoice_tab import InvoiceTab
     from file_toolbox.gui.dialogs.mkdir_tab import BatchFolderCreatorDialog
     from file_toolbox.gui.dialogs.pdf_tab import PDFGeneratorDialog
@@ -89,6 +90,12 @@ def _make_invoice_tab() -> InvoiceTab:
     return InvoiceTab()
 
 
+def _make_excel_merge_tab() -> ExcelMergeTab:
+    from file_toolbox.gui.dialogs.excel_merge_tab import ExcelMergeTab
+
+    return ExcelMergeTab()
+
+
 def _make_about_tab() -> AboutTab:
     from file_toolbox.gui.dialogs.about_tab import AboutTab
 
@@ -104,7 +111,7 @@ def _construct_tab(factory: Callable[[], QWidget], name: str) -> QWidget:
 
 
 class MainWindow(QMainWindow):
-    """工具箱主窗口，6 个功能 Tab。"""
+    """工具箱主窗口，7 个功能 Tab。"""
 
     def __init__(self, coordinator: UpdateCoordinator | None = None) -> None:
         super().__init__()
@@ -129,7 +136,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
-        # 6 个功能 Tab + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
+        # 7 个功能 Tab + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
         # 均懒导入,首次构造某 Tab 时才 import;首屏只构造重命名 Tab。
         # 打包形态下真实平台主窗口构造可达 ~1.7s,大头是首个控件初始化链
         # 之后的各 Tab 陆续构造;懒掉非首屏 Tab 让首帧只付首 Tab 的成本。
@@ -141,6 +148,7 @@ class MainWindow(QMainWindow):
         self._replace_tab: ContentReplaceDialog | None = None
         self._attendance_tab: AttendanceTab | None = None
         self._invoice_tab: InvoiceTab | None = None
+        self._excel_merge_tab: ExcelMergeTab | None = None
         self._about_tab: AboutTab | None = None
         # 懒构造登记:index -> (标签文本, Tab 工厂, 属性名);占位页被真实 Tab 原位替换。
         # 含首屏(重命名):由 __init__ 末尾的 _on_tab_changed 统一触发构造。
@@ -154,6 +162,7 @@ class MainWindow(QMainWindow):
                     ("内容替换", _make_replace_tab, "_replace_tab"),
                     ("考勤汇总", _make_attendance_tab, "_attendance_tab"),
                     ("发票识别", _make_invoice_tab, "_invoice_tab"),
+                    ("Excel合并", _make_excel_merge_tab, "_excel_merge_tab"),
                     ("关于", _make_about_tab, "_about_tab"),
                 ]
             )
@@ -168,6 +177,7 @@ class MainWindow(QMainWindow):
             "replace",
             "attendance",
             "invoice",
+            "excel_merge",
             None,
         ]
         tabs.currentChanged.connect(self._on_tab_changed)
@@ -431,6 +441,7 @@ class MainWindow(QMainWindow):
             self._replace_tab,
             self._attendance_tab,
             self._invoice_tab,
+            self._excel_merge_tab,
             self._about_tab,
         ):
             # 懒构造 Tab 可能尚未实例化(用户未切换过),无实例即无清理
