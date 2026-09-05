@@ -63,20 +63,24 @@ def main() -> None:
     """CLI 统一入口,把 OpParseError 转成友好中文提示而非 Python traceback。
 
     `file-toolbox` 命令(pyproject console_script 指向本函数)与
-    `python -m file_toolbox` 两条路径都经此入口。
-    standalone_mode=False 使 typer.Exit 以异常抛出,便于在此统一处理。
+    `python -m file_toolbox` 两条路径都经此入口。退出码两条路径都接:
+    typer 0.27 的 standalone_mode=False 把命令内 `raise typer.Exit(code)` 转成
+    app() 的返回值(而非重新抛出),必须消费返回值,否则错误路径会以 0 退出;
+    同时保留 except typer.Exit 兜底,兼容未来版本改为抛出的行为。
     """
     configure_logging(mode="cli")
     logger = logging.getLogger(__name__)
     try:
-        app(standalone_mode=False)
+        rv = app(standalone_mode=False)
     except OpParseError as e:
         logger.warning("CLI 参数文件解析失败: %s", e)
         typer.secho(f"错误:{e}", fg=typer.colors.RED, err=True)
         raise SystemExit(1) from e
     except typer.Exit as e:
-        # standalone_mode=False 下 typer.Exit 以异常抛出,按其退出码退出
         raise SystemExit(e.exit_code) from e
+    if rv:
+        # None(无返回值命令)与 0 均为成功;非 0 按该退出码退出
+        raise SystemExit(rv)
 
 
 if __name__ == "__main__":  # pragma: no cover

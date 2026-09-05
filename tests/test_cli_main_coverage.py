@@ -89,6 +89,21 @@ def test_main_typer_exit_propagates_exit_code(monkeypatch):
     assert exc_info.value.code == 42
 
 
+def test_main_consumes_returned_exit_code(monkeypatch):
+    """main():app() 返回非 0 退出码 → SystemExit(该码)。
+
+    回归:typer 0.27 的 standalone_mode=False 把命令内 raise typer.Exit(code)
+    转成 app() 的返回值而非重新抛出;旧实现不消费返回值,所有错误路径
+    (rename/mkdir/pdf/replace/invoice 的 Exit(1))在真实入口
+    (file-toolbox 命令 / python -m)都以 0 退出,仅 CliRunner 因自身捕获
+    click Exit 而显示 1,掩盖了该缺陷。
+    """
+    monkeypatch.setattr(main_mod, "app", lambda *a, **k: 3)
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 3
+
+
 def test_main_normal_completion_exit_zero(monkeypatch):
     """main():正常完成(无异常)→ 不抛 SystemExit。"""
     modes = []
