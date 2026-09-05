@@ -45,6 +45,12 @@ def _summary_label(tool: str, data: dict[str, Any]) -> str:
         files = data.get("file_count", 0)
         fmt = data.get("fmt", "?")
         return f"{inv} 张发票 / {files} 文件 [{fmt}]"
+    if tool == "excel_merge":
+        sheets = data.get("sheet_count", 0)
+        files = data.get("file_count", 0)
+        naming = data.get("naming", "?")
+        output = Path(str(data.get("output", ""))).name
+        return f"{sheets} 工作表 / {files} 文件 [{naming}] → {output}"
     if tool == "attendance":
         employees = data.get("employee_count", 0)
         year = data.get("year", "?")

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .about_tab import AboutTab
     from .attendance_tab import AttendanceTab
+    from .excel_merge_tab import ExcelMergeTab
     from .history_dialog import HistoryDialog
     from .invoice_tab import InvoiceTab
     from .mkdir_tab import BatchFolderCreatorDialog
@@ -25,6 +26,7 @@ __all__ = [
     "ContentReplaceDialog",
     "HistoryDialog",
     "InvoiceTab",
+    "ExcelMergeTab",
     "AboutTab",
     "AttendanceTab",
 ]
@@ -33,6 +35,7 @@ __all__ = [
 _LAZY_ATTRS: dict[str, str] = {
     "AboutTab": "about_tab",
     "AttendanceTab": "attendance_tab",
+    "ExcelMergeTab": "excel_merge_tab",
     "HistoryDialog": "history_dialog",
     "InvoiceTab": "invoice_tab",
     "BatchFolderCreatorDialog": "mkdir_tab",

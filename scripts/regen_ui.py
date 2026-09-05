@@ -86,6 +86,7 @@ UI_SOURCES: list[UiMapping] = [
 # 其余 dialog(pdf/rename/replace)历史文件含手写惯用法(setHorizontalHeaderLabels 等),
 # pyside6-uic 无法精确复现,在补齐 .ui 前暂归手维护。详见 task-6-report.md。
 HANDMADE: set[str] = {
+    "ui_excel_merge_dialog.py",
     "ui_invoice_dialog.py",
     "ui_pdf_dialog.py",
     "ui_rename_dialog.py",

@@ -473,6 +473,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cattrs" },
     { name = "chardet" },
+    { name = "openpyxl" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "psutil" },
@@ -498,7 +499,6 @@ gui = [
     { name = "pyside6" },
 ]
 invoice = [
-    { name = "openpyxl" },
     { name = "pdfplumber" },
 ]
 
@@ -508,7 +508,7 @@ requires-dist = [
     { name = "chardet", specifier = ">=5.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "nuitka", marker = "extra == 'dev'", specifier = ">=2.6" },
-    { name = "openpyxl", marker = "extra == 'invoice'", specifier = ">=3.1" },
+    { name = "openpyxl", specifier = ">=3.1" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pdfplumber", marker = "extra == 'invoice'", specifier = ">=0.11" },
     { name = "pillow", specifier = ">=10.0" },
