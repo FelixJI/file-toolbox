@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.12
+
+### Features
+
+- **excel-merge:** 新增合并多个 Excel 工作簿为一个工作簿的功能 (#69) (89de65b)
+
+### Bug Fixes
+
+- **gui:** 重复启动改为激活既有实例,杜绝 GUI 双开 (#67) (46e2139)
+- **gui:** 修复建文件夹粘贴、重命名预览、发票导出目录与更新横幅可访问性缺陷 (#65) (809c103)
+- **updater:** 修复 Nuitka 便携包的 Velopack 更新链路失效 (#64) (546b0fe)
+
+### Dependencies
+
+- **deps:** bump pypdf from 6.16.0 to 6.16.1 (#68) (0a92492)
+
 ## 0.2.11
 
 ### Features
