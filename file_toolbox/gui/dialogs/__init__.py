@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .history_dialog import HistoryDialog
     from .invoice_tab import InvoiceTab
     from .mkdir_tab import BatchFolderCreatorDialog
+    from .pdf_sort_tab import PdfSortTab
     from .pdf_tab import PDFGeneratorDialog
     from .rename_tab import FileRenamerDialog
     from .replace_tab import ContentReplaceDialog
@@ -27,6 +28,7 @@ __all__ = [
     "HistoryDialog",
     "InvoiceTab",
     "ExcelMergeTab",
+    "PdfSortTab",
     "AboutTab",
     "AttendanceTab",
 ]
@@ -39,6 +41,7 @@ _LAZY_ATTRS: dict[str, str] = {
     "HistoryDialog": "history_dialog",
     "InvoiceTab": "invoice_tab",
     "BatchFolderCreatorDialog": "mkdir_tab",
+    "PdfSortTab": "pdf_sort_tab",
     "PDFGeneratorDialog": "pdf_tab",
     "FileRenamerDialog": "rename_tab",
     "ContentReplaceDialog": "replace_tab",
