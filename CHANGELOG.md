@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+### Features
+
+- **pdf-sort:** 新增按文字层匹配排序键重排 PDF 页面的功能 (#71) (4d9e18e)
+
 ## 0.2.12
 
 ### Features
