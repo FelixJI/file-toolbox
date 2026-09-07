@@ -10,6 +10,7 @@ from file_toolbox.cli.invoice_cmd import invoice
 from file_toolbox.cli.mkdir_cmd import mkdir
 from file_toolbox.cli.op_parser import OpParseError
 from file_toolbox.cli.pdf_cmd import pdf
+from file_toolbox.cli.pdf_sort_cmd import pdf_sort
 from file_toolbox.cli.rename_cmd import rename
 from file_toolbox.cli.replace_cmd import replace
 from file_toolbox.common.logging_config import configure_logging
@@ -18,7 +19,7 @@ from file_toolbox.common.logging_config import configure_logging
 # pretty_exceptions_enable=False 关闭 Typer 对它的彩色堆栈包装,改由这里统一处理。
 app = typer.Typer(
     name="file-toolbox",
-    help="批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、Excel 合并",
+    help="批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、Excel 合并、PDF 排序",
     invoke_without_command=True,
     pretty_exceptions_show_locals=False,
 )
@@ -38,10 +39,11 @@ def gui() -> None:
         raise typer.Exit(1) from e
 
 
-# 注册 6 个命令(平铺,避免子 app 嵌套)
+# 注册 7 个命令(平铺,避免子 app 嵌套)
 app.command(name="rename")(rename)
 app.command(name="mkdir")(mkdir)
 app.command(name="pdf")(pdf)
+app.command(name="pdf-sort")(pdf_sort)
 app.command(name="replace")(replace)
 app.command(name="invoice")(invoice)
 app.command(name="excel-merge")(excel_merge)

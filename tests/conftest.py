@@ -527,3 +527,26 @@ def pdf_sample_realistic(tmp_path) -> Path:
 
     c.save()
     return pdf_path
+
+
+@pytest.fixture
+def make_text_pdf(tmp_path):
+    """工厂:make_text_pdf(名称, [每页文字]) -> Path,生成每页一段文字的 PDF。
+
+    reportlab 逐页 drawString,pypdf extract_text 可逐页取回文字,
+    供 pdf_sort 的匹配/排序测试使用。默认 Helvetica 仅支持 ASCII 文字;
+    中文标签的匹配容错用纯字符串在 core/pdf_sort/keys 单测覆盖。
+    """
+
+    def _make(name: str, page_texts: list[str]) -> Path:
+        from reportlab.pdfgen import canvas
+
+        pdf_path = tmp_path / name
+        c = canvas.Canvas(str(pdf_path), pagesize=(612, 792))
+        for text in page_texts:
+            c.drawString(72, 700, text)
+            c.showPage()
+        c.save()
+        return pdf_path
+
+    return _make

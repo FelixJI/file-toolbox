@@ -89,6 +89,7 @@ HANDMADE: set[str] = {
     "ui_excel_merge_dialog.py",
     "ui_invoice_dialog.py",
     "ui_pdf_dialog.py",
+    "ui_pdf_sort_dialog.py",
     "ui_rename_dialog.py",
     "ui_replace_dialog.py",
 }

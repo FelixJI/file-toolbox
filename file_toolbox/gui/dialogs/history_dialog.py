@@ -57,6 +57,12 @@ def _summary_label(tool: str, data: dict[str, Any]) -> str:
         month = data.get("month", "?")
         output = Path(str(data.get("output", ""))).name
         return f"{year}-{month} / {employees} 人 → {output}"
+    if tool == "pdf_sort":
+        pages = data.get("page_count", 0)
+        files = data.get("file_count", 0)
+        outputs = data.get("outputs", [])
+        order = data.get("order", "?")
+        return f"{pages} 页 / {files} 文件 [{order}] → {len(outputs)} 个输出"
     return str(data)[:40]
 
 

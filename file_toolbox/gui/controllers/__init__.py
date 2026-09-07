@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from file_toolbox.gui.controllers.invoice_controller import InvoiceController
     from file_toolbox.gui.controllers.mkdir_controller import MkdirController
     from file_toolbox.gui.controllers.pdf_controller import PDFConfigState, PDFController
+    from file_toolbox.gui.controllers.pdf_sort_controller import PdfSortController
     from file_toolbox.gui.controllers.rename_controller import RenameController
     from file_toolbox.gui.controllers.replace_controller import ReplaceController
 
@@ -22,6 +23,7 @@ __all__ = [
     "MkdirController",
     "PDFConfigState",
     "PDFController",
+    "PdfSortController",
     "RenameController",
     "ReplaceController",
 ]
@@ -33,6 +35,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "MkdirController": ("mkdir_controller", "MkdirController"),
     "PDFConfigState": ("pdf_controller", "PDFConfigState"),
     "PDFController": ("pdf_controller", "PDFController"),
+    "PdfSortController": ("pdf_sort_controller", "PdfSortController"),
     "RenameController": ("rename_controller", "RenameController"),
     "ReplaceController": ("replace_controller", "ReplaceController"),
 }

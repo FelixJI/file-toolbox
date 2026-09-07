@@ -14,14 +14,14 @@
 </div>
 
 File Toolbox 把批量重命名、批量建文件夹、生成 PDF、内容替换、考勤汇总、发票识别和
-Excel 合并集中到同一个 CLI 与 PySide6 桌面界面中。批量重命名、内容替换、发票识别和
-Excel 合并默认只预览结果，显式传入 `--yes` 才会执行；建文件夹会先列出将要创建的目录
-清单，生成 PDF 在执行过程中逐文件报告进度。
+Excel 合并、PDF 排序集中到同一个 CLI 与 PySide6 桌面界面中。批量重命名、内容替换、
+发票识别、PDF 排序和 Excel 合并默认只预览结果，显式传入 `--yes` 才会执行；建文件夹会先
+列出将要创建的目录清单，生成 PDF 在执行过程中逐文件报告进度。
 
 > [!IMPORTANT]
 > Word / Excel / PowerPoint 转 PDF、Word / Excel 内容替换和考勤汇总依赖 Windows 上的
 > Microsoft Office（转 PDF 亦支持 WPS）；批量重命名、建文件夹、图片转 PDF、txt 替换、
-> 发票识别和 Excel 合并可在 Windows、macOS 和 Linux 上使用。
+> 发票识别、PDF 排序和 Excel 合并可在 Windows、macOS 和 Linux 上使用。
 
 ## 主要功能
 
@@ -34,6 +34,7 @@ Excel 合并默认只预览结果，显式传入 `--yes` 才会执行；建文�
 | 考勤汇总 | — | ✓ | 按 Excel 考勤表方案汇总，预览后另存；仅 Windows + Excel |
 | 发票识别 | ✓ | ✓ | 解析 PDF/OFD/XML 电子发票，导出 Excel/JSON，支持去重 |
 | Excel 合并 | ✓ | ✓ | 多个 xlsx/xlsm 的全部工作表合并为一个工作簿，保留值与样式，工作表名防冲突，输出永不覆盖已有文件 |
+| PDF 排序 | ✓ | ✓ | 按文字层正则匹配每页排序键（日期/流水号等）重排页面，适合单页单据扫描件归档；需含文字层，源文件不被修改 |
 
 ## 下载与使用
 
