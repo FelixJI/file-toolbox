@@ -368,3 +368,96 @@ def test_close_event_stops_running_worker(tab, monkeypatch):
 def test_close_event_without_worker_noop(tab):
     tab._worker = None
     tab.closeEvent(QCloseEvent())  # 不抛错即通过
+
+
+# ==================== 文件选择与输出目录 ====================
+
+
+def test_add_files_dialog_appends_pdfs(tab, make_text_pdf, monkeypatch):
+    first = make_text_pdf("a.pdf", ["a"])
+    second = make_text_pdf("b.pdf", ["b"])
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_sort_tab.QFileDialog.getOpenFileNames",
+        lambda *args: ([str(first), str(second)], ""),
+    )
+
+    tab._add_files()
+
+    assert [p.name for p in tab._files] == ["a.pdf", "b.pdf"]
+    assert "已选择 2 个文件" in tab.ui.lbl_status.text()
+
+
+def test_add_folder_recursive_and_flat_modes(tab, make_text_pdf, monkeypatch, tmp_path):
+    make_text_pdf("top.pdf", ["top"])
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
+    nested = make_text_pdf("nested/nested.pdf", ["nested"])
+    assert nested.parent == nested_dir
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_sort_tab.QMessageBox.question",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_sort_tab.QFileDialog.getExistingDirectory",
+        lambda *args: str(tmp_path),
+    )
+
+    tab._add_folder()
+
+    assert {p.name for p in tab._files} == {"top.pdf", "nested.pdf"}
+
+    tab._clear()
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_sort_tab.QMessageBox.question",
+        lambda *args: QMessageBox.StandardButton.No,
+    )
+
+    tab._add_folder()
+
+    assert [p.name for p in tab._files] == ["top.pdf"]
+
+
+def test_add_folder_cancelled_keeps_list_empty(tab, monkeypatch):
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_sort_tab.QFileDialog.getExistingDirectory",
+        lambda *args: "",
+    )
+
+    tab._add_folder()
+
+    assert tab._files == []
+
+
+def test_browse_outdir_sets_edit(tab, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_sort_tab.QFileDialog.getExistingDirectory",
+        lambda *args: str(tmp_path),
+    )
+
+    tab._browse_outdir()
+
+    assert tab.ui.edit_outdir.text() == str(tmp_path)
+
+
+def test_resolve_outdir_uses_last_output_dir_setting(tab, make_text_pdf, monkeypatch):
+    from file_toolbox.common import settings
+
+    out = make_text_pdf("out.pdf", ["x"])
+    monkeypatch.setattr(settings, "get", lambda key, default=None: str(out.parent))
+    tab.ui.edit_outdir.clear()
+
+    assert tab._resolve_outdir() == out.parent
+
+
+def test_on_sort_ok_failure_shows_warning_without_outputs(tab, monkeypatch, make_text_pdf):
+    make_text_pdf("a.pdf", ["a"])
+    warned: list[str] = []
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.pdf_sort_tab.QMessageBox.warning",
+        lambda *args, **kwargs: warned.append(args[2]),
+    )
+    result = SortResult(sorted_files=[], failed=[FailedFile("a.pdf", "无匹配键")])
+
+    tab._on_sort_ok(result)
+
+    assert warned and "源文件均未被修改" in warned[0]

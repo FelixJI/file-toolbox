@@ -141,3 +141,40 @@ def test_run_gui_secondary_exits_without_window(monkeypatch, tmp_path):
 
     assert created == []
     assert exited == []
+
+
+def test_listen_failure_fails_open_as_secondary(app, monkeypatch):
+    """双启动竞态输家(listen 失败)且无主实例可达时,fail open 不阻断启动。"""
+    guard = SingleInstanceGuard(_unique_name())
+    monkeypatch.setattr(guard._server, "listen", lambda _name: False)
+
+    assert guard.acquire() is True
+
+
+def test_read_client_ignores_unrelated_payload(app):
+    """非激活消息(如协议噪声)不触发激活信号,也不回执。"""
+    guard = SingleInstanceGuard(_unique_name())
+    emitted: list[bool] = []
+    guard.activateRequested.connect(lambda: emitted.append(True))
+
+    class FakeSocket:
+        def readAll(self):
+            class Payload:
+                def data(self):
+                    return b"garbage"
+
+            return Payload()
+
+        write = lambda *args: (_ for _ in ()).throw(AssertionError("噪声不应回执"))  # noqa: E731
+
+    guard._read_client(FakeSocket())  # type: ignore[arg-type]
+
+    assert emitted == []
+
+
+def test_allow_foreground_activation_noop_off_windows(monkeypatch):
+    from file_toolbox.gui import single_instance as si
+
+    monkeypatch.setattr(si.sys, "platform", "linux")
+
+    si._allow_foreground_activation()  # 非 win32 分支静默返回
