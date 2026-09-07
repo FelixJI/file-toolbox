@@ -7,6 +7,7 @@ from file_toolbox.updater import (
     UpdateCheckStatus,
     VelopackUpdateCoordinator,
 )
+from file_toolbox.updater.coordinator import UpdateCancelled
 
 
 class FakeAsset:
@@ -133,3 +134,83 @@ def test_portable_manager_applies_updates_without_installer() -> None:
     assert result.status is UpdateCheckStatus.AVAILABLE
     assert applied.status is UpdateApplyStatus.APPLY_STARTED
     assert manager.applied is manager.update
+
+
+class CancellingManager(FakeManager):
+    """progress callback 阶段取消或失败:下载中止且不得进入 apply。"""
+
+    def __init__(self, update: object, error: Exception | None = None) -> None:
+        super().__init__(update=update)
+        self.download_error = error
+        self.applied = None
+
+    def download_updates(
+        self, update: object, progress_callback: Callable[[int], None] | None = None
+    ) -> None:
+        if self.download_error is not None:
+            raise self.download_error
+        if progress_callback is not None:
+            progress_callback(10)
+            raise UpdateCancelled
+
+    def wait_exit_then_apply_updates(self, update: object, *, silent: bool, restart: bool) -> None:
+        raise AssertionError("取消/失败路径不得安排 apply")
+
+
+def _selected_coordinator(manager: FakeManager) -> VelopackUpdateCoordinator:
+    coordinator = VelopackUpdateCoordinator(
+        feed_candidates=("https://direct.invalid/feed/",),
+        manager_factory=lambda _source: manager,
+    )
+    assert coordinator.check().status is UpdateCheckStatus.AVAILABLE
+    return coordinator
+
+
+def test_download_cancel_maps_to_cancelled_without_apply() -> None:
+    coordinator = _selected_coordinator(CancellingManager(FakeUpdateInfo()))
+
+    result = coordinator.download_and_apply(lambda _value: None)
+
+    assert result.status is UpdateApplyStatus.CANCELLED
+
+
+def test_download_failure_maps_to_failed_with_message() -> None:
+    coordinator = _selected_coordinator(
+        CancellingManager(FakeUpdateInfo(), error=RuntimeError("磁盘已满"))
+    )
+
+    result = coordinator.download_and_apply(lambda _value: None)
+
+    assert result.status is UpdateApplyStatus.FAILED
+    assert "磁盘已满" in (result.message or "")
+
+
+def test_create_update_coordinator_wires_proxies_and_forward_proxy(monkeypatch) -> None:
+    from file_toolbox.updater import velopack_adapter
+
+    captured_feeds: list[tuple[str, ...]] = []
+
+    def fake_build_feed_candidates(
+        prefixes, *, direct_feed="https://github.com/FelixJI/file-toolbox/releases/latest/download/"
+    ):
+        captured_feeds.append(tuple(prefixes))
+        return tuple(f"{prefix}/{direct_feed}" for prefix in prefixes) + (direct_feed,)
+
+    monkeypatch.setattr(
+        "file_toolbox.updater.proxy.get_enabled_proxies", lambda: ("https://mirror.example", "")
+    )
+    monkeypatch.setattr(
+        "file_toolbox.updater.transport.build_feed_candidates", fake_build_feed_candidates
+    )
+    monkeypatch.setattr(
+        "file_toolbox.common.settings.get",
+        lambda key, default=None: (
+            " http://proxy.local:8080 " if key == "forward_proxy" else default
+        ),
+    )
+
+    coordinator = velopack_adapter.create_update_coordinator()
+
+    assert captured_feeds == [("https://mirror.example", "")]
+    assert coordinator._forward_proxy == "http://proxy.local:8080"
+    assert coordinator._feed_candidates[-1].startswith("https://github.com/")

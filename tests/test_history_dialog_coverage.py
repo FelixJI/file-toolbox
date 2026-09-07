@@ -285,3 +285,21 @@ def test_history_dialog_undo_rid_none_returns(app, tmp_path, monkeypatch):
     dlg._undo_selected()
     # rid None → 直接 return,未进入后续逻辑
     assert not any("无可撤销" in str(a) or "找不到" in str(a) for a in info_calls)
+
+
+def test_summary_label_excel_merge():
+    label = _summary_label(
+        "excel_merge",
+        {"sheet_count": 4, "file_count": 2, "naming": "prefix", "output": "C:/out/合并.xlsx"},
+    )
+    assert "4 工作表" in label and "2 文件" in label and "prefix" in label
+    assert label.endswith("→ 合并.xlsx")
+
+
+def test_summary_label_pdf_sort():
+    label = _summary_label(
+        "pdf_sort",
+        {"page_count": 12, "file_count": 3, "outputs": ["a.pdf", "b.pdf"], "order": "asc"},
+    )
+    assert "12 页" in label and "3 文件" in label and "asc" in label
+    assert label.endswith("→ 2 个输出")

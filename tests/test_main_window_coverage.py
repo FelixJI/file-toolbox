@@ -382,3 +382,165 @@ def test_run_gui_creates_and_shows_window(monkeypatch, tmp_path):
     assert modes == ["gui"]
     assert shown == [1]
     assert exited == [0]
+
+
+# ---------------------------------------------------------------------------
+# 更新检查回显与下载发起(关于页手动检查 → banner → 进度对话框)
+# ---------------------------------------------------------------------------
+
+
+class _FakeMetaObject:
+    invoke_calls: list[tuple] = []
+
+    @staticmethod
+    def invokeMethod(*args, **kwargs):
+        _FakeMetaObject.invoke_calls.append(args)
+
+
+def _materialize_about(win):
+    win._materialize_all_tabs()
+    assert win._about_tab is not None
+    return win._about_tab
+
+
+def test_on_update_checked_ignores_auto_check_noise(win):
+    displayed: list[tuple] = []
+    about = _materialize_about(win)
+    win._manual_check_pending = False
+
+    import pytest as _pytest
+
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(about, "display_check_result", lambda *args: displayed.append(args))
+        win._on_update_checked(UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9"))
+
+    assert displayed == []
+
+
+def test_on_update_checked_requires_constructed_about_tab(win):
+    win._manual_check_pending = True
+    win._about_tab = None
+
+    win._on_update_checked(UpdateCheckResult(UpdateCheckStatus.LATEST))  # 防御路径不抛异常
+
+
+@pytest.mark.parametrize(
+    ("status", "version", "expected_kind"),
+    [
+        (UpdateCheckStatus.AVAILABLE, "9.9.9", "available"),
+        (UpdateCheckStatus.FAILED, None, "failed"),
+        (UpdateCheckStatus.LATEST, None, "latest"),
+    ],
+)
+def test_on_update_checked_displays_manual_results(win, status, version, expected_kind):
+    displayed: list[tuple] = []
+    about = _materialize_about(win)
+    win._manual_check_pending = True
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(about, "display_check_result", lambda *args: displayed.append(args))
+        win._on_update_checked(UpdateCheckResult(status, version=version))
+
+    assert displayed and displayed[0][0] == expected_kind
+
+
+def test_start_download_without_pending_update_is_noop(win, monkeypatch):
+    win._pending_update = None
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: (_ for _ in ()).throw(AssertionError("无待更新版本不应弹确认")),
+    )
+
+    win._start_download()
+
+
+def test_start_download_declined_does_not_dispatch(win, monkeypatch):
+    _FakeMetaObject.invoke_calls.clear()
+    win._pending_update = UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9")
+    monkeypatch.setattr(mw_mod.QMetaObject, "invokeMethod", _FakeMetaObject.invokeMethod)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Cancel)
+
+    win._start_download()
+
+    assert _FakeMetaObject.invoke_calls == []
+    assert win._update_dialog is None
+
+
+def test_start_download_confirmed_shows_dialog_and_dispatches(win, monkeypatch):
+    _FakeMetaObject.invoke_calls.clear()
+    win._pending_update = UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9")
+    monkeypatch.setattr(mw_mod.QMetaObject, "invokeMethod", _FakeMetaObject.invokeMethod)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Apply)
+
+    try:
+        win._start_download()
+
+        assert _FakeMetaObject.invoke_calls
+        assert _FakeMetaObject.invoke_calls[0][1] == "do_download_and_apply"
+        assert win._update_dialog is not None
+        assert win._download_cancelled is False
+    finally:
+        if win._update_dialog is not None:
+            win._update_dialog.close()
+            win._update_dialog = None
+
+
+def test_apply_cancelled_result_neither_warns_nor_quits(win, monkeypatch):
+    warned: list[str] = []
+    quits: list[int] = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *_a, message="": warned.append(message))
+    monkeypatch.setattr(QApplication, "quit", lambda: quits.append(1))
+
+    win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.CANCELLED))
+
+    assert warned == [] and quits == []
+
+
+def test_shutdown_survives_update_worker_close_failure(win, monkeypatch):
+    quits: list[int] = []
+
+    class BrokenWorkerStub:
+        def isRunning(self) -> bool:
+            raise RuntimeError("worker already gone")
+
+        def quit(self) -> None:
+            raise AssertionError("isRunning 失败后不应继续操作 worker")
+
+    monkeypatch.setattr(QApplication, "quit", lambda: quits.append(1))
+    monkeypatch.setattr("file_toolbox.common.settings.set", lambda key, value: None)
+    win._update_worker = BrokenWorkerStub()  # type: ignore[assignment]
+
+    win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED))
+
+    assert quits == [1]
+
+
+def test_update_progress_without_dialog_is_noop(win):
+    win._update_dialog = None
+
+    win._on_update_progress(80)  # 不应抛异常
+
+
+def test_update_progress_partial_value_keeps_download_label(win):
+    dialog = MagicMock()
+    win._update_dialog = dialog
+
+    win._on_update_progress(45)
+
+    dialog.setValue.assert_called_once_with(45)
+    dialog.setLabelText.assert_not_called()
+    win._update_dialog = None
+
+
+def test_close_event_survives_update_worker_quit_failure(win):
+    worker = MagicMock()
+    worker.isRunning.return_value = True
+    worker.quit.side_effect = RuntimeError("quit failed")
+    win._update_worker = worker
+    event = QCloseEvent()
+
+    win.closeEvent(event)
+
+    worker.quit.assert_called_once()
+    assert event.isAccepted() is True

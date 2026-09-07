@@ -113,3 +113,85 @@ def test_gui_entry_startup_trace_logged_when_run_as_main(monkeypatch, tmp_path):
     messages = [r.getMessage() for r in records if r.name == "file_toolbox.gui_entry"]
     assert any("GUI 入口" in m for m in messages)
     assert any("GUI 模块导入完成" in m for m in messages)
+
+
+def test_sys_excepthook_passes_keyboardinterrupt_to_original(monkeypatch, tmp_path):
+    """Ctrl+C 属正常退出路径:不写 crash 日志,直接交给原始 excepthook。"""
+    monkeypatch.chdir(tmp_path)
+    configure_logging(mode="test")
+    import file_toolbox.common.logging_config as logging_config
+
+    forwarded: list[tuple] = []
+    monkeypatch.setattr(
+        logging_config, "_original_sys_excepthook", lambda *args: forwarded.append(args)
+    )
+
+    try:
+        raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        logging_config._log_uncaught_exception(*sys.exc_info())
+
+    assert len(forwarded) == 1
+    assert isinstance(forwarded[0][0], type(KeyboardInterrupt))
+
+
+def _thread_args(exc_type, exc_value, exc_traceback, thread=None):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        exc_type=exc_type, exc_value=exc_value, exc_traceback=exc_traceback, thread=thread
+    )
+
+
+def test_thread_excepthook_forwards_system_exit_without_crash_log(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    log_file = configure_logging(mode="test")
+    import file_toolbox.common.logging_config as logging_config
+
+    forwarded: list[object] = []
+    monkeypatch.setattr(
+        logging_config, "_original_threading_excepthook", lambda args: forwarded.append(args)
+    )
+
+    logging_config._log_uncaught_thread_exception(_thread_args(SystemExit, SystemExit(0), None))
+    _flush_file_handlers()
+
+    assert len(forwarded) == 1
+    assert "未捕获异常" not in log_file.read_text(encoding="utf-8")
+
+
+def test_thread_excepthook_logs_missing_exception_instance(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    log_file = configure_logging(mode="test")
+    import file_toolbox.common.logging_config as logging_config
+
+    monkeypatch.setattr(logging_config, "_original_threading_excepthook", lambda args: None)
+
+    logging_config._log_uncaught_thread_exception(_thread_args(RuntimeError, None, None))
+    _flush_file_handlers()
+
+    content = log_file.read_text(encoding="utf-8")
+    assert "后台线程未捕获异常但无异常实例 thread=unknown" in content
+
+
+def test_thread_excepthook_logs_thread_name_and_traceback(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    log_file = configure_logging(mode="test")
+    import threading as threading_mod
+
+    import file_toolbox.common.logging_config as logging_config
+
+    monkeypatch.setattr(logging_config, "_original_threading_excepthook", lambda args: None)
+    worker = threading_mod.Thread(target=lambda: None, name="崩溃工作线程")
+
+    try:
+        raise RuntimeError("线程内崩溃样本")
+    except RuntimeError:
+        logging_config._log_uncaught_thread_exception(
+            _thread_args(RuntimeError, *sys.exc_info()[1:], thread=worker)
+        )
+    _flush_file_handlers()
+
+    content = log_file.read_text(encoding="utf-8")
+    assert "后台线程未捕获异常 thread=崩溃工作线程" in content
+    assert "RuntimeError: 线程内崩溃样本" in content
