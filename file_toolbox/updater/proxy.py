@@ -42,12 +42,11 @@ _GITHUB_HOSTS = frozenset(
 # 这些代理可用性不稳定,故仅作候选;运行时配合 get_fetch_candidates() 末尾的
 # 直连兜底自动回退,单个代理不可用不影响功能。
 #
-# 实测行为(2026-08):多数公共镜像只代理 github.com 下载资源,不代理 api.github.com。
-# 故这些镜像主要在"下载 zip/checksums"阶段生效;检查更新(API 端点)多由末尾直连兜底。
-# ghfast.top / ghproxy.net 实测对下载资源有效但对 API 返回 403 —— 属预期,
-# get_fetch_candidates() 会自动跳过失败候选继续尝试下一个 + 直连。
+# 实测行为(2026-09):以下镜像均可代理 feed(releases.win.json)与 nupkg 下载,
+# 且对 latest/download 的 302 为同主机相对重定向,资产下载不会绕过镜像。
+# ghproxy.com(2026-09 实测连接超时,含首页)与 ghps.cc(DNS 失效)已移除。
+# 排在首位的死镜像会让每次检查先耗尽一个完整超时才回退,移除即加速。
 DEFAULT_PROXIES: tuple[str, ...] = (
-    "https://ghproxy.com",
     "https://gh-proxy.com",
     "https://ghfast.top",
     "https://ghproxy.net",

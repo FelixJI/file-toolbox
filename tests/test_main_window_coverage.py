@@ -434,14 +434,22 @@ def test_on_update_checked_requires_constructed_about_tab(win):
 )
 def test_on_update_checked_displays_manual_results(win, status, version, expected_kind):
     displayed: list[tuple] = []
+    available_results: list[UpdateCheckResult] = []
     about = _materialize_about(win)
     win._manual_check_pending = True
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(about, "display_check_result", lambda *args: displayed.append(args))
+        mp.setattr(about, "display_update_available", lambda r: available_results.append(r))
         win._on_update_checked(UpdateCheckResult(status, version=version))
 
-    assert displayed and displayed[0][0] == expected_kind
+    if expected_kind == "available":
+        # available 走完整展示(标签 + 更新内容 + 立即更新按钮)
+        assert [r.version for r in available_results] == ["9.9.9"]
+        assert displayed == []
+    else:
+        assert displayed and displayed[0][0] == expected_kind
+        assert available_results == []
 
 
 def test_start_download_without_pending_update_is_noop(win, monkeypatch):
@@ -480,10 +488,59 @@ def test_start_download_confirmed_shows_dialog_and_dispatches(win, monkeypatch):
         assert _FakeMetaObject.invoke_calls[0][1] == "do_download_and_apply"
         assert win._update_dialog is not None
         assert win._download_cancelled is False
+        # 到 100% 后还要停留显示"正在校验并准备更新…",必须禁用 Qt 的
+        # autoClose/autoReset(默认会在 setValue(100) 时隐藏对话框并重置数值)
+        assert win._update_dialog.autoClose() is False
+        assert win._update_dialog.autoReset() is False
+        assert "9.9.9" in win._update_dialog.windowTitle()
     finally:
         if win._update_dialog is not None:
             win._update_dialog.close()
             win._update_dialog = None
+
+
+def test_on_download_requested_ensures_worker_and_starts_download(win, monkeypatch):
+    """关于页"立即更新":worker 未运行时启动,并复用 _start_download。"""
+    starts: list[int] = []
+    downloads: list[int] = []
+    monkeypatch.setattr(win._update_worker, "start", lambda: starts.append(1))
+    monkeypatch.setattr(win._update_worker, "isRunning", lambda: False)
+    monkeypatch.setattr(win, "_start_download", lambda: downloads.append(1))
+
+    win._on_download_requested()
+
+    assert starts == [1]
+    assert downloads == [1]
+
+
+def test_about_tab_lazy_construction_receives_pending_update(win):
+    """自动检查先发现新版、用户之后才打开关于页 → 构造后补显新版提示。"""
+    win._pending_update = UpdateCheckResult(
+        UpdateCheckStatus.AVAILABLE, version="9.9.9", release_notes="- 新功能"
+    )
+    win._tabs.setCurrentIndex(8)
+    about = win._about_tab
+    assert about is not None
+    assert about.btn_download_update.isHidden() is False
+    assert "9.9.9" in about._check_result_lbl.text()
+    assert "新功能" in about._notes_view.toPlainText()
+
+
+def test_download_cancel_restores_retry_affordances(win):
+    """取消下载后:状态栏横幅恢复显示(可重试),关于页按钮恢复可用。"""
+    win._pending_update = UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9")
+    about = _materialize_about(win)
+    win._update_banner.hide()
+    win._update_dialog = MagicMock()
+    win._update_worker = MagicMock()
+
+    win._on_download_cancel()
+
+    assert win._download_cancelled is True
+    assert win._update_dialog is None
+    assert win._update_banner.isHidden() is False
+    assert about.btn_download_update.isEnabled() is True
+    assert about.btn_check_update.isEnabled() is True
 
 
 def test_apply_cancelled_result_neither_warns_nor_quits(win, monkeypatch):

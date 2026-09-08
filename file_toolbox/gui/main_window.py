@@ -244,8 +244,13 @@ class MainWindow(QMainWindow):
         self._tabs.setCurrentIndex(current)
         self._tabs.blockSignals(False)
         if attr == "_about_tab":
-            # 关于页手动检查更新:AboutTab 请求 → 投递 worker → 结果回显
-            cast("AboutTab", tab).check_requested.connect(self._on_check_requested)
+            # 关于页手动检查/立即更新:AboutTab 请求 → 投递 worker → 结果回显/复用下载流程
+            about_tab = cast("AboutTab", tab)
+            about_tab.check_requested.connect(self._on_check_requested)
+            about_tab.download_requested.connect(self._on_download_requested)
+            if self._pending_update is not None:
+                # 自动检查先于用户打开关于页:把已发现的新版本补显到刚构造的页面
+                about_tab.display_update_available(self._pending_update)
 
     def _materialize_all_tabs(self) -> None:
         """立即构造全部懒 Tab(测试与预热场景使用)。"""
@@ -289,6 +294,12 @@ class MainWindow(QMainWindow):
         self._manual_check_pending = True
         self._trigger_check()
 
+    def _on_download_requested(self) -> None:
+        """关于页"立即更新":确保 worker 运行后复用与状态栏横幅一致的下载流程。"""
+        if not self._update_worker.isRunning():
+            self._update_worker.start()
+        self._start_download()
+
     def _on_update_checked(self, result: UpdateCheckResult) -> None:
         """worker checked 信号:仅手动检查时回显结果到关于页。
 
@@ -301,9 +312,7 @@ class MainWindow(QMainWindow):
         if about is None:
             return  # 手动检查必经关于页,理论上已构造;防御懒构造态异常路径
         if result.status is UpdateCheckStatus.AVAILABLE:
-            about.display_check_result(
-                "available", f"🆕 发现新版本 {result.version}(点击底部提示更新)"
-            )
+            about.display_update_available(result)
         elif result.status is UpdateCheckStatus.FAILED:
             about.display_check_result(
                 "failed", f"⚠ {result.message or '检查更新失败,请检查网络或代理设置'}"
@@ -317,7 +326,7 @@ class MainWindow(QMainWindow):
         self._update_banner.show_result(result)
 
     def _start_download(self) -> None:
-        """用户点击 banner → 弹进度对话框 + 向 worker 投递下载请求。"""
+        """用户点击 banner/关于页"立即更新" → 弹进度对话框 + 向 worker 投递下载请求。"""
         if self._pending_update is None:
             return
         update = self._pending_update
@@ -336,12 +345,18 @@ class MainWindow(QMainWindow):
         self._download_cancelled = False  # 新一轮下载,清除取消标记
         label = f"正在下载 v{update.version}…"
         dlg = QProgressDialog(label, "取消", 0, 100, self)
-        dlg.setWindowTitle("更新")
+        dlg.setWindowTitle(f"更新到 v{update.version}")
         dlg.setMinimumDuration(0)
+        # 关闭 Qt 默认的 autoClose/autoReset:到 100% 后还要停留在
+        # "正在校验并准备更新…"直到 apply 结果到达;默认行为会在 setValue(100)
+        # 时立即隐藏对话框并重置数值,校验提示永远不可见且进度条回跳闪烁。
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
         dlg.setValue(0)
         dlg.canceled.connect(self._on_download_cancel)
         self._update_dialog = dlg
         dlg.show()
+        self._set_about_downloading(True)
         QMetaObject.invokeMethod(
             self._update_worker,
             "do_download_and_apply",
@@ -353,6 +368,19 @@ class MainWindow(QMainWindow):
         self._download_cancelled = True
         self._update_worker.cancel_download()
         self._update_dialog = None
+        self._restore_retry_affordances()
+
+    def _restore_retry_affordances(self) -> None:
+        """下载取消/失败后恢复重试入口(状态栏横幅 + 关于页按钮)。"""
+        if self._pending_update is not None:
+            self._update_banner.show()
+        self._set_about_downloading(False)
+
+    def _set_about_downloading(self, downloading: bool) -> None:
+        """同步关于页"检查更新/立即更新"按钮的可用状态(未构造则跳过)。"""
+        about = self._about_tab
+        if about is not None:
+            about.set_update_downloading(downloading)
 
     def _on_update_progress(self, value: int) -> None:
         if self._update_dialog is None:
@@ -367,6 +395,7 @@ class MainWindow(QMainWindow):
             self._update_dialog.close()
             self._update_dialog = None
         if self._download_cancelled or result.status is UpdateApplyStatus.CANCELLED:
+            self._restore_retry_affordances()
             return
         if result.status is UpdateApplyStatus.FAILED:
             QMessageBox.warning(
@@ -374,6 +403,7 @@ class MainWindow(QMainWindow):
                 "更新失败",
                 f"{result.message}\n\n原程序未受影响,可稍后重试。",
             )
+            self._restore_retry_affordances()
             return
         self._shutdown_for_restart()
 

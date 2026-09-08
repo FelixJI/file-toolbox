@@ -1,7 +1,8 @@
 """关于 Tab:展示软件名称/版本/开源地址/技术路线/更新日志 + 快捷方式管理。
 
 第 6 个 Tab,嵌入主窗口。纯展示 QWidget + 4 个快捷方式按钮。
-只调用 common 层(metadata / shortcuts)返回值,不混入业务逻辑。
+只调用 common 层(metadata / shortcuts)返回值,不混入业务逻辑;
+更新相关的检查/下载动作通过信号交由主窗口执行。
 """
 
 import platform
@@ -16,16 +17,20 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
 from file_toolbox.common import metadata, settings, shortcuts
 from file_toolbox.common.paths import get_log_dir
+from file_toolbox.updater.models import UpdateCheckResult
 from file_toolbox.updater.proxy import DEFAULT_PROXIES
+
+# 检查结果着色:available 与状态栏更新横幅同蓝,failed 用警示红;latest 用默认色。
+_RESULT_COLORS = {"available": "#0969da", "failed": "#d1242f"}
 
 
 class AboutTab(QWidget):
@@ -33,6 +38,8 @@ class AboutTab(QWidget):
 
     # 用户点检查更新时向主窗口请求(主窗口投递 worker 并回调结果)
     check_requested = Signal()
+    # 用户点"立即更新"时向主窗口请求(主窗口走与状态栏横幅一致的下载流程)
+    download_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -97,18 +104,34 @@ class AboutTab(QWidget):
 
         root.addWidget(info_box)
 
-        # --- 更新与代理组(检查更新 + 代理设置整合) ---
+        # --- 更新与代理组(检查更新 + 新版详情 + 代理设置整合) ---
         update_box = QGroupBox("更新与代理")
         update_layout = QVBoxLayout(update_box)
 
-        # 上半:检查更新
+        # 上半:检查更新 + 结果标签 + 立即更新按钮(发现新版时才显示)
         check_row = QHBoxLayout()
         self.btn_check_update = QPushButton("检查更新")
         self.btn_check_update.clicked.connect(self._on_check_clicked)
         check_row.addWidget(self.btn_check_update)
         self._check_result_lbl = QLabel("")
+        self._check_result_lbl.setWordWrap(True)
         check_row.addWidget(self._check_result_lbl, stretch=1)
+        self.btn_download_update = QPushButton("立即更新")
+        self.btn_download_update.setToolTip("下载新版本并在准备完成后自动重启")
+        self.btn_download_update.clicked.connect(self._on_download_clicked)
+        self.btn_download_update.hide()
+        check_row.addWidget(self.btn_download_update)
         update_layout.addLayout(check_row)
+
+        # 中部:新版本更新内容(检查到新版且有 release notes 时才显示)
+        self._notes_lbl = QLabel("新版本更新内容:")
+        self._notes_lbl.hide()
+        update_layout.addWidget(self._notes_lbl)
+        self._notes_view = QTextBrowser()
+        self._notes_view.setOpenExternalLinks(True)
+        self._notes_view.setMaximumHeight(180)
+        self._notes_view.hide()
+        update_layout.addWidget(self._notes_view)
 
         # 下半:代理设置
         proxy_intro = QLabel(
@@ -178,14 +201,14 @@ class AboutTab(QWidget):
         root.addWidget(tech_box)
 
         # --- 更新日志组 ---
+        # QTextBrowser + setMarkdown:CHANGELOG.md 是 markdown 源文件,直接
+        # QPlainTextEdit 裸放等于让用户读源码;渲染后的标题/加粗/列表可读性好得多。
         log_box = QGroupBox("更新日志")
         log_layout = QVBoxLayout(log_box)
-        self._changelog = QPlainTextEdit()
-        self._changelog.setReadOnly(True)
-        mono = self._changelog.font()
-        mono.setFamily("Consolas, Monaco, monospace")
-        self._changelog.setFont(mono)
-        self._changelog.setPlainText(metadata.get_changelog())
+        self._changelog = QTextBrowser()
+        self._changelog.setOpenExternalLinks(True)
+        self._changelog.setMarkdown(metadata.get_changelog())
+        self._changelog.setMinimumHeight(240)
         log_layout.addWidget(self._changelog)
         root.addWidget(log_box, stretch=1)
 
@@ -246,19 +269,57 @@ class AboutTab(QWidget):
 
     # --- 检查更新 ---
     def _on_check_clicked(self) -> None:
-        """点击检查更新:禁用按钮 + 显示检查中 + 请求主窗口执行。"""
+        """点击检查更新:禁用按钮 + 清理上一轮新版提示 + 请求主窗口执行。"""
         self.btn_check_update.setEnabled(False)
+        self._check_result_lbl.setStyleSheet("")
         self._check_result_lbl.setText("检查中…")
+        self._hide_update_affordances()
         self.check_requested.emit()
+
+    def _on_download_clicked(self) -> None:
+        self.download_requested.emit()
+
+    def _hide_update_affordances(self) -> None:
+        """隐藏"立即更新"按钮与新版更新内容区(新一轮检查时清理旧状态)。"""
+        self.btn_download_update.hide()
+        self._notes_lbl.hide()
+        self._notes_view.hide()
 
     def display_check_result(self, kind: str, text: str) -> None:
         """主窗口回调:显示检查结果并恢复按钮。
 
-        kind: "latest" | "available" | "failed"(预留:未来可按状态着色/加图标,当前仅用 text)
+        kind: "latest" | "available" | "failed"。latest/failed 会同时清掉
+        上一轮"立即更新"按钮(available 的完整展示走 display_update_available)。
         text: 展示文本。
         """
         self.btn_check_update.setEnabled(True)
+        color = _RESULT_COLORS.get(kind)
+        self._check_result_lbl.setStyleSheet(f"color: {color}; font-weight: 600;" if color else "")
         self._check_result_lbl.setText(text)
+        if kind != "available":
+            self._hide_update_affordances()
+
+    def display_update_available(self, result: UpdateCheckResult) -> None:
+        """主窗口回调:展示新版本(结果标签 + 更新内容 + 立即更新按钮)。"""
+        self.btn_check_update.setEnabled(True)
+        self._check_result_lbl.setStyleSheet(
+            f"color: {_RESULT_COLORS['available']}; font-weight: 600;"
+        )
+        self._check_result_lbl.setText(f"🆕 发现新版本 v{result.version},可立即更新")
+        notes = result.release_notes.strip()
+        if notes:
+            self._notes_view.setMarkdown(notes)
+            self._notes_lbl.show()
+            self._notes_view.show()
+        else:
+            self._notes_lbl.hide()
+            self._notes_view.hide()
+        self.btn_download_update.show()
+
+    def set_update_downloading(self, downloading: bool) -> None:
+        """下载进行中禁用检查/立即更新,防止重复触发;结束后恢复。"""
+        self.btn_check_update.setEnabled(not downloading)
+        self.btn_download_update.setEnabled(not downloading)
 
     # --- GitHub 代理设置 ---
     # 列表项数据:UserRole 存归一化代理 URL;UserRole+1 存是否默认项(True 不可移除)。
