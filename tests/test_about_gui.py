@@ -10,14 +10,18 @@ pytest.importorskip("PySide6.QtWidgets")
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QLabel,
-    QPlainTextEdit,
     QPushButton,
+    QTextEdit,
     QWidget,
 )
 
 from file_toolbox import __version__  # noqa: E402
 from file_toolbox.common import metadata  # noqa: E402
 from file_toolbox.gui.dialogs.about_tab import AboutTab  # noqa: E402
+from file_toolbox.updater.models import (  # noqa: E402
+    UpdateCheckResult,
+    UpdateCheckStatus,
+)
 
 
 @pytest.fixture(scope="module")
@@ -26,13 +30,16 @@ def app():
 
 
 def _collect_text(tab: AboutTab) -> str:
-    """递归收集 Tab 内所有 QLabel/QPlainTextEdit 文本(不依赖具体控件名)。"""
+    """递归收集 Tab 内所有 QLabel/QTextEdit 文本(不依赖具体控件名)。
+
+    QTextEdit 覆盖 QTextBrowser(markdown 渲染的更新日志/新版更新内容)。
+    """
     parts: list[str] = []
 
     def walk(widget):
         if isinstance(widget, QLabel):
             parts.append(widget.text())
-        elif isinstance(widget, QPlainTextEdit):
+        elif isinstance(widget, QTextEdit):
             parts.append(widget.toPlainText())
         # 递归所有子 widget
         for child in widget.children():
@@ -69,6 +76,17 @@ def test_about_tab_shows_repo_url(app):
 def test_about_tab_shows_changelog(app):
     tab = AboutTab()
     assert "Changelog" in _collect_text(tab) or "版本" in _collect_text(tab)
+
+
+def test_about_tab_changelog_renders_markdown(app):
+    """更新日志区用 QTextBrowser 渲染 markdown,而非裸放源码。"""
+    from PySide6.QtWidgets import QTextBrowser
+
+    tab = AboutTab()
+    assert isinstance(tab._changelog, QTextBrowser)
+    # markdown 标题("# Changelog"/"## 0.x.y")渲染后以纯文本形式保留标题文字
+    text = tab._changelog.toPlainText()
+    assert "Changelog" in text or "当前版本" in text  # 兜底文本含"当前版本"
 
 
 def test_about_tab_has_four_shortcut_buttons(app):
@@ -155,6 +173,88 @@ def test_about_tab_display_check_result_failed(app):
     tab.display_check_result("failed", "⚠ 检查失败")
     assert btn.isEnabled() is True
     assert "检查失败" in tab._check_result_lbl.text()
+
+
+# ---------------------------------------------------------------------------
+# 更新交互:新版展示 / 立即更新按钮 / 结果着色 / 下载期间状态
+# ---------------------------------------------------------------------------
+
+
+def _available_result(version: str = "9.9.9", notes: str = "") -> UpdateCheckResult:
+    return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version=version, release_notes=notes)
+
+
+def test_about_tab_default_hides_update_affordances(app):
+    """初始态:立即更新按钮与新版更新内容区隐藏。"""
+    tab = AboutTab()
+    assert tab.btn_download_update.isHidden() is True
+    assert tab._notes_lbl.isHidden() is True
+    assert tab._notes_view.isHidden() is True
+
+
+def test_about_tab_display_update_available_shows_button_and_notes(app):
+    """发现新版 → 结果标签着色 + 更新内容 markdown 渲染 + 立即更新按钮可见。"""
+    tab = AboutTab()
+    tab.display_update_available(_available_result("9.9.9", notes="## 9.9.9\n\n- 新功能 A"))
+    assert "9.9.9" in tab._check_result_lbl.text()
+    assert "#0969da" in tab._check_result_lbl.styleSheet()
+    assert tab.btn_download_update.isHidden() is False
+    assert tab._notes_lbl.isHidden() is False
+    assert tab._notes_view.isHidden() is False
+    assert "新功能 A" in tab._notes_view.toPlainText()
+    assert tab.btn_check_update.isEnabled() is True
+
+
+def test_about_tab_display_update_available_without_notes_hides_notes(app):
+    """新版无 release notes → 只显示按钮,不显示空的更新内容区。"""
+    tab = AboutTab()
+    tab.display_update_available(_available_result("9.9.9", notes=""))
+    assert tab.btn_download_update.isHidden() is False
+    assert tab._notes_lbl.isHidden() is True
+    assert tab._notes_view.isHidden() is True
+
+
+def test_about_tab_check_again_clears_previous_update_state(app):
+    """再次点击检查更新 → 上一轮的按钮/更新内容区被清理。"""
+    tab = AboutTab()
+    tab.display_update_available(_available_result("9.9.9", notes="- 新功能"))
+    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
+    btn.click()
+    assert tab.btn_download_update.isHidden() is True
+    assert tab._notes_view.isHidden() is True
+    assert "检查中" in tab._check_result_lbl.text()
+
+
+def test_about_tab_display_check_result_colors_by_kind(app):
+    """latest/failed 结果分别用默认色/警示红,并隐藏立即更新按钮。"""
+    tab = AboutTab()
+    tab.display_update_available(_available_result("9.9.9"))
+    tab.display_check_result("failed", "⚠ 检查失败")
+    assert "#d1242f" in tab._check_result_lbl.styleSheet()
+    assert tab.btn_download_update.isHidden() is True
+    tab.display_check_result("latest", "✓ 已是最新")
+    assert tab._check_result_lbl.styleSheet() == ""
+
+
+def test_about_tab_download_button_emits_signal(app):
+    """点击立即更新 → emit download_requested。"""
+    tab = AboutTab()
+    received: list = []
+    tab.download_requested.connect(lambda: received.append(1))
+    tab.btn_download_update.click()
+    assert received == [1]
+
+
+def test_about_tab_set_update_downloading_toggles_buttons(app):
+    """下载进行中禁用检查/立即更新;结束后恢复。"""
+    tab = AboutTab()
+    tab.display_update_available(_available_result("9.9.9"))
+    tab.set_update_downloading(True)
+    assert tab.btn_check_update.isEnabled() is False
+    assert tab.btn_download_update.isEnabled() is False
+    tab.set_update_downloading(False)
+    assert tab.btn_check_update.isEnabled() is True
+    assert tab.btn_download_update.isEnabled() is True
 
 
 def test_about_tab_has_proxy_edit(app):

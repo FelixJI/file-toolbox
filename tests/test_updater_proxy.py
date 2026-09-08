@@ -158,14 +158,14 @@ class TestDefaultProxies:
             assert not p.endswith("/")  # 归一化无尾斜杠
 
     def test_default_proxies_contains_current_mirrors(self):
-        """锁定当前主流可用的 GitHub 加速镜像,防止回退。
+        """锁定当前实测可用的 GitHub 加速镜像,防止回退。
 
-        实测(2026-08):这些镜像对 github.com 下载资源有效;ghps.cc 已 DNS 失效被移除。
+        实测(2026-09):三个镜像均可代理 feed(releases.win.json)与 nupkg 下载,
+        latest/download 的 302 为同主机相对重定向,资产下载不会绕过镜像。
         运行时配合 get_fetch_candidates() 末尾直连兜底,单个镜像失效自动回退。
         """
-        # 用完整元组相等断言(而非 4 个 `in`),既锁顺序又是更强的契约。
+        # 用完整元组相等断言(而非逐个 `in`),既锁顺序又是更强的契约。
         assert proxy.DEFAULT_PROXIES == (
-            "https://ghproxy.com",
             "https://gh-proxy.com",
             "https://ghfast.top",
             "https://ghproxy.net",
@@ -174,6 +174,14 @@ class TestDefaultProxies:
     def test_default_proxies_drops_dead_ghps_cc(self):
         """ghps.cc 实测 DNS 失效,不应保留在默认列表误导用户。"""
         assert proxy.DEFAULT_PROXIES.count("https://ghps.cc") == 0
+
+    def test_default_proxies_drops_dead_ghproxy_com(self):
+        """ghproxy.com 实测连接超时(含首页),不应保留在默认列表。
+
+        排在首位的死镜像会让每次检查更新先耗尽一个完整超时才回退到下一候选,
+        移除它本身就是对检查/下载链路的加速。
+        """
+        assert proxy.DEFAULT_PROXIES.count("https://ghproxy.com") == 0
 
 
 class TestGetEnabledProxies:

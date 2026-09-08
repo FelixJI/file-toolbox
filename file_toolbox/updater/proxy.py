@@ -8,9 +8,10 @@
 > settings["gh_proxy"](旧单值,向后兼容)> 空(无代理)。
 非 GitHub 域名 / 代理为空 → URL 原样返回。
 
-候选列表与回退:get_fetch_candidates() 返回去尝试的代理序列(环境变量代理 →
-用户启用的代理列表 → 末尾 "" 直连兜底),检查更新/下载按序逐个尝试,全部失败
-才整体失败(程序内部自动回退,无需用户干预)。
+候选列表与并发探测:get_fetch_candidates() 返回探测用的代理候选序列(环境变量
+代理 → 用户启用的代理列表 → 末尾 "" 直连)。检查更新阶段并发探测全部候选,
+最先成功者(即最快可用者)被选定为该轮检查与下载的更新源;全部失败才整体
+失败(程序内部自动回退,无需用户干预,勾选顺序不影响速度结果)。
 
 兼容性:本变换为"前缀拼接"。GitHub release 下载会 302 重定向到 objects.githubusercontent.com,
 urllib 默认重定向处理器原样跟随 Location,不对重定向目标再次拼接代理。故代理需为
@@ -42,12 +43,11 @@ _GITHUB_HOSTS = frozenset(
 # 这些代理可用性不稳定,故仅作候选;运行时配合 get_fetch_candidates() 末尾的
 # 直连兜底自动回退,单个代理不可用不影响功能。
 #
-# 实测行为(2026-08):多数公共镜像只代理 github.com 下载资源,不代理 api.github.com。
-# 故这些镜像主要在"下载 zip/checksums"阶段生效;检查更新(API 端点)多由末尾直连兜底。
-# ghfast.top / ghproxy.net 实测对下载资源有效但对 API 返回 403 —— 属预期,
-# get_fetch_candidates() 会自动跳过失败候选继续尝试下一个 + 直连。
+# 实测行为(2026-09):以下镜像均可代理 feed(releases.win.json)与 nupkg 下载,
+# 且对 latest/download 的 302 为同主机相对重定向,资产下载不会绕过镜像。
+# ghproxy.com(2026-09 实测连接超时,含首页)与 ghps.cc(DNS 失效)已移除。
+# 排在首位的死镜像会让每次检查先耗尽一个完整超时才回退,移除即加速。
 DEFAULT_PROXIES: tuple[str, ...] = (
-    "https://ghproxy.com",
     "https://gh-proxy.com",
     "https://ghfast.top",
     "https://ghproxy.net",
@@ -106,7 +106,7 @@ def get_enabled_proxies() -> list[str]:
 
 
 def get_fetch_candidates() -> list[str]:
-    """按序尝试的代理候选序列(程序内部回退用)。
+    """并发探测用的代理候选序列(顺序仅决定串行回退路径的尝试次序)。
 
     顺序:环境变量代理 → 用户启用的代理列表 → ""(直连,总在末尾兜底)。
     过滤空串后去重保序,末尾追加唯一一个 "" 兜底。

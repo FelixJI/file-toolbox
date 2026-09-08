@@ -173,6 +173,8 @@ class TestMainWindowIntegration:
         app.processEvents()
         assert "8.0.0" in win._about_tab._check_result_lbl.text()
         assert win._update_banner.isHidden() is False
+        # 关于页就地提供"立即更新"入口,不再要求用户去窗口底部找状态栏横幅
+        assert win._about_tab.btn_download_update.isHidden() is False
 
     def test_latest_check_updates_about_without_banner(self, app):
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
