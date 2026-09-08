@@ -135,8 +135,9 @@ class AboutTab(QWidget):
 
         # 下半:代理设置
         proxy_intro = QLabel(
-            "URL 加速前缀会拼在完整 GitHub feed 地址之前，并按勾选顺序尝试；"
-            "全部失败后回退直连。它不同于下方标准 forward proxy。"
+            "URL 加速前缀会拼在完整 GitHub feed 地址之前；检查更新时会并发探测所有勾选镜像"
+            "与直连，自动选用最快可用者（勾选顺序不影响速度）；全部失败才整体失败。"
+            "它不同于下方标准 forward proxy。"
         )
         proxy_intro.setWordWrap(True)
         update_layout.addWidget(proxy_intro)

@@ -1,5 +1,7 @@
 """UpdateCoordinator 公共行为契约。"""
 
+import threading
+import time
 from collections.abc import Callable
 
 from file_toolbox.updater import (
@@ -17,6 +19,17 @@ class FakeAsset:
 
 class FakeUpdateInfo:
     TargetFullRelease = FakeAsset()
+
+
+class VersionedAsset:
+    def __init__(self, version: str) -> None:
+        self.Version = version
+        self.NotesMarkdown = f"{version} 更新内容"
+
+
+class VersionedUpdateInfo:
+    def __init__(self, version: str) -> None:
+        self.TargetFullRelease = VersionedAsset(version)
 
 
 class FakeManager:
@@ -97,6 +110,113 @@ def test_all_feed_candidates_failing_is_observable_without_sdk_exception_leak() 
 
     assert result.status is UpdateCheckStatus.FAILED
     assert result.message == "无法连接更新源，请检查网络或代理设置"
+
+
+# ---------------------------------------------------------------------------
+# 并发竞速:多候选且未配置 forward proxy 时,先成功(最快可用)者胜出
+# ---------------------------------------------------------------------------
+
+
+class GatedManager(FakeManager):
+    """check_for_updates 阻塞在门上(模拟慢镜像),放行后才返回。"""
+
+    def __init__(self, update: object | None, gate: threading.Event) -> None:
+        super().__init__(update=update)
+        self._gate = gate
+
+    def check_for_updates(self) -> object | None:
+        assert self._gate.wait(10), "探测门 10s 内未放行"
+        if self.error is not None:
+            raise self.error
+        return self.update
+
+
+def test_racing_picks_fastest_available_candidate() -> None:
+    """慢镜像阻塞时,快镜像立即胜出;串行实现会被首个慢候选拖满 10s。"""
+    gate = threading.Event()
+    slow = GatedManager(VersionedUpdateInfo("0.1.0"), gate)
+    fast = FakeManager(update=VersionedUpdateInfo("0.2.0"))
+    coordinator = VelopackUpdateCoordinator(
+        feed_candidates=("https://slow.invalid/feed/", "https://fast.invalid/feed/"),
+        manager_factory=lambda source: slow if "slow" in source else fast,
+    )
+
+    try:
+        t0 = time.monotonic()
+        result = coordinator.check()
+        elapsed = time.monotonic() - t0
+
+        assert result.status is UpdateCheckStatus.AVAILABLE
+        assert result.version == "0.2.0"
+        assert elapsed < 5
+    finally:
+        gate.set()  # 放行落败线程,不让 daemon 线程滞留整个测试会话
+
+
+def test_racing_fastest_latest_response_wins() -> None:
+    """快镜像返回 None(已是最新)同样先到先胜,不被慢镜像阻塞。"""
+    gate = threading.Event()
+    slow = GatedManager(VersionedUpdateInfo("0.1.0"), gate)
+    fast = FakeManager()  # update=None → LATEST
+    coordinator = VelopackUpdateCoordinator(
+        feed_candidates=("https://slow.invalid/feed/", "https://fast.invalid/feed/"),
+        manager_factory=lambda source: slow if "slow" in source else fast,
+    )
+
+    try:
+        result = coordinator.check()
+        assert result.status is UpdateCheckStatus.LATEST
+    finally:
+        gate.set()
+
+
+def test_racing_maps_factory_failure_to_candidate_loss() -> None:
+    """某候选 manager 构造失败只淘汰该候选,不影响其余候选胜出。"""
+
+    def factory(source: str) -> FakeManager:
+        if "broken" in source:
+            raise RuntimeError("no local manifest")
+        return FakeManager(update=VersionedUpdateInfo("0.3.0"))
+
+    coordinator = VelopackUpdateCoordinator(
+        feed_candidates=("https://broken.invalid/feed/", "https://ok.invalid/feed/"),
+        manager_factory=factory,
+    )
+
+    result = coordinator.check()
+
+    assert result.status is UpdateCheckStatus.AVAILABLE
+    assert result.version == "0.3.0"
+
+
+def test_forward_proxy_keeps_sequential_candidate_order() -> None:
+    """配置 forward proxy 时代理环境变量互斥,按候选顺序串行且短路(非并发)。"""
+    calls: list[str] = []
+
+    class SlowFirstManager(FakeManager):
+        def check_for_updates(self) -> object | None:
+            time.sleep(0.2)
+            return self.update
+
+    def factory(source: str) -> FakeManager:
+        calls.append(source)
+        if "first" in source:
+            return SlowFirstManager(update=VersionedUpdateInfo("1.0.0"))
+        return FakeManager(update=VersionedUpdateInfo("2.0.0"))
+
+    coordinator = VelopackUpdateCoordinator(
+        feed_candidates=("https://first.invalid/feed/", "https://second.invalid/feed/"),
+        manager_factory=factory,
+        forward_proxy="http://127.0.0.1:7890",
+    )
+
+    result = coordinator.check()
+
+    # 首个(慢)候选胜出;若误入并发路径,立即返回的 2.0.0 会赢
+    assert result.status is UpdateCheckStatus.AVAILABLE
+    assert result.version == "1.0.0"
+    # 串行短路:首个候选成功后不再构造后续候选的 manager
+    assert calls == ["https://first.invalid/feed/"]
 
 
 def test_apply_requires_prior_available_check() -> None:
