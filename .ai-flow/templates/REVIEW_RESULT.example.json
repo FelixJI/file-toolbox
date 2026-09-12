@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "reviewed_head_sha": null,
+  "reviewed_base_sha": null,
+  "reviewer_run_id": null,
+  "independent_context_confirmed": false,
+  "review_scope": "not_started",
+  "verdict": "INSUFFICIENT_EVIDENCE",
+  "acceptance_evidence": [],
+  "findings": [],
+  "missing_evidence": [
+    "Actual diff, current SHAs, required validation results and AC evidence have not been checked."
+  ],
+  "note": "Empty findings are not PASS. This report is not a GitHub approval or a trusted merge check."
+}
