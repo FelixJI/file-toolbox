@@ -1,0 +1,69 @@
+{
+  "schema_version": 2,
+  "configuration_status": "ready",
+  "repository": "FelixJI/file-toolbox",
+  "default_branch": "main",
+  "baseline_sha": "30a53871beb37fa1ffbe5b8b2824efb008845961",
+  "mode": "assisted",
+  "profile": "balanced",
+  "max_writers_per_worktree": 1,
+  "default_parallel_writers": 1,
+  "capabilities": {
+    "git": "available",
+    "github_read": "unknown",
+    "github_write": "unknown",
+    "codex_independent_review": "unknown",
+    "zcode_execution": "unavailable",
+    "zcode_external_invocation": "unavailable",
+    "persistent_orchestrator": "not_provided"
+  },
+  "validation": {
+    "commands": [
+      "uv sync --frozen --all-extras",
+      "uv run --all-extras python scripts/check_release_contract.py",
+      "uv run ruff check .",
+      "uv run ruff format --check .",
+      "uv run mypy",
+      "uv run --all-extras python scripts/regen_ui.py --check",
+      "uv run pytest --cov=file_toolbox.core --cov-branch --cov-fail-under=90 -W error::ResourceWarning -W error::DeprecationWarning -q",
+      "uv run pytest --cov=file_toolbox --cov-branch --cov-fail-under=90 -W error::ResourceWarning -W error::DeprecationWarning -q",
+      "uv run --all-extras python scripts/check_test_count.py",
+      "uv build",
+      "uv run --all-extras python scripts/build_exe.py --ci",
+      "python scripts/release_smoke.py"
+    ],
+    "baseline_result": "not_run",
+    "required_check_names": ["required"]
+  },
+  "risk_paths": {
+    "review_required": ["R1", "R2", "R3"],
+    "human_merge_required": ["R2", "R3"]
+  },
+  "quota": {
+    "source": "unknown",
+    "last_verified_at": null,
+    "note": "Do not infer remaining account allowance. Work and Codex may share usage; see SOURCES S6."
+  },
+  "auto_merge": {
+    "enabled": false,
+    "allowlisted_categories": [],
+    "trusted_gate_verified": false,
+    "note": "This package does not implement a remote enforcement gate."
+  },
+  "deployment": {
+    "authorized": false,
+    "real_data_operations_authorized": false
+  },
+  "retry_policy": {
+    "zcode_same_root_cause_failed_rounds": 2,
+    "codex_same_root_cause_failed_rounds": 2,
+    "ci_infrastructure_retries": 1
+  },
+  "setup_gaps": [
+    "GitHub 可访问性与 read/write 能力未验证：无 gh CLI 可执行入口。",
+    "ZCode 执行入口与外部调用能力未验证：无 zcode 可执行入口。",
+    "环境未提供可用 Python/UV，无法在本机复现 `.ci/project.json` 的验证命令；请先补齐命令与权限后补跑。",
+    "未在 GitHub 分支保护中确认 required check 和 review 规则；请按一页式设置清单完成配置。",
+    "独立 Codex 审阅能力（`@codex review` 路径、触发时机）未实测。"
+  ]
+}

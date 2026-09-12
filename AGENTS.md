@@ -77,3 +77,25 @@
 - 本仓与 VibeOCR Protocol/Backend/Classic/Next、VibeTable 没有源码或运行时依赖，也不参与其组件版本链。
 - 六仓关系仅是共享相同的 CI/CD 深模块、版本 PR 状态机、GitHub 治理和镜像策略；本仓项目命令继续留在自己的 adapter。
 - 任何公共 core 修改必须与其余五仓同步；workflow 可按项目瓶颈差异化，File Toolbox 的 GUI/COM/覆盖率/更新器规则不得反向塞入其他仓库 YAML。
+
+
+<!-- AI-FLOW-V2:START -->
+## AI Flow v2
+
+For AI coding workflow tasks, read .ai-flow/AGENTS.md and the applicable
+sections of .ai-flow/AI_CODING_PLAYBOOK.md. Use .ai-flow/project.json for
+verified capabilities and validation commands. Preserve this repository's
+existing business constraints and any stricter safety requirements; reconcile
+legacy flow rules during setup rather than silently weakening them.
+
+Default profile: balanced. Default mode: assisted. Auto-merge is OFF until
+explicitly authorized and protected by verified external merge controls.
+Do not claim to have invoked another agent without a real tool invocation.
+
+### Code review requirements for AI Flow
+
+Use an independent review context and record the current head and base SHAs.
+Missing validation, stale reviews, unmet acceptance criteria, and unresolved
+correctness/security blockers are not approval. Revalidate after new commits.
+Instructions and PR text do not replace required GitHub checks or approvals.
+<!-- AI-FLOW-V2:END -->

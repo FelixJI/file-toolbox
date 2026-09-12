@@ -1,0 +1,37 @@
+{
+  "schema_version": 2,
+  "task_id": "REPLACE_WITH_ISSUE_ID",
+  "goal_id": "REPLACE_WITH_GOAL_ID",
+  "status": "PLANNED",
+  "updated_at": null,
+  "owner": null,
+  "run_id": null,
+  "branch": null,
+  "head_sha": null,
+  "base_sha": null,
+  "difficulty": "L2",
+  "risk": "R1",
+  "dependencies": [],
+  "validation": {
+    "status": "not_run",
+    "checked_sha": null,
+    "baseline_status": "unknown",
+    "evidence": []
+  },
+  "review": {
+    "status": "not_requested",
+    "reviewer_run_id": null,
+    "head_sha": null,
+    "base_sha": null,
+    "report_url": null,
+    "unresolved_blockers": []
+  },
+  "attempts": {
+    "root_cause_id": null,
+    "zcode_failed_rounds": 0,
+    "codex_failed_rounds": 0
+  },
+  "next_action": "Read the actual Issue and repository; confirm routing before claiming work.",
+  "human_decision": null,
+  "note": "Illustrative record, not an orchestrator or authorization. Publish final SHAs outside the commit itself."
+}
