@@ -27,7 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # 基线:当前实际用例数(依赖升级 PR 补齐考勤/更新链路测试后上调)。
 # 超过此数即通过;低于则失败提醒「测试被删除」。
-DEFAULT_MIN = 1922
+DEFAULT_MIN = 1976
 
 
 def collect_test_count() -> int:

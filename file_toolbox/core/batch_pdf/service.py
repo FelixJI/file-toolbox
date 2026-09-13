@@ -358,7 +358,7 @@ class PDFGeneratorService:
         # 记录历史(执行后):从 results 汇总 ok/fail(逻辑同 PDFController.summarize_results),
         # config 取审计子集。形状与原 GUI pdf_tab 内联写入 / PDFController.build_history_record
         # 完全一致。此处可能在工作线程(PdfGenerateWorker)内执行,add_record 由
-        # JsonHistoryStore 的 threading.Lock 保护。
+        # JsonHistoryStore 的文件事务锁(线程 + 跨进程)保护。
         if self._history_store is not None:
             ok = sum(1 for r in results if r.get("success"))
             fail = len(results) - ok

@@ -71,3 +71,97 @@ class TestCorruptionTolerance:
         _settings_path().parent.mkdir(parents=True, exist_ok=True)
         _settings_path().write_text(payload, encoding="utf-8")
         assert settings.get("anything", "d") == "d"
+
+
+# =====================================================================================
+# Issue #77 回归:并发 set 不同 key 不互相覆盖、唯一临时文件、IO 失败不覆盖旧文件。
+# =====================================================================================
+import multiprocessing  # noqa: E402
+import threading  # noqa: E402
+from pathlib import Path  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+
+def _spawn_set_child(key: str) -> None:
+    """spawn 子进程:按 CLI 数据根策略(cwd-scoped)写一个设置 key。"""
+    settings.set(key, 1)
+
+
+class TestConcurrentSet:
+    def test_threads_set_different_keys_all_preserved(self, isolated_cwd):
+        """同进程两线程并发 set 不同 key:两个 key 都保留。
+
+        旧实现两个线程都先读旧快照再顺序保存,后写者抹掉先写者的 key。
+        """
+        barrier = threading.Barrier(2)
+
+        def writer(key: str) -> None:
+            barrier.wait(5)
+            settings.set(key, 1)
+
+        threads = [threading.Thread(target=writer, args=(k,)) for k in ("a", "b")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        assert settings.get("a") == 1
+        assert settings.get("b") == 1
+
+    def test_spawn_two_processes_set_different_keys_all_preserved(self, isolated_cwd):
+        """真实双进程 spawn 并发 set 不同 key:两个 key 都保留(跨进程锁互斥)。"""
+        ctx = multiprocessing.get_context("spawn")
+        children = [ctx.Process(target=_spawn_set_child, args=(k,)) for k in ("a", "b")]
+        for child in children:
+            child.start()
+        try:
+            for child in children:
+                child.join(timeout=20)
+        finally:
+            for child in children:
+                if child.is_alive():
+                    child.terminate()
+                    child.join()
+        assert [child.exitcode for child in children] == [0, 0]
+        assert settings.get("a") == 1
+        assert settings.get("b") == 1
+
+    def test_no_fixed_or_residual_temp_files(self, isolated_cwd):
+        """写路径不再使用固定 settings.tmp;事务后目录无 .tmp 残留。"""
+        settings.set("k", "v")
+        data_dir = _settings_path().parent
+        assert not (data_dir / "settings.tmp").exists()
+        assert not list(data_dir.glob("*.tmp"))
+        # 稳定 sidecar 锁文件保留(与临时文件区分)
+        assert (data_dir / "settings.json.lock").exists()
+
+
+class TestWriteFailurePreservation:
+    def test_replace_failure_preserves_old_and_cleans_tmp(self, isolated_cwd):
+        """replace 失败:异常传播,旧文件保留,本次临时文件被清理。"""
+        p = _settings_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('{"old": 1}', encoding="utf-8")
+        with (
+            patch(
+                "file_toolbox.common.settings.os.replace", side_effect=OSError("injected replace")
+            ),
+            pytest.raises(OSError, match="injected replace"),
+        ):
+            settings.set("new", 2)
+        assert json.loads(p.read_text(encoding="utf-8")) == {"old": 1}
+        assert not list(p.parent.glob("*.tmp"))
+
+    def test_read_permission_error_propagates_without_overwrite(self, isolated_cwd):
+        """权限等 IO 读取失败不得被当作空设置:set 传播异常,旧文件不被覆盖。
+
+        旧实现 _load 吞掉 OSError 返回 {},set 会用 {key: value} 重写整个文件。
+        """
+        p = _settings_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('{"old": 1}', encoding="utf-8")
+        with (
+            patch.object(Path, "read_text", side_effect=PermissionError("denied")),
+            pytest.raises(PermissionError, match="denied"),
+        ):  # noqa: SIM117
+            settings.set("new", 2)
+        assert json.loads(p.read_text(encoding="utf-8")) == {"old": 1}

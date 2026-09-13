@@ -98,23 +98,28 @@ def test_read_all_skips_corrupt_line(tmp_path):
     assert [r["id"] for r in records] == [1, 2]
 
 
-def test_get_record_line_missing_id_key_does_not_crash(tmp_path):
-    """合法 JSON 但缺 'id' 键的行 → get_record 查找时 rec["id"] 会 KeyError。
+def test_get_record_line_missing_id_key_returns_none(tmp_path, caplog):
+    """缺 'id' 键的行是无效记录:查询跳过(返回 None)而非抛 KeyError,并记诊断日志。
 
-    锁定当前行为:_read_all 把它当普通记录读入,get_record 遍历时对该行 rec["id"]
-    抛 KeyError(非静默跳过)。此为已知弱点(部分写入/损坏),记录行为使未来若改为
-    「跳过无 id 行」该测试变红。
+    旧实现把该行当普通记录读入,get_record 遍历时 rec["id"] 抛 KeyError——
+    「名义上不崩、实际必然崩」的错误契约,Issue #77 更正为显式可观察:无效行
+    跳过 + logger.warning(含路径/行号,不含记录内容)。
     """
+    import logging
+
     store = JsonHistoryStore(tmp_path)
     f = tmp_path / "rename.jsonl"
     f.write_text(
         '{"no_id": true}\n',  # 合法 JSON,无 id 键
         encoding="utf-8",
     )
-    import pytest
-
-    with pytest.raises(KeyError):
-        store.get_record("rename", 1)
+    with caplog.at_level(logging.WARNING, logger="file_toolbox.common.history"):
+        assert store.get_record("rename", 1) is None
+        assert store.get_records("rename") == []
+    assert "line=1" in caplog.text
+    assert str(f) in caplog.text
+    # 诊断日志不得回显记录内容
+    assert "no_id" not in caplog.text
 
 
 def test_last_id_falls_back_to_full_scan_when_last_line_corrupt(tmp_path):
@@ -197,3 +202,314 @@ def test_add_record_thread_safe_concurrent(tmp_path):
     ids = [r["id"] for r in records]
     # id 从 1 开始连续无重复(锁保证 _last_id+1 的读-改-写原子)
     assert ids == list(range(1, n_threads * per_thread + 1))
+
+
+# =====================================================================================
+# Issue #77 回归:跨进程/跨实例并发一致性、损坏行保留与显式日志、写失败保留旧文件。
+# =====================================================================================
+import logging  # noqa: E402
+import multiprocessing  # noqa: E402
+import os  # noqa: E402
+import sys  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+from pathlib import Path  # noqa: E402
+from unittest.mock import patch  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+def _spawn_add_child(history_dir: Path, barrier, index: int) -> None:
+    """spawn 子进程:barrier 对齐后各追加一条记录(真实进程,无 monkeypatch)。"""
+    store = JsonHistoryStore(history_dir)
+    barrier.wait(timeout=15)
+    store.add_record("rename", {"child": index})
+
+
+class TestCrossProcessConsistency:
+    def test_spawn_two_processes_add_add_unique_ids(self, tmp_path):
+        """真实双进程 spawn 同时 add:id 必须唯一(旧实现双读旧快照得 [1,1])。"""
+        ctx = multiprocessing.get_context("spawn")
+        barrier = ctx.Barrier(2)
+        children = [
+            ctx.Process(target=_spawn_add_child, args=(tmp_path, barrier, i)) for i in range(2)
+        ]
+        for child in children:
+            child.start()
+        try:
+            for child in children:
+                child.join(timeout=20)
+        finally:
+            for child in children:
+                if child.is_alive():
+                    child.terminate()
+                    child.join()
+        assert [child.exitcode for child in children] == [0, 0]
+        ids = sorted(r["id"] for r in JsonHistoryStore(tmp_path).get_records("rename"))
+        assert ids == [1, 2]
+
+
+class TestCrossInstanceConsistency:
+    def test_two_instances_add_and_mark_no_lost_update(self, tmp_path):
+        """同目录两个 store 实例并发 mark/add:互不丢记录,最终 [1,2] 且 id1 已撤销。
+
+        旧实现 mark 的读-改-写不在同一锁域:并发 add 的记录被旧快照重写抹掉。
+        """
+        first = JsonHistoryStore(tmp_path)
+        second = JsonHistoryStore(tmp_path)
+        first.add_record("rename", {"initial": True})
+        barrier = threading.Barrier(2)
+
+        def do_mark() -> None:
+            barrier.wait(5)
+            first.mark_undone("rename", 1)
+
+        def do_add() -> None:
+            barrier.wait(5)
+            second.add_record("rename", {"concurrent": True})
+
+        threads = [threading.Thread(target=do_mark), threading.Thread(target=do_add)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        records = second.get_records("rename")
+        assert [r["id"] for r in records] == [1, 2]
+        assert records[0]["undone"] is True
+        assert records[1]["undone"] is False
+
+    def test_two_instances_concurrent_add_unique_ids(self, tmp_path):
+        """两个实例并发 add(同一进程):id 唯一连续(线程锁先于文件锁串行化)。"""
+        first = JsonHistoryStore(tmp_path)
+        second = JsonHistoryStore(tmp_path)
+        barrier = threading.Barrier(2)
+
+        def add(store: JsonHistoryStore, tag: str) -> None:
+            barrier.wait(5)
+            store.add_record("pdf", {"tag": tag})
+
+        threads = [
+            threading.Thread(target=add, args=(first, "a")),
+            threading.Thread(target=add, args=(second, "b")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        ids = sorted(r["id"] for r in first.get_records("pdf"))
+        assert ids == [1, 2]
+
+    def test_relative_and_absolute_dirs_share_lock(self, tmp_path, monkeypatch):
+        """相对与绝对目录表达指向同一数据根时必须共享同一把锁。"""
+        monkeypatch.chdir(tmp_path)
+        abs_store = JsonHistoryStore(tmp_path)
+        rel_store = JsonHistoryStore(Path("."))
+        barrier = threading.Barrier(2)
+
+        def add(store: JsonHistoryStore, tag: str) -> None:
+            barrier.wait(5)
+            store.add_record("pdf", {"tag": tag})
+
+        threads = [
+            threading.Thread(target=add, args=(abs_store, "abs")),
+            threading.Thread(target=add, args=(rel_store, "rel")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        ids = sorted(r["id"] for r in abs_store.get_records("pdf"))
+        assert ids == [1, 2]
+
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows 大小写别名目录")
+    def test_windows_case_alias_dirs_share_lock(self, tmp_path):
+        """Windows 大小写别名目录表达共享同一把锁(锁身份大小写归一)。"""
+        alias_dir = Path(str(tmp_path).swapcase())
+        stores = [JsonHistoryStore(tmp_path), JsonHistoryStore(alias_dir)]
+        barrier = threading.Barrier(2)
+
+        def add(store: JsonHistoryStore, tag: str) -> None:
+            barrier.wait(5)
+            store.add_record("pdf", {"tag": tag})
+
+        threads = [
+            threading.Thread(target=add, args=(stores[0], "real")),
+            threading.Thread(target=add, args=(stores[1], "alias")),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        ids = sorted(r["id"] for r in stores[0].get_records("pdf"))
+        assert ids == [1, 2]
+
+
+class TestReaderIsolation:
+    def test_reader_blocked_until_rewriter_releases(self, tmp_path):
+        """读者不能进入进行中的重写事务:锁内 replace 挂起期间 get_records 阻塞,
+        完成后读到完整替换结果(不再观察到截断空文件中间态)。"""
+        writer = JsonHistoryStore(tmp_path)
+        reader = JsonHistoryStore(tmp_path)
+        writer.add_record("rename", {"v": 1})
+        reached_replace = threading.Event()
+        proceed = threading.Event()
+        real_replace = os.replace
+
+        def gated_replace(src, dst):
+            reached_replace.set()
+            assert proceed.wait(5)
+            real_replace(src, dst)
+
+        with (
+            patch("file_toolbox.common.history.os.replace", side_effect=gated_replace),
+            ThreadPoolExecutor(2) as pool,
+        ):
+            writer_future = pool.submit(writer.mark_undone, "rename", 1)
+            assert reached_replace.wait(5), "写事务应到达锁内 replace 边界"
+            reader_future = pool.submit(reader.get_records, "rename")
+            time.sleep(0.3)  # 给读者进入锁等待的时间(持锁方仍阻塞在 proceed)
+            assert not reader_future.done(), "写事务持锁期间读者不应完成"
+            proceed.set()
+            records = reader_future.result(timeout=5)
+            writer_future.result(timeout=5)
+        assert [r["id"] for r in records] == [1]
+        assert records[0]["undone"] is True
+
+
+class TestCorruptLineHandling:
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            '{"no_id": true}',  # 缺 id
+            "[]",  # 非对象(数组)
+            '"a string"',  # 非对象(字符串)
+            '{"id": "bad"}',  # 字符串 id
+            '{"id": true}',  # bool id(int 子类,必须排除)
+            '{"id": 0}',  # 非正整数
+            '{"id": -3}',  # 负整数
+            "{not json",  # 损坏 JSON
+        ],
+    )
+    def test_invalid_lines_skipped_and_logged(self, tmp_path, caplog, payload):
+        """无效行查询时跳过,并记录含路径/行号的诊断日志(不回显记录内容)。"""
+        f = tmp_path / "rename.jsonl"
+        f.write_text(payload + "\n", encoding="utf-8")
+        store = JsonHistoryStore(tmp_path)
+        with caplog.at_level(logging.WARNING, logger="file_toolbox.common.history"):
+            assert store.get_records("rename") == []
+            assert store.get_record("rename", 1) is None
+        assert "line=1" in caplog.text
+        assert str(f) in caplog.text
+        assert payload not in caplog.text
+
+    def test_mark_undone_preserves_corrupt_lines_and_extra_fields(self, tmp_path):
+        """mark 只重写目标行:损坏行、无换行破损尾与额外字段逐行保留。"""
+        f = tmp_path / "rename.jsonl"
+        f.write_text(
+            '{"id": 1, "timestamp": "t", "data": {}, "undone": false, "extra": "keep"}\n'
+            "{broken-middle\n"
+            '{"id": 2, "timestamp": "t", "data": {"v": 2}, "undone": false}\n'
+            "{broken-tail",
+            encoding="utf-8",
+        )
+        JsonHistoryStore(tmp_path).mark_undone("rename", 2)
+        lines = f.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 4
+        untouched = json.loads(lines[0])
+        assert untouched["extra"] == "keep"
+        assert untouched["undone"] is False
+        assert lines[1] == "{broken-middle"
+        marked = json.loads(lines[2])
+        assert marked["id"] == 2
+        assert marked["undone"] is True
+        assert lines[3] == "{broken-tail"
+
+    def test_add_separates_from_unterminated_broken_tail(self, tmp_path):
+        """末行破损且无换行:append 前补分隔,新记录独立成行、id 接最大有效值。"""
+        f = tmp_path / "rename.jsonl"
+        f.write_text(
+            '{"id": 1, "timestamp": "t", "data": {}, "undone": false}\n{broken-tail',
+            encoding="utf-8",
+        )
+        rid = JsonHistoryStore(tmp_path).add_record("rename", {"v": 1})
+        assert rid == 2
+        lines = f.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 3
+        assert lines[1] == "{broken-tail"
+        assert json.loads(lines[2])["id"] == 2
+
+    def test_add_after_invalid_high_id_line_uses_max_valid(self, tmp_path):
+        """id 分配取最大「有效」id:字符串 id 的诱惑值不参与。"""
+        f = tmp_path / "rename.jsonl"
+        f.write_text(
+            '{"id": 5, "timestamp": "t", "data": {}, "undone": false}\n{"id": "99"}\n',
+            encoding="utf-8",
+        )
+        assert JsonHistoryStore(tmp_path).add_record("rename", {}) == 6
+
+    def test_clear_counts_valid_records_and_empties_file(self, tmp_path):
+        """clear 是显式清空:计数只含有效记录,清空后文件为空。"""
+        f = tmp_path / "rename.jsonl"
+        f.write_text(
+            '{"id": 1, "timestamp": "t", "data": {}, "undone": false}\n'
+            "{broken\n"
+            '{"id": 2, "timestamp": "t", "data": {}, "undone": false}\n',
+            encoding="utf-8",
+        )
+        assert JsonHistoryStore(tmp_path).clear("rename") == 2
+        assert f.read_text(encoding="utf-8") == ""
+
+    def test_mark_missing_id_leaves_file_unchanged(self, tmp_path):
+        """mark 不存在的 id:不改写文件(旧实现仍会无差别全量重写)。"""
+        store = JsonHistoryStore(tmp_path)
+        store.add_record("rename", {"v": 1})
+        f = tmp_path / "rename.jsonl"
+        original = f.read_text(encoding="utf-8")
+        store.mark_undone("rename", 999)
+        assert f.read_text(encoding="utf-8") == original
+
+
+class TestWriteFailurePreservation:
+    def test_mark_serialization_failure_preserves_old_file(self, tmp_path):
+        """序列化失败:异常传播,旧文件逐字保留,无临时文件残留。"""
+        store = JsonHistoryStore(tmp_path)
+        store.add_record("rename", {"v": 1})
+        f = tmp_path / "rename.jsonl"
+        original = f.read_text(encoding="utf-8")
+        with (
+            patch("file_toolbox.common.history.json.dumps", side_effect=OSError("injected dumps")),
+            pytest.raises(OSError, match="injected dumps"),
+        ):
+            store.mark_undone("rename", 1)
+        assert f.read_text(encoding="utf-8") == original
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_mark_replace_failure_preserves_old_and_cleans_tmp(self, tmp_path):
+        """replace 失败:异常传播,旧文件保留,本次临时文件被清理。"""
+        store = JsonHistoryStore(tmp_path)
+        store.add_record("rename", {"v": 1})
+        f = tmp_path / "rename.jsonl"
+        original = f.read_text(encoding="utf-8")
+        with (
+            patch(
+                "file_toolbox.common.history.os.replace", side_effect=OSError("injected replace")
+            ),
+            pytest.raises(OSError, match="injected replace"),
+        ):
+            store.mark_undone("rename", 1)
+        assert f.read_text(encoding="utf-8") == original
+        assert not list(tmp_path.glob("*.tmp"))
+
+    def test_add_serialization_failure_preserves_old_file(self, tmp_path):
+        """append 前序列化失败:异常传播,文件保持原样。"""
+        store = JsonHistoryStore(tmp_path)
+        store.add_record("rename", {"v": 1})
+        f = tmp_path / "rename.jsonl"
+        original = f.read_text(encoding="utf-8")
+        with (
+            patch("file_toolbox.common.history.json.dumps", side_effect=OSError("injected dumps")),
+            pytest.raises(OSError, match="injected dumps"),
+        ):
+            store.add_record("rename", {"v": 2})
+        assert f.read_text(encoding="utf-8") == original
