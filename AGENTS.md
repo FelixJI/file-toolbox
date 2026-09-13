@@ -84,13 +84,13 @@
 
 For AI coding workflow tasks, read `.ai-flow/AGENTS.md` and the applicable
 sections of `.ai-flow/AI_CODING_PLAYBOOK.md`. Use `.ai-flow/project.json` for
-verified capabilities and validation commands. Preserve existing project rules
+shared policy and validation commands; ignored `.ai-flow/local.json` holds host readiness and CLI settings. Preserve existing project rules
 and stricter safety requirements; reconcile legacy flow rules during setup.
 
 Default profile: balanced. Web ChatGPT creates/updates Issue task contracts; Codex controls/routes and performs
 complex work; the already configured pi+GLM performs bounded implementation.
 Read `.ai-flow/prompts/08-batch-run.md` for the one-sentence execution entry.
-The local `.ai-flow/scripts/flow.py` runner dispatches only after process exit.
+The local `.ai-flow/scripts/flow.py` coordinator uses Codex App Server + Pi RPC; dispatches after turn/completed or agent_settled, not process exit.
 After handing off to a detached runner, release the worktree and end the turn;
 do not poll, recursively spawn runners, or resume an unrelated/active session.
 `AI_FLOW_CHILD=1` means report to the outer runner, do not dispatch other agents.
@@ -103,5 +103,9 @@ security sandbox or an automatic message injector into an existing desktop chat.
 Use an independent review context and record current head/base SHAs.
 Missing tests, stale reviews and unresolved correctness/security blockers are not
 approval. Revalidate new commits. Instructions do not replace GitHub checks or
-qualified approvals. Do not expose credentials in runtime artifacts or commits.
+qualified approvals. Never commit machine-local run/probe reports or BOOTSTRAP_RESULT.md.
+Store reports under ignored `.ai-flow/runtime/`; publish brief progress only in Issue/PR text.
+Before commit/push run `.ai-flow/scripts/hygiene.py`; never use git add . / -A.
+Do not refresh shared project.json for local readiness, capabilities or current baseline.
+Do not expose credentials in runtime artifacts or commits.
 <!-- AI-FLOW-V3:END -->

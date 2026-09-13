@@ -1,23 +1,20 @@
 {
   "schema_version": 3,
-  "configuration_status": "partial",
   "repository": "FelixJI/file-toolbox",
   "default_branch": "main",
-  "baseline_sha": "79094f4c8887059054eda38bcadaa16d12ed4324",
-  "mode": "event-driven",
+  "mode": "native-event-driven",
   "profile": "balanced",
   "max_writers_per_worktree": 1,
   "default_parallel_writers": 1,
-  "capabilities": {
-    "git": "available",
-    "github_read": "available",
-    "github_write": "unknown",
-    "codex_cli_exec": "available",
-    "codex_independent_review": "available",
-    "pi_noninteractive": "available",
-    "pi_glm_provider_verified": "available",
-    "detached_process_survival": "unknown",
-    "desktop_thread_injection": "not_implemented"
+  "runner": {
+    "max_controller_turns": 24,
+    "max_worker_runs_per_task": 8,
+    "max_pi_runs_per_task": 2,
+    "controller_timeout_seconds": 900,
+    "worker_timeout_seconds": 3600,
+    "review_timeout_seconds": 1800,
+    "preview_chars": 5000,
+    "backend": "native"
   },
   "validation": {
     "commands": [
@@ -34,7 +31,6 @@
       "uv run --all-extras python scripts/build_exe.py --ci",
       "uv run python scripts/release_smoke.py"
     ],
-    "baseline_result": "quality passed; core 1938 passed/98.24%; full 1941 passed/98.30%; package build passed; 4 runner regression tests passed; Nuitka release build/smoke and remote CI not run",
     "required_check_names": [
       "required"
     ]
@@ -49,11 +45,6 @@
       "R2",
       "R3"
     ]
-  },
-  "quota": {
-    "source": "unknown",
-    "last_verified_at": null,
-    "note": "Use configured Codex login and existing pi+GLM setup. Never infer quota or silently change billing."
   },
   "auto_merge": {
     "enabled": false,
@@ -70,29 +61,11 @@
     "codex_same_root_cause_failed_rounds": 2,
     "ci_infrastructure_retries": 1
   },
-  "setup_gaps": [
-    "真实本地业务回调已 FINISHED，独立审阅 PASS；仍待本 Codex 回合结束后的后台存活证据，正式 runner 保持关闭。",
-    "GitHub 读取及 strict required/squash 已核实；尚未推送或创建接入 PR，写入与本次远端 CI 未实测。"
-  ],
-  "runner": {
-    "enabled": false,
-    "trusted_local_execution": true,
-    "pi_command": [
-      "pi"
-    ],
-    "pi_args": [],
-    "codex_command": [
-      "codex.exe"
-    ],
-    "codex_global_args": [],
-    "codex_exec_args": [],
-    "max_controller_turns": 24,
-    "max_worker_runs_per_task": 8,
-    "max_pi_runs_per_task": 2,
-    "controller_timeout_seconds": 900,
-    "worker_timeout_seconds": 3600,
-    "review_timeout_seconds": 1800,
-    "preview_chars": 5000,
-    "allow_local_git_writes": true
+  "flow_version": "3.2.0",
+  "artifact_policy": {
+    "local_config": ".ai-flow/local.json",
+    "runtime_root": ".ai-flow/runtime",
+    "publish_progress": "issue_or_pr_summary",
+    "checkpoint_commits": false
   }
 }

@@ -1,37 +1,17 @@
 {
-  "schema_version": 3,
-  "task_id": "REPLACE_WITH_ISSUE_ID",
-  "goal_id": "REPLACE_WITH_GOAL_ID",
-  "status": "PLANNED",
-  "updated_at": null,
-  "owner": null,
-  "run_id": null,
-  "branch": null,
-  "head_sha": null,
-  "base_sha": null,
-  "difficulty": "L2",
-  "risk": "R1",
-  "dependencies": [],
-  "validation": {
-    "status": "not_run",
-    "checked_sha": null,
-    "baseline_status": "unknown",
-    "evidence": []
+  "example_only": true,
+  "run_id": "example",
+  "status": "WAITING_PI",
+  "pending": {
+    "role": "PI",
+    "task_id": "issue-123",
+    "protocol": "pi-rpc",
+    "child_pid": 12345,
+    "session_id": "example-session"
   },
-  "review": {
-    "status": "not_requested",
-    "reviewer_run_id": null,
-    "head_sha": null,
-    "base_sha": null,
-    "report_url": null,
-    "unresolved_blockers": []
+  "progress": {
+    "event": "tool_execution_start",
+    "tool": "bash"
   },
-  "attempts": {
-    "root_cause_id": null,
-    "codex_failed_rounds": 0,
-    "pi_failed_rounds": 0
-  },
-  "next_action": "Read the actual Issue and repository; confirm routing before claiming work.",
-  "human_decision": null,
-  "note": "Published task snapshot; runtime state.json is local orchestration truth. No merge authorization. Keep secrets out of evidence."
+  "note": "Local-only projection; do not commit real state or treat PID liveness as active model progress."
 }

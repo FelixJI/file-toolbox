@@ -7,3 +7,14 @@ __pycache__/
 
 # 接入操作文档需要版本管理。
 !docs/
+/local.json
+/runtime/
+/migration-backups/
+/upgrade-candidates/
+/reports/
+__pycache__/
+*.pyc
+BOOTSTRAP_RESULT.md
+AI_FLOW_RESULT.md
+AI_FLOW_HANDOFF.md
+AI_FLOW_STATUS.json

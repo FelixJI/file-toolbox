@@ -2,7 +2,9 @@
 
 import importlib.util
 import json
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -115,3 +117,91 @@ def test_commit_rejects_unlisted_staged_content(flow_repo: Path) -> None:
         )
     assert flow.git(flow_repo, "rev-parse", "HEAD") == head
     assert flow.git(flow_repo, "show", ":tracked.txt") == "staged change"
+
+
+@pytest.mark.parametrize("role, mode", [("CONTROLLER", "read-only"), ("CODEX", "workspace-write")])
+def test_native_thread_uses_schema_sandbox_mode(flow_repo: Path, role: str, mode: str) -> None:
+    from unittest.mock import Mock
+
+    import native_rpc
+
+    client = native_rpc.CodexClient.__new__(native_rpc.CodexClient)
+    client.root = flow_repo
+    client.cfg = {}
+    client.wire = Mock()
+    client.wire.request.return_value = {"thread": {"id": "new-thread"}}
+    assert client.select_thread(None, role) == "new-thread"
+    params = client.wire.request.call_args.args[1]
+    assert params["sandbox"] == mode
+    assert params["approvalPolicy"] == "never"
+
+
+@pytest.mark.parametrize("boundary", ["commit", "push"])
+def test_git_executes_artifact_hooks(flow_repo: Path, boundary: str) -> None:
+    import hygiene
+
+    flow.git(flow_repo, "config", "user.name", "Test")
+    flow.git(flow_repo, "config", "user.email", "test@example.invalid")
+    guard = flow_repo / ".ai-flow/scripts/hygiene.py"
+    guard.parent.mkdir(parents=True)
+    shutil.copyfile(Path(hygiene.__file__), guard)
+    # The hook runs through uv, in an isolated local environment without dependency downloads.
+    subprocess.run(["uv", "venv", "--python", sys.executable, str(flow_repo / ".venv")], check=True)
+    (flow_repo / ".gitignore").write_text(".venv/\n", encoding="utf-8")
+    flow.git(flow_repo, "add", ".ai-flow/scripts/hygiene.py", ".gitignore")
+    flow.git(flow_repo, "commit", "-qm", "test: guard fixture")
+    report = flow_repo / "BOOTSTRAP_RESULT.md"
+    report.write_text("local report", encoding="utf-8")
+    flow.git(flow_repo, "add", report.name)
+    if boundary == "push":
+        # Create the legacy report before installing guards; exercise a real pre-push invocation.
+        flow.git(flow_repo, "commit", "-qm", "test: legacy local report")
+        remote = flow_repo.parent / "remote.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], check=True)
+        flow.git(flow_repo, "remote", "add", "local-test", str(remote))
+    hygiene.install_hooks(flow_repo)
+    args = (
+        ["commit", "-qm", "test: blocked report"]
+        if boundary == "commit"
+        else ["push", "local-test", "HEAD:refs/heads/probe"]
+    )
+    result = subprocess.run(["git", "-C", str(flow_repo), *args], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "BLOCKED: machine-local artifacts" in result.stderr
+    assert "BOOTSTRAP_RESULT.md" in result.stderr
+    if boundary == "commit":
+        flow.git(flow_repo, "rm", "--cached", report.name)
+        report.unlink()
+        # Shared hooks also work on an older branch without the new guard source.
+        flow.git(flow_repo, "rm", ".ai-flow/scripts/hygiene.py")
+        (flow_repo / "design.md").write_text("persistent design", encoding="utf-8")
+        flow.git(flow_repo, "add", "design.md")
+        flow.git(flow_repo, "commit", "-qm", "test: allow persistent document")
+    else:
+        refs = subprocess.run(["git", "--git-dir", str(remote), "show-ref"], capture_output=True)
+        assert refs.returncode == 1 and not refs.stdout
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows file sharing contract")
+@pytest.mark.parametrize("release_reader", [True, False])
+def test_atomic_state_with_concurrent_reader(tmp_path: Path, release_reader: bool) -> None:
+    import threading
+
+    state = tmp_path / "state.json"
+    state.write_text('{"old":true}', encoding="utf-8")
+    reader = state.open("rb")
+    timer = threading.Timer(0.05, reader.close) if release_reader else None
+    try:
+        if timer:
+            timer.start()
+            flow.atomic(state, '{"new":true}')
+            assert json.loads(state.read_text()) == {"new": True}
+        else:
+            with pytest.raises(PermissionError):
+                flow.atomic(state, '{"new":true}')
+            assert json.loads(state.read_text()) == {"old": True}
+    finally:
+        reader.close()
+        if timer:
+            timer.join()
+    assert not list(tmp_path.glob("*.tmp"))

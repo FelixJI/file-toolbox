@@ -1,77 +1,128 @@
-# 一次性升级：在目标仓库交给本地 Codex 执行
+# 安装 / 升级 AI Flow v3.2 Native
 
-你是接入工程师。将此包接入当前 Git 仓库，目标为 `balanced` + `event-driven`，沿用现有 pi+GLM 与 Codex 登录。只做接入，不夹带业务重构，不自动合并。普通技术判断自行完成；确需权限/登录/风险授权时一次汇总。
+这是交给**本地 Codex**执行的一次性接入任务，不是业务 runner 的子任务。交付包必须解压在目标仓库外。
+执行目标：Codex App Server + Pi RPC；保留 Issue-first、balanced、单写入者、独立审阅和既有登录。
+本文件授权范围是安装/迁移本工作流、本地 hooks 与验证；不授权自动合并、部署、真实数据操作、付费服务或放宽 CI/安全策略。
 
-## 1. 先读实际仓库，不碰用户未提交改动
+## 一句话升级
 
-读取原始目标、包内 README/执行规范、现有根和嵌套 AGENTS/override、Git 状态、远端默认分支、依赖清单、CI、未合并 PR。确认工作区、分支与命令，不假定 default branch=main，也不假定 npm/pnpm。
+> 按附件 AI Flow v3.2 的 BOOTSTRAP.md 将当前仓库升级为 Codex App Server + Pi RPC，保留现有规则和 Codex/pi+GLM 登录，迁移已跟踪的沟通过程文件及本机状态，完成协议与提交守卫验证；只提交持久化代码/规则的必要变更，不提交报告，不为进度另开 PR。
 
-若有未提交工作，使用干净的独立 worktree；不得 stash/reset/clean，不接管其他会话正在修改的目录。新的 worktree 不会自动拥有原目录的项目级 pi 配置、依赖和 ignored 文件，需要识别并在不复制秘密入库的前提下配置。Git worktree 只是隔离工作文件，不是安全沙箱。
+## 一句话全新安装
 
-## 2. 安装或升级，保留项目定制
+> 按附件 AI Flow v3.2 的 BOOTSTRAP.md 在当前仓库安装 Codex App Server + Pi RPC 工作流，沿用已配置的 pi+GLM 和 Codex 登录，完成本机接入与提交守卫验证；运行报告只留本地，日常使用 Issue-first、balanced。
 
-将安装包解压在仓库外。调用包里的 `install.py --repo <真实仓库根目录>` 预览；已有 v2 时加 `--upgrade`。审阅计划后加 `--apply`。
+## 1. 安全接管与读取
 
-安装器只自动替换与随包 v2 哈希完全相同的文件，并为旧内容备份。定制文件不覆盖；新候选写入 `.ai-flow/upgrade-candidates/`。**已有 project.json 永远保留**，包括未配置的原 v2 文件；必须读取候选并手工语义合并 v3 字段，保留真实项目命令和限制。备份与候选不提交。
+读取当前项目 AGENTS/override、已有 .ai-flow、Git status、相关接入 Issue/PR。明确仓库根目录和本次集成分支。
+有活动 runner 先请求其在完成边界停止；核对它实际停止并释放仓库锁。不能只删除锁文件。
+不要在旧 pi/Codex 仍写入时覆盖调度器，不要把 v3.1 pending 记录直接交给 v3.2 resume。
+用户未提交工作不能 stash/reset/clean。用干净专用 worktree；不要把整个压缩包复制进仓库。
 
-将仍在生效的 ZCode/assisted 旧规则、旧模板和 v3 规范协调一致；不能只复制 runner 就说升级成功。根 AGENTS 只升级明确管理的入口块；定制块保留项目约束后合并。不要删除非 AI 模板或项目原有保护。
+如果这个仓库是 FelixJI/file-toolbox，另读 FILE_TOOLBOX_MIGRATION.md，先核实 #86 的当前状态与真实 diff。
+不要假定它仍 open，也不要机械 cherry-pick 只有本机状态的提交。优先复用已有接入分支/PR承载真正升级；必要时才建一个集成 PR。
 
-安装包的 `tests/`、`migration/` 是包级验证/迁移材料，不要求整个包入库。只暂存经过审阅的接入文件，不使用未经检查的 `git add .`。
+## 2. 预览与安装
 
-## 3. 核对本地 CLI 和现有身份
+在解压包目录运行；Windows 可把 python 替换为 py -3，项目使用 uv 时沿用该项目的 Python 启动方式。
 
-要求 Python 3.9+、Git、可从当前环境调用的 `pi` 与 `codex` CLI。Codex 桌面应用已登录不等于终端 CLI 已登录或可见；分别检查。不要擅自安装最新模型、重建 pi 提供商、复制认证文件、换用 API 计费、追加第三方代理或申请新密钥。
+```text
+uv run --frozen python install.py --repo "<仓库根目录>" --upgrade
+uv run --frozen python install.py --repo "<仓库根目录>" --upgrade --apply
+```
 
-查看 `pi --version/--help`、`codex --version`、`codex exec --help` 的实际能力。运行：
+全新安装省略 --upgrade。需要 Python 3.10+，仅标准库；复用现有 Git、Codex CLI、pi CLI。
+升级器按 v2/v3.1 文件哈希替换未经定制的规则，保留项目业务内容；定制文件给出 ignored 的 upgrade-candidates。
+逐项语义合并候选，不能看到脚本文件已更新就忽略仍引用旧 exec/print 行为的定制提示词。
+升级器在写入时获取与旧 runner 相同的仓库锁；不改远端、登录、模型全局设置或现有 CI。
+
+## 3. 分离共享配置与本机状态
+
+共享 `.ai-flow/project.json` 只保留项目稳定配置：仓库、默认分支、profile、验证命令、风险路径、运行上限、安全/合并边界。
+本机 `.ai-flow/local.json` 被 Git 忽略：CLI 路径/参数、ready/partial、enabled、信任授权、能力探测、模型/提供商核验。
+临时产物、当前 baseline/head、安装报告、日志、receipt、会话索引全部位于 `.ai-flow/runtime/`。
+
+升级自动把旧 project.json 中本机字段迁到 local.json/legacy，并重置为 partial、enabled=false；这不是丢配置，而是不能拿 exec 的测试证明 RPC 已就绪。
+既有 pi_command/pi_args、Codex command/global args 优先保留。凭据继续由原 CLI 管理，绝不复制 auth.json 到 local.json。
+legacy.codex_exec_args 若非空，逐项转换：model/provider/effort 转 local.runner 对应字段；exec 专属参数不能盲目拼到 app-server；无法确认的参数留缺口，不悄悄删除有效限制。
+不强制更换 npm 包名、GLM 通道或付费方案；仅在实际 CLI 缺协议能力时说明必要升级，保留原认证。
+
+## 4. 清理历史沟通过程文件，安装提交守卫
+
+先预览，再执行精确迁移：
+
+```text
+uv run --frozen python .ai-flow/scripts/hygiene.py --tracked
+uv run --frozen python .ai-flow/scripts/hygiene.py --migrate
+uv run --frozen python .ai-flow/scripts/hygiene.py --migrate --apply
+uv run --frozen python .ai-flow/scripts/hygiene.py --install-hooks
+```
+
+migrate 只处理识别到的本机产物，不扫描删除所有 .md。它备份当前内容到 ignored runtime/legacy，然后 git rm --cached 精确取消跟踪并移走原报告；local.json 取消跟踪后仍保留原位，以免丢失正在使用的本机配置；不使用 -f、不动无关暂存内容。
+删除历史已跟踪的报告是一次有意义的迁移变更，应与本次升级一起提交；之后报告不再进入版本控制。
+**.gitignore 不会取消对已跟踪文件的跟踪。** 不要仅加 ignore 就宣称已解决。
+
+若已有 pre-commit/pre-push 或 core.hooksPath/Husky/pre-commit 管理器，脚本拒绝覆盖；在本次接入中保留原有检查并整合以下检查：
+- pre-commit 调用 hygiene.py --staged。
+- pre-push 调用 hygiene.py --pre-push，并完整转交原始 stdin 四列 ref 数据；不要让前一个 hook 消耗 stdin 后再传空输入。
+
+验证守卫实际被 Git 执行；不能仅在 AGENTS.md 写“禁止提交”。使用临时独立 Git 仓库测试，别在真实 PR 制造探针提交。
+提交规则：精确文件列表，不用 git add . / -A；不提交 local.json、runtime、备份、候选、BOOTSTRAP_RESULT.md；不为了安装状态单独生成 PR。
+短摘要放在本次对话或已有 Issue/PR 的正文/一条评论；不要把完整日志、主机路径或账户信息公开。
+
+## 5. 协议、模型与运行验证
+
+先运行离线测试（在解压包目录）：
+
+```text
+uv run --frozen python -m unittest discover -s tests -v
+```
+
+在目标仓库运行不发起模型生成的协议握手：
 
 ```text
 uv run --frozen python .ai-flow/scripts/flow.py doctor
 ```
 
-Windows 的 npm `.cmd` 启动器由 runner 尝试按已安装 package.json 的 bin 元数据解析为 Node 命令；失败时填写实际存在的 `[node.exe绝对路径, CLI.js绝对路径]`，不可猜路径或拼接 shell 字符串。不是 npm 安装则按真实二进制设置。
-
-`.ai-flow/project.json` 中先填写真实 repository/default_branch/baseline、已有验证命令、权限状态。`runner.pi_args=[]` 默认继承现有配置；不要凭印象写 provider id。Codex 多 profile 时使用现有已验证 profile，不改变账户认证。
-
-当前 pi 的非交互模式不会弹出项目信任提示；没有适用信任记录时，可能忽略 `.pi/settings.json`、项目扩展等资源。[S5] 特别是新 worktree，要确认 print 模式实际加载了预期配置。不要擅自设全局 always 信任；只有用户已授权该具体项目、已审查本地资源且当前 CLI 支持时，才记录项目级信任或采用本次限定的 trust 参数。配置来源/工作目录变化后重新核验 provider/model 与通道。
-
-## 4. 一次确认本地执行边界，再进行真实冒烟
-
-解释并确认以下有限授权：在该可信 worktree 启动本地 pi/Codex 子进程；运行仓库现有测试；使用 runner 进行显式路径的本地建分支和提交。**不含自动合并、部署、真实数据操作、新费用、修改安全策略。**
-
-获授权后可设 `runner.trusted_local_execution=true`；授权本地 Git 再设 `runner.allow_local_git_writes=true`。这不是完整计算机权限的授权；不要替用户开启 danger-full-access 或绕过组织策略。若用户已明确授予同等本地权限，记录该范围，无需重复询问。
-
-运行：
+doctor 会启动 CLI、加载已有配置/扩展并做 initialize/initialized 或 get_state；不是只 grep --help，也不是验证了真实模型调用。
+Pi 仍继承本机文件/进程权限，Codex sandbox 并不能包住 Pi。确认用户已有可信本地执行意图后，设置 local.runner.trusted_local_execution=true；不得给未信任项目静默启用。
+然后运行短的真实模型探针（会使用原有额度）：
 
 ```text
 uv run --frozen python .ai-flow/scripts/flow.py doctor --live
 ```
 
-该步骤使用现有模型额度，pi 禁用工具、Codex 用只读检查，各返回一个固定标记。检查退出码、完整事件、模型/提供商字段，确认实际使用的是用户已配置的 GLM 与预期套餐通道。模型名称不足以证明计费通道，需核对本地提供商设置；报告时脱敏。确认仓库未变更。
+两个 Agent 各连续两轮，在同一进程中返回固定短标记。所装 CLI 的协议以本机生成的 schema 和真实响应为准；`thread/start.sandbox` 使用 `read-only`/`workspace-write`；`turn/start.sandboxPolicy.type` 使用 `readOnly`/`workspaceWrite`，以本机 schema 为准。核对 Codex 原登录通道、Pi 实际 provider/model 是用户已配置 GLM；还要核对静态/动态结果和工作树未变化。
+新版 Pi 必须支持 agent_settled；agent_end 后仍可能继续重试。探针失败不得自动回退到“收到 agent_end 就成功”。
+Windows npm shim 由包内元数据解析到 node + CLI 入口，不把 prompt 插进 cmd.exe。解析失败时填本机实际绝对 node/CLI 路径到 local.json，不能编造路径。
 
-`doctor --live` 不证明真实 shell/测试/网络权限已全部可用。进一步在专用测试分支做一个可清理的小型业务闭环：Codex 分类→BRANCH→pi 或 Codex 实施→必要时 COMMIT→独立 REVIEW→FINISH。测试数据不接触生产，不为演练创建费用。保留完整证据。
+权限/输入请求会被拒绝并暂停，不会默认 Accept；先调查具体原因，不用 full access 或关闭保护“修好”探针。
+独立审阅验证使用新 thread，绑定实际 base/head。角色有独立上下文，不要求为每轮重启 Codex 进程。
+接入业务演练采用一个可回滚的小任务；本地验证、提交、独立审阅后再一次性 push。只读/无代码探针不需要新 PR。
 
-Codex 实现默认 workspace-write；其 `.git` 可能仍只读。[S12] 由已授权 runner 的 BRANCH/COMMIT 处理本地 Git，不开放整个文件系统，不将提交失败误认成模型能力不足。runner 不执行任意 Git/shell 字符串，保留现有 hooks 与签名要求；这些要求阻塞时需如实暂停。
+完成后将实际能力与局部启用状态写 local.json，而不是 project.json。每个 worktree 的 local.json 都是本机文件；新 worktree 按已验证配置复制并重新核对路径/基线，不能以为 Git 会传播它。
+允许运行条件：local.configuration_status=ready，local.runner.enabled=true，trusted_local_execution=true。有限本地分支/提交另由 allow_local_git_writes=true 明确授权。
 
-## 5. 验证“一句话交接后是否存活”
+## 6. 后台存活与显示
 
-先用只读计划（不改文件、直接核验后 FINISH）验证 runner，再测试 `--detach`。必须核对**启动 Codex 入口结束后**进程仍存活，并最终留下完成回执；启动成功不等于宿主允许后台存活。控制器也需要读取本地 Codex/pi 凭据和调用模型网络，不能假定沙箱子进程具备这些能力。
+若需要脱离入口 Codex 回合持续运行，必须在用户实际 Windows/Codex 宿主验证。SUBMITTED 和 launcher PID 不是存活证明。
+不能在当前会话内凭口头预测断言“关闭这个会话以后一定继续”。未验证时用普通可信终端前台运行，并把缺口只记录本地。
+不要为更新这项能力再提交一个“ready PR”。
 
-若当前平台阻止后台进程、终端 CLI 或网络凭据读取，不解除平台限制、不改安全策略自救。降为 PARTIAL：在用户已授权的普通本地终端以前台启动同一个 runner，让终端保持打开；这是一个本地调度进程等待，不是 Codex 轮询。若希望以后仍一句话启动，需要用户在此环境一次性配置允许的启动入口，再重做存活演练。
+```text
+uv run --frozen python .ai-flow/scripts/flow.py status
+uv run --frozen python .ai-flow/scripts/flow.py watch
+```
 
-云端 Codex 无法天然调用用户电脑里已配置的 pi；此方案默认本地 Codex/CLI。不能将云端任务状态写成 LOCAL_READY。
+watch 是人工查看入口，每秒刷新本机快照，不调用模型或询问 Agent 进度。原 Codex 桌面会话不会自动出现 Pi 子 Agent 卡片。
+要退出 watch 用 Ctrl+C；它不停止任务。stop 在本轮后停止；stop --now 向当前协议会话发送 interrupt/abort。
 
-## 6. 项目验证、配置完成与合并
+## 7. CI 与交付
 
-运行真实存在的安全基线验证，记录 command/cwd/exit/SHA。基线失败、未跑、网络受限、GitHub 无权限均分别标明。远端 CI、Issue/PR 写入、发布证据能力单独核实；没有这些能力不编造链接。
+本次基础包不改现有 CI/required checks，先消除报告/本机配置的提交。不得用 [skip ci] 或将必需 workflow 整体 paths-ignore 来掩盖无意义提交。
+确需后续优化时按 docs/ARTIFACTS_AND_CI.md 对现有 plan/重任务/required 汇总分层；不能笼统跳过 .ai-flow/**，这里有真正可执行代码和安全规则。
+提交前执行 hygiene.py --staged；推送前核对相对真实基线的 diff、当前 SHA 审阅和本地验证；push 后仅有新实际修改才再 push。
 
-确认 `.ai-flow/runtime/` 被 Git 忽略；运行日志可能包含代码与敏感内容，不直接上传。确认整个接入修改已在接入分支提交，运行前工作区干净。设置 `mode=event-driven`、`profile=balanced`、`auto_merge.enabled=false`。
+最终向用户给：已安装版本/协议、已验证与未验证事项、本地报告路径、确实发生的代码/规则变更、一个日常入口。安装报告可保存到 `.ai-flow/runtime/bootstrap/BOOTSTRAP_RESULT.md`，不得提交。
 
-只有必要能力实测成立、授权有依据、冲突已协调，才将 `configuration_status=ready` 与 `runner.enabled=true`。状态开关只是软件条件，不是外部授权证明。为了进行受控演练可以临时启用，演练未通过必须关闭并标 PARTIAL。
-
-创建接入 PR（已有授权且具备能力时），否则保留分支与准确 handoff。不擅自修改 branch protection、CI 权限或自动合并设置。来源与 GitHub 门禁建议见 docs/SOURCES.md、GITHUB_SETUP.md。
-
-## 最后只汇总一次
-
-输出 READY / PARTIAL；已验证的 CLI 版本、GLM 提供商通道和调用结果；后台存活结果；业务/审阅闭环证据；未完成的权限/CI/模型限制；真正需要用户一次操作的事项；以后执行的一句话。
-
-日常不要求用户手工拆 L1–L5、启动 pi、复制日志、追问状态或逐条转交审阅。不能完成的能力必须标明，不能以“理论支持”冒充实测。
+日常：**按 AI Flow 执行 #123，balanced，推进到可交付边界。**

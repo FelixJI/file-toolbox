@@ -1,6 +1,6 @@
 # AI Flow Agent Rules v3
 
-完整规则：`.ai-flow/AI_CODING_PLAYBOOK.md`。项目能力与命令：`.ai-flow/project.json`。项目现有更严格的业务/安全规则优先。不能用本文件覆盖工具或平台的权限限制。
+完整规则：`.ai-flow/AI_CODING_PLAYBOOK.md`。共享规则与验证命令：`.ai-flow/project.json`；本机能力/启用状态：ignored 的 `.ai-flow/local.json`。项目现有更严格的业务/安全规则优先。不能用本文件覆盖工具或平台的权限限制。
 
 ## v3 事件驱动入口（优先于旧版调度表述）
 
@@ -45,3 +45,11 @@
 
 检查验收条件与真实行为是否一致，优先识别状态/数据流错误、持久化兼容、权限边界和跨 PR 回归；格式与普通 lint 留给 CI。
 任何未跑的关键测试、未核对的最新提交或尚未处理的阻塞项都不得解释为批准。具体项目不变量应由接入 Agent 在适用目录补充，而不是堆砌通用口号。
+
+
+## v3.2 产物与发布规则
+
+共享 project.json 不记录本机 ready/enabled、CLI 路径、探测和当前 baseline；这些保存在 ignored local.json/runtime。
+BOOTSTRAP_RESULT.md、运行/审阅沟通报告不得进入版本控制；短摘要放 Issue/PR 文本。
+不为 checkpoint/能力状态造新 commit 或 PR；精确暂存，提交/推送前执行 hygiene guard，阶段交付再 push。
+正常协议完成不是 PID 退出；状态文件是 checkpoint，不是给另一 Agent 发消息的主要接口。

@@ -1,67 +1,39 @@
-# 官方技术来源
+# 协议与设计依据
 
-核对日期：2026-09-13。CLI 和产品能力可能改变，部署以本机 --help、实际权限及冒烟结果为准。下面仅说明机制来源；路由等级、任务大小、上限与具体 runner 设计是本包工程选择。
+核查日期：2026-09-13。实际接入以本机安装版本与 doctor --live 为准；链接可能随官方重定向。
 
-## Codex / OpenAI
+[N1] OpenAI — Codex App Server
+https://developers.openai.com/codex/app-server/
+initialize/initialized、thread/start/resume、turn/start/outputSchema、turn/completed、item/completed、turn/interrupt、server-initiated approvals。
+实现采用核心稳定 API；不把另起一个 App Server 等同于附着当前桌面 thread。
 
-**[S1] Codex GitHub 集成 / Review**
-https://learn.chatgpt.com/docs/third-party/github
-原文档入口：https://developers.openai.com/codex/integrations/github
-用于区分 GitHub Review 与完整任务验收，不把默认 P0/P1 报告当全量验收。
+[N2] Pi upstream — RPC Mode
+https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md
+原 badlogic/pi-mono 地址当前重定向到上游此仓库。RPC JSONL、prompt/get_state、new_session/switch_session、session-dir、abort/clear_queue、extension UI。
 
-**[S2] AGENTS.md 指令机制**
-https://learn.chatgpt.com/docs/agent-configuration/agents-md
-原入口：https://developers.openai.com/codex/guides/agents-md
-用于入口、层级覆盖与项目约束；AGENTS 不自行提供跨进程调度。
+[N3] 同一 RPC 文档的 agent_end / agent_settled 事件约定
+agent_end 只结束低层 run，可能还重试/压缩/继续队列；agent_settled 才是本包采用的完整结算边界。
 
-**[S3] Codex Non-interactive mode**
-https://learn.chatgpt.com/docs/non-interactive-mode
-原入口：https://developers.openai.com/codex/noninteractive/
-说明 exec、JSON 事件、-o、--output-schema、权限及本地认证复用；本包采用独立 CLI 调用。
+[N4] GitHub — Troubleshooting required status checks
+https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks
+必需 workflow 被 paths/branches/commit-message 整体跳过可能留下 Pending；job 条件与 workflow 过滤不能混为一谈。
 
-**[S6] Managing usage with GPT-6 Astra in Work and Codex**
-https://help.openai.com/en/articles/20001516-managing-usage-with-gpt-6-astra-in-work-and-codex
-说明 Work 与 Codex 的用量关系；不据此估算用户未知余额，也不声称所有网页版聊天都与 Codex 分离计费。
+[N5] GitHub — Workflow syntax for GitHub Actions
+https://docs.github.com/actions/reference/workflow-syntax-for-github-actions
+路径过滤、事件、concurrency 与 required 检查相关行为。基础包不自动修改用户 CI。
 
-**[S10] Codex App Server**
-https://learn.chatgpt.com/docs/app-server
-原入口：https://developers.openai.com/codex/app-server/
-提供双向协议、thread/turn、事件。是另行开发客户端的能力，不是本包已实现桌面回调的证据。
+[N6] 用户仓库读取快照（非本包执行变更）
+https://github.com/FelixJI/file-toolbox/pull/86
+https://github.com/FelixJI/file-toolbox/blob/main/.github/workflows/ci.yml
+已通过 GitHub 连接读取 #86 diff/元数据与 ci.yml；见 FILE_TOOLBOX_MIGRATION.md，安装时应再取最新事实。
 
-**[S11] Codex CLI developer commands**
-https://learn.chatgpt.com/docs/developer-commands?surface=cli
-用于核对 CLI 的 --ask-for-approval、sandbox、exec 参数。运行前仍必须读取实际安装版帮助。
+## 继承规范中的来源标记
 
-**[S12] Building a safe, effective sandbox to enable Codex on Windows**
-https://openai.com/index/building-codex-windows-sandbox/
-2026-05-13 官方工程文章。解释沙箱约束向子进程传播、工作区写入与 .git/.codex/.agents 等受保护路径。本包不通过提升整个沙箱权限来解决 Git 提交问题。
-
-## pi
-
-**[S5] pi 官方网站与 coding-agent README**
-https://pi.dev/
-https://github.com/earendil-works/pi/tree/main/packages/coding-agent
-https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/README.md
-说明 print / JSON / RPC 模式、stdin、--no-session、模型/提供商设置及工具边界。既有安装可能仍使用旧 npm 包路径，接入按实际元数据识别，不强制重装。
-
-**[S8] pi JSON 模式事件**
-https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/json.md
-用于解析完整 assistant 消息和输出事件，不依赖终端屏幕文本。
-
-**[S9] pi 扩展生命周期**
-https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/docs/extensions.md
-agent_end 不一定是全部重试/后续队列结束；agent_settled 语义不同。本包选择等待一次性进程退出，不要求用户安装新版扩展钩子。
-
-## GitHub
-
-**[S4] Protected branches**
-https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches
-用于 required checks/reviews、真实审批身份与远端门禁。
-
-**[S7] Automatically merging a pull request**
-https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request
-GitHub auto-merge 按实际配置的 reviews/checks 工作，不自动理解本包风险等级。本包没有调用该接口。
-
-## 验证声明
-
-技术文档核对不等于用户环境验证。实际测试清单见包根 TEST_REPORT.md；真实 Windows、Codex/GLM 身份、项目命令、后台存活和 GitHub 权限仍由 BOOTSTRAP 验证。源码中的参数、事件格式不应被当成平台永久承诺。
+[S1] Codex GitHub code review 文档：https://developers.openai.com/codex/integrations/github/
+[S2] Codex 指令发现：https://developers.openai.com/codex/guides/agents-md/
+[S3] v3.2 运行接口现在对应 [N1]，不再以 exec 为运行核心。
+[S4] GitHub required checks / 分支保护相关要求对应 [N4] 及仓库实际规则。
+[S5] Pi 接口现在对应 [N2]。
+[S6] 额度以用户实际账户 Usage 页面为准，不硬编码套餐权益或假定不同界面独立计费。
+[S7] GitHub auto-merge：https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request
+[S8][S9] Pi 事件语义对应 [N2][N3]；旧版等待 print 进程退出的描述已由 native 协议替代。
