@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "PI",
+        "CODEX",
+        "REVIEW",
+        "BRANCH",
+        "COMMIT",
+        "PAUSE",
+        "FINISH"
+      ]
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": [
+        "L1",
+        "L2",
+        "L3",
+        "L4",
+        "L5"
+      ]
+    },
+    "risk": {
+      "type": "string",
+      "enum": [
+        "R0",
+        "R1",
+        "R2",
+        "R3"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "instructions": {
+      "type": "string"
+    },
+    "base_sha": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "checkpoint": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "task_id",
+    "difficulty",
+    "risk",
+    "reason",
+    "instructions",
+    "base_sha",
+    "summary",
+    "checkpoint"
+  ],
+  "additionalProperties": false
+}

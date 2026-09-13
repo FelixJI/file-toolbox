@@ -1,11 +1,11 @@
-# 断点恢复与接手
+# 恢复本地运行 / 交接
 
-从当前Issue/PR恢复任务，不假定你看到上一段聊天。读取最近有效交接单、实际GitHub状态、最新head/base SHA、CI/review和适用规则。
+先读 AGENTS、project.json、原始计划和 `.ai-flow/runtime/runs/<run-id>/state.json`，再核对实际 Git 状态与最近回执。旧聊天不是恢复依据。
 
-先核实交接记录与真实分支是否一致、上一写入者是否已停止、依赖是否已合并。状态不一致以真实仓库为准，记录纠正；不要按旧计划覆盖新代码或另开重复PR。
+正常 PAUSE：确认外部原因已解除，使用 `flow.py resume --run <id> --detach`。不得重新 start 相同批次来重置次数或重做完成任务。
 
-明确领取当前剩余动作：实施 / 调查 / 修复 / 独立审阅 / 补证据 / 合并前核查。保留已验证工作，不重复做已经通过的整个阶段；但head或base变化使验证失效时，重做所需验证。
+pending 中断：检查 PID、是否存在孤儿子进程、已提交/未提交 diff、调用输出；确认不会并发写入后，才使用 `resume --ack-interrupted`。这个标志是确认已核对，不是自动杀进程。Git 操作可能已生效而回执未写，不能重放 add/commit/建分支。
 
-保留同一根因的失败计数，不因为换会话清零；换执行者按策略保留之前尝试作为证据。普通技术细节自行决定，产品/权限/费用/不可逆风险按HUMAN_REQUIRED汇总。
+若工作流/CI 政策已变更，旧 run 不继续；审查差异后用明确 handoff 建立新 run。保留基线、当前分支/head、已完成任务、旧 review/CI 绑定 SHA、待办、已尝试失败和真正需要授权的事项。
 
-完成后更新Issue/PR的状态、SHA、证据和next_action。当前工具不能执行下一动作时写HANDOFF_REQUIRED，不说已交给别的Agent；实际无法获取仓库或关键证据时BLOCKED，不编造完成。
+入口完成交接后结束本轮，不轮询。FINISHED 不重放。外部依赖/CI 未变就 PAUSE，不忙等。详情见 docs/RUNNER.md。
