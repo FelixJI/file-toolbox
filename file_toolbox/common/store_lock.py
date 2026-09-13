@@ -75,6 +75,10 @@ def file_transaction_lock(
     公共持久化事务都在本上下文内完成读、分配与写;内部 helper 不得再嵌套
     获取(线程锁不可重入,嵌套会立即死锁并被测试暴露)。超时抛
     ``TimeoutError``,权限等 IO 错误原样传播。
+
+    注意:加锁要创建/打开锁文件,因此读事务也隐含「数据目录可写」的要求,
+    目录只读时读操作同样 fail closed;线程锁与 OS 锁串行各用同一 timeout,
+    最坏总等待约 2×timeout。
     """
     key = lock_key(target)
     thread_lock = _thread_lock_for(key)

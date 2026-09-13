@@ -84,7 +84,7 @@ def test_default_history_dir(monkeypatch, tmp_path):
 
 
 def test_read_all_skips_corrupt_line(tmp_path):
-    """_read_all 跳过损坏行:有效 + 损坏 + 有效 → 返回 2 条(覆盖 33-34 continue)。"""
+    """读取跳过损坏行:有效 + 损坏 + 有效 → 返回 2 条(损坏行不进入有效记录视图)。"""
     store = JsonHistoryStore(tmp_path)
     f = tmp_path / "rename.jsonl"
     f.write_text(
@@ -123,7 +123,7 @@ def test_get_record_line_missing_id_key_returns_none(tmp_path, caplog):
 
 
 def test_last_id_falls_back_to_full_scan_when_last_line_corrupt(tmp_path):
-    """末行损坏:_last_id 回退全量扫描 max id → add_record 返回 max+1(覆盖 60-62)。"""
+    """末行损坏:max 有效 id 来自全量有效记录扫描 → add_record 返回 max+1。"""
     store = JsonHistoryStore(tmp_path)
     f = tmp_path / "rename.jsonl"
     f.write_text(
@@ -135,21 +135,21 @@ def test_last_id_falls_back_to_full_scan_when_last_line_corrupt(tmp_path):
 
 
 def test_get_record_returns_none_when_id_missing(tmp_path):
-    """get_record 找不到 id → None(覆盖 89)。"""
+    """get_record 找不到 id → None。"""
     store = JsonHistoryStore(tmp_path)
     store.add_record("rename", {"v": 1})
     assert store.get_record("rename", 999) is None
 
 
 def test_read_all_returns_empty_when_file_missing(tmp_path):
-    """_read_all 文件不存在 → 直接返回 [](覆盖 26)。"""
+    """历史文件不存在 → 读取直接返回 []。"""
     store = JsonHistoryStore(tmp_path)
     assert store.get_records("never_written") == []
     assert store.get_record("never_written", 1) is None
 
 
 def test_last_id_returns_zero_when_file_only_blank_lines(tmp_path):
-    """文件存在但全是空行 → _last_id 走 last_line 为空分支返回 0(覆盖 62),
+    """文件存在但全是空行 → 无有效记录、最大有效 id 为 0,
     add_record 应从 id=1 开始。"""
     store = JsonHistoryStore(tmp_path)
     f = tmp_path / "rename.jsonl"
