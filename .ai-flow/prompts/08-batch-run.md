@@ -13,7 +13,7 @@
 1. 校准 Issue 中的目标、AC、依赖、当前基线、相关 PR 与实际风险。若 Issue 明显过时，先按权限更新任务合同或记录需要更新的事实；不要悄悄改变产品目标。
 2. 将本次执行所需内容固化为 `.ai-flow/runtime/intake.md`：Issue/Task Issue 编号与读取时刻、baseline SHA、当前依赖状态、当前可执行范围、必要 AC/约束和相关 PR。它是当前 run 的执行快照，不是新的长期真相源；不要复制密钥/认证材料。
 3. 使用干净、专用 Git worktree/分支。不得清理或 stash 用户未提交内容；确认没有其他写入者。
-4. 一次调用：`python .ai-flow/scripts/flow.py start --intake .ai-flow/runtime/intake.md --detach`。旧版 `--plan` 仅保留兼容。Python Launcher 环境可用 `py -3`。不要在控制器子会话中再次调用本入口。
+4. 一次调用：`uv run --frozen python .ai-flow/scripts/flow.py start --intake .ai-flow/runtime/intake.md --detach`。旧版 `--plan` 仅保留兼容。本仓所有 Python 入口统一使用锁定的 uv 环境。不要在控制器子会话中再次调用本入口。
 5. 启动输出 SUBMITTED 不是 RUNNING。仅允许一次启动确认读取 `status`/日志；不能反复轮询。确认不足则如实说明“已提交，运行存活待验证”。
 6. 当前桌面会话结束本轮；把工作区写入权交给 runner。不要与 runner 同时改代码、不要启动 `codex exec resume --last`、不要每隔几秒读取日志。runner 会在工作进程退出后启动新的 Codex CLI 控制/实施/独立审阅会话。
 

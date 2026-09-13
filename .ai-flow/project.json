@@ -13,7 +13,7 @@
     "github_read": "available",
     "github_write": "unknown",
     "codex_cli_exec": "available",
-    "codex_independent_review": "unknown",
+    "codex_independent_review": "available",
     "pi_noninteractive": "available",
     "pi_glm_provider_verified": "available",
     "detached_process_survival": "unknown",
@@ -34,7 +34,7 @@
       "uv run --all-extras python scripts/build_exe.py --ci",
       "uv run python scripts/release_smoke.py"
     ],
-    "baseline_result": "quality passed; core pytest 1938 passed, coverage 98.24%; full coverage and release build/smoke not yet run",
+    "baseline_result": "quality passed; core 1938 passed/98.24%; full 1941 passed/98.30%; package build passed; 4 runner regression tests passed; Nuitka release build/smoke and remote CI not run",
     "required_check_names": [
       "required"
     ]
@@ -71,9 +71,8 @@
     "ci_infrastructure_retries": 1
   },
   "setup_gaps": [
-    "真实 runner 闭环与独立审阅待完成。",
-    "桌面入口回合结束后的后台存活待验证；此前保持 runner 关闭。",
-    "GitHub 写入与远端 CI 未实测；不自动合并。"
+    "真实本地业务回调已 FINISHED，独立审阅 PASS；仍待本 Codex 回合结束后的后台存活证据，正式 runner 保持关闭。",
+    "GitHub 读取及 strict required/squash 已核实；尚未推送或创建接入 PR，写入与本次远端 CI 未实测。"
   ],
   "runner": {
     "enabled": false,

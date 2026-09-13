@@ -19,10 +19,10 @@ L1/L2 + R0/R1 → pi；L3 未知根因/跨模块/状态 → Codex；明确拆出
 ## 命令
 
 ```text
-python .ai-flow/scripts/flow.py doctor
-python .ai-flow/scripts/flow.py status
-python .ai-flow/scripts/flow.py stop
-python .ai-flow/scripts/flow.py resume --detach
+uv run --frozen python .ai-flow/scripts/flow.py doctor
+uv run --frozen python .ai-flow/scripts/flow.py status
+uv run --frozen python .ai-flow/scripts/flow.py stop
+uv run --frozen python .ai-flow/scripts/flow.py resume --detach
 ```
 
 运行结果：`.ai-flow/runtime/runs/<run-id>/SUMMARY.md`。状态、日志按需读，不定时问 Codex。

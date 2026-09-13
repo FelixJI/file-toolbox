@@ -25,7 +25,7 @@
 查看 `pi --version/--help`、`codex --version`、`codex exec --help` 的实际能力。运行：
 
 ```text
-python .ai-flow/scripts/flow.py doctor
+uv run --frozen python .ai-flow/scripts/flow.py doctor
 ```
 
 Windows 的 npm `.cmd` 启动器由 runner 尝试按已安装 package.json 的 bin 元数据解析为 Node 命令；失败时填写实际存在的 `[node.exe绝对路径, CLI.js绝对路径]`，不可猜路径或拼接 shell 字符串。不是 npm 安装则按真实二进制设置。
@@ -43,7 +43,7 @@ Windows 的 npm `.cmd` 启动器由 runner 尝试按已安装 package.json 的 b
 运行：
 
 ```text
-python .ai-flow/scripts/flow.py doctor --live
+uv run --frozen python .ai-flow/scripts/flow.py doctor --live
 ```
 
 该步骤使用现有模型额度，pi 禁用工具、Codex 用只读检查，各返回一个固定标记。检查退出码、完整事件、模型/提供商字段，确认实际使用的是用户已配置的 GLM 与预期套餐通道。模型名称不足以证明计费通道，需核对本地提供商设置；报告时脱敏。确认仓库未变更。

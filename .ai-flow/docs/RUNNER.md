@@ -84,12 +84,12 @@ pi 的“总派发 2 次”比规范中的“同根因 2 轮失败”更保守�
 全局 `--repo` 必须放在子命令前；默认当前工作区根目录。
 
 ```text
-python .ai-flow/scripts/flow.py doctor
-python .ai-flow/scripts/flow.py doctor --live
-python .ai-flow/scripts/flow.py start --intake .ai-flow/runtime/intake.md --detach
-python .ai-flow/scripts/flow.py status --run <run-id>
-python .ai-flow/scripts/flow.py stop --run <run-id>
-python .ai-flow/scripts/flow.py resume --run <run-id> --detach
+uv run --frozen python .ai-flow/scripts/flow.py doctor
+uv run --frozen python .ai-flow/scripts/flow.py doctor --live
+uv run --frozen python .ai-flow/scripts/flow.py start --intake .ai-flow/runtime/intake.md --detach
+uv run --frozen python .ai-flow/scripts/flow.py status --run <run-id>
+uv run --frozen python .ai-flow/scripts/flow.py stop --run <run-id>
+uv run --frozen python .ai-flow/scripts/flow.py resume --run <run-id> --detach
 ```
 
 `doctor` 只检查本地 CLI 帮助与版本；`--live` 使用现有额度做无工具标记响应。它不自动改 ready、不证明实际业务工具/网络可用。
@@ -133,7 +133,7 @@ stop 写一个停止标记。当前子进程允许完成或到超时，下一派
 中断 pending：先检查 state 中 role/PID、输出、Git diff 和日志；确认没有仍在运行的 pi/Codex/子测试进程；必要时通过操作系统终止。然后：
 
 ```text
-python .ai-flow/scripts/flow.py resume --run <run-id> --ack-interrupted --detach
+uv run --frozen python .ai-flow/scripts/flow.py resume --run <run-id> --ack-interrupted --detach
 ```
 
 该标志表示你已确认不会与孤儿进程并发；脚本不可靠地推测 PID 是否重用。它记录 RECOVERY，让新的 Codex 控制会话核对实际改动、补验证/审阅，不原样重放旧任务。
