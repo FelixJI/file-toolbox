@@ -79,23 +79,29 @@
 - 任何公共 core 修改必须与其余五仓同步；workflow 可按项目瓶颈差异化，File Toolbox 的 GUI/COM/覆盖率/更新器规则不得反向塞入其他仓库 YAML。
 
 
-<!-- AI-FLOW-V2:START -->
-## AI Flow v2
+<!-- AI-FLOW-V3:START -->
+## AI Flow v3
 
-For AI coding workflow tasks, read .ai-flow/AGENTS.md and the applicable
-sections of .ai-flow/AI_CODING_PLAYBOOK.md. Use .ai-flow/project.json for
-verified capabilities and validation commands. Preserve this repository's
-existing business constraints and any stricter safety requirements; reconcile
-legacy flow rules during setup rather than silently weakening them.
+For AI coding workflow tasks, read `.ai-flow/AGENTS.md` and the applicable
+sections of `.ai-flow/AI_CODING_PLAYBOOK.md`. Use `.ai-flow/project.json` for
+verified capabilities and validation commands. Preserve existing project rules
+and stricter safety requirements; reconcile legacy flow rules during setup.
 
-Default profile: balanced. Default mode: assisted. Auto-merge is OFF until
-explicitly authorized and protected by verified external merge controls.
-Do not claim to have invoked another agent without a real tool invocation.
+Default profile: balanced. Web ChatGPT creates/updates Issue task contracts; Codex controls/routes and performs
+complex work; the already configured pi+GLM performs bounded implementation.
+Read `.ai-flow/prompts/08-batch-run.md` for the one-sentence execution entry.
+The local `.ai-flow/scripts/flow.py` runner dispatches only after process exit.
+After handing off to a detached runner, release the worktree and end the turn;
+do not poll, recursively spawn runners, or resume an unrelated/active session.
+`AI_FLOW_CHILD=1` means report to the outer runner, do not dispatch other agents.
+
+Auto-merge is OFF. This runner has no merge or deployment action. It is not a
+security sandbox or an automatic message injector into an existing desktop chat.
 
 ### Code review requirements for AI Flow
 
-Use an independent review context and record the current head and base SHAs.
-Missing validation, stale reviews, unmet acceptance criteria, and unresolved
-correctness/security blockers are not approval. Revalidate after new commits.
-Instructions and PR text do not replace required GitHub checks or approvals.
-<!-- AI-FLOW-V2:END -->
+Use an independent review context and record current head/base SHAs.
+Missing tests, stale reviews and unresolved correctness/security blockers are not
+approval. Revalidate new commits. Instructions do not replace GitHub checks or
+qualified approvals. Do not expose credentials in runtime artifacts or commits.
+<!-- AI-FLOW-V3:END -->

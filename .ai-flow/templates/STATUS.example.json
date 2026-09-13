@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "task_id": "REPLACE_WITH_ISSUE_ID",
   "goal_id": "REPLACE_WITH_GOAL_ID",
   "status": "PLANNED",
@@ -28,10 +28,10 @@
   },
   "attempts": {
     "root_cause_id": null,
-    "zcode_failed_rounds": 0,
-    "codex_failed_rounds": 0
+    "codex_failed_rounds": 0,
+    "pi_failed_rounds": 0
   },
   "next_action": "Read the actual Issue and repository; confirm routing before claiming work.",
   "human_decision": null,
-  "note": "Illustrative record, not an orchestrator or authorization. Publish final SHAs outside the commit itself."
+  "note": "Published task snapshot; runtime state.json is local orchestration truth. No merge authorization. Keep secrets out of evidence."
 }

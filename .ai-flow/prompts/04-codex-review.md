@@ -21,3 +21,6 @@
 PASS必须无未解决阻塞项；不输出“批准但仍需修复”。信息无法访问、CI还没完成或关键路径没验证则INSUFFICIENT_EVIDENCE，不默认为通过。
 
 将结果发布到当前PR（无权限则输出报告）。这份审阅结论不是GitHub批准身份，也不是自动合并授权；仍需项目实际门禁。
+
+## runner 模式输出优先
+AI_FLOW_CHILD=1 且收到 review.schema.json 时，严格返回该 schema 的 JSON；不额外输出 markdown 包装。AC 证据不能为空。控制器已给出精确 base/head，必须核实；只读会话无法执行必要验证时给 INSUFFICIENT_EVIDENCE，由外层另派验证。结果发布由有权限的后续任务处理，本审阅会话不尝试写 PR、改代码或调用其他 Agent。

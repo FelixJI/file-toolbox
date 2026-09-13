@@ -6,7 +6,7 @@
 
 结论二选一：
 
-`DELEGATE_TO_ZCODE`：边界和实现路径已清楚。给必须保持的不变量、具体AC与测试、已排除路线、有限施工checkpoint，并把交接写回Issue。调用能力不可用时HANDOFF_REQUIRED。
+`DELEGATE_TO_PI`：边界和实现路径已清楚。给必须保持的不变量、具体AC与测试、已排除路线、有限施工checkpoint，并把交接写回Issue。调用能力不可用时HANDOFF_REQUIRED。
 
 `CODEX_IMPLEMENT`：未知根因、复杂状态/并发/架构判断仍是核心工作。直接接着按03提示词实现，不要求用户再复制一次实现提示词；不能假称已启动另一个会话。
 

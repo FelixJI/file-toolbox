@@ -1,5 +1,5 @@
 ---
-name: AI Task v2
+name: AI Task v3
 about: 带边界、证据和交接记录的AI开发任务
 title: "[AI] "
 labels: ""
@@ -44,7 +44,7 @@ AI_ROUTING:
   difficulty_reason: 单模块且方案清楚
   risk: R1
   risk_reason: 可逆的普通运行时行为变化
-  implementer: zcode
+  implementer: pi
   independent_review: codex
   human_merge_required: true  # 初始auto-merge关闭；不是由此字段授权自动合并
 ```
