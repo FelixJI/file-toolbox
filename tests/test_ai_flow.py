@@ -89,3 +89,29 @@ def test_branch_uses_project_prefix(flow_repo: Path) -> None:
     )
     with pytest.raises(ValueError, match="codex/"):
         flow.local_git(flow_repo, folder, state, cfg, decision)
+
+
+def test_commit_rejects_unlisted_staged_content(flow_repo: Path) -> None:
+    flow.git(flow_repo, "switch", "-c", "codex/commit-boundary")
+    original = flow_repo / "tracked.txt"
+    original.write_text("staged change", encoding="utf-8")
+    flow.git(flow_repo, "add", "tracked.txt")
+    original.write_text("before", encoding="utf-8")
+    (flow_repo / "visible.txt").write_text("intended change", encoding="utf-8")
+    head = flow.git(flow_repo, "rev-parse", "HEAD")
+    state = {"run_id": "test", "sequence": 1, "review_needed": {}}
+    decision = {
+        "action": "COMMIT",
+        "task_id": "test",
+        "instructions": json.dumps({"message": "test(flow): 显式路径", "paths": ["visible.txt"]}),
+    }
+    with pytest.raises(ValueError, match="exactly match ALL"):
+        flow.local_git(
+            flow_repo,
+            flow_repo / ".git",
+            state,
+            {"allow_local_git_writes": True, "default_branch": "main"},
+            decision,
+        )
+    assert flow.git(flow_repo, "rev-parse", "HEAD") == head
+    assert flow.git(flow_repo, "show", ":tracked.txt") == "staged change"

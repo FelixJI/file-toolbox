@@ -697,7 +697,8 @@ def local_git(
             listed.append(name)
         changed = set()
         for args in [
-            ("diff", "HEAD", "--name-only", "--no-renames", "-z"),
+            ("diff", "--cached", "HEAD", "--name-only", "--no-renames", "-z"),
+            ("diff", "--name-only", "--no-renames", "-z"),
             ("ls-files", "--others", "--exclude-standard", "-z"),
         ]:
             result = subprocess.run(
