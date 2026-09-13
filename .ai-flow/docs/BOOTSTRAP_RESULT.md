@@ -59,3 +59,14 @@
 GitHub 只读核查成功：viewerPermission=ADMIN，仓库仅允许 squash，main 要求严格同步的 required check。未执行远端写操作、未推送或创建接入 PR，所以 github_write 和本次远端 CI 仍未实测；无需重新配置现有门禁。可在获得推送/PR 授权后交付 PR，不能因本地 PASS 自动合并。
 
 能力就绪后日常入口：**按 AI Flow v3 执行 #123，balanced，推进到可交付边界。**
+
+## 2026-09-13 后续核验：本地 runner 就绪
+
+以上 PARTIAL 为接入提交时的历史记录。本次 #83 的 v3 兼容执行补齐了剩余本地接入证据：
+
+- 入口任务 `01a099a1-3276-75b3-8075-4b89958a1c2b` 的接入回合于 2026-09-13 07:45:50 UTC 完成（桌面任务 completedAt=1789285550）。
+- 后台 run `20260913T074541Z-7f7d4b53` 的真实控制进程于 07:46:42 UTC 成功退出，runner 于 07:46:43 UTC FINISHED，晚于入口回合结束。该证据证明这次本机跨回合存活，不保证机器重启或宿主强制终止后的恢复。
+- PR #85 已真实创建并合并，最新远端 main 为 `67dcb70612874fabe9e66faf0c75656d3704b431`；GitHub 写入能力已有实际记录。历史配置中的“未推送/未建 PR”不再是当前阻塞。
+- 本次专用 worktree 执行 `uv sync --frozen --all-extras` 与 `uv run --frozen python .ai-flow/scripts/flow.py doctor` 均 exit 0，pi/Codex CLI 检查均 ok。沿用上述真实模型与业务闭环证据，没有重复修改认证或 provider。
+
+据此将 configuration_status 更新为 ready、runner.enabled 更新为 true，并刷新本地能力记录；原有自动合并关闭、禁止部署、沙箱与有限 Git 写入限制不变。此变更作为独立接入 PR 审阅，不与 #77–#82 的业务修复混合。ready 仅指本地接入条件满足，不表示此 PR 的独立审阅、CI 或业务目标已通过。

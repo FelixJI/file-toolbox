@@ -1,9 +1,9 @@
 {
   "schema_version": 3,
-  "configuration_status": "partial",
+  "configuration_status": "ready",
   "repository": "FelixJI/file-toolbox",
   "default_branch": "main",
-  "baseline_sha": "79094f4c8887059054eda38bcadaa16d12ed4324",
+  "baseline_sha": "67dcb70612874fabe9e66faf0c75656d3704b431",
   "mode": "event-driven",
   "profile": "balanced",
   "max_writers_per_worktree": 1,
@@ -11,12 +11,12 @@
   "capabilities": {
     "git": "available",
     "github_read": "available",
-    "github_write": "unknown",
+    "github_write": "available",
     "codex_cli_exec": "available",
     "codex_independent_review": "available",
     "pi_noninteractive": "available",
     "pi_glm_provider_verified": "available",
-    "detached_process_survival": "unknown",
+    "detached_process_survival": "available",
     "desktop_thread_injection": "not_implemented"
   },
   "validation": {
@@ -70,12 +70,9 @@
     "codex_same_root_cause_failed_rounds": 2,
     "ci_infrastructure_retries": 1
   },
-  "setup_gaps": [
-    "真实本地业务回调已 FINISHED，独立审阅 PASS；仍待本 Codex 回合结束后的后台存活证据，正式 runner 保持关闭。",
-    "GitHub 读取及 strict required/squash 已核实；尚未推送或创建接入 PR，写入与本次远端 CI 未实测。"
-  ],
+  "setup_gaps": [],
   "runner": {
-    "enabled": false,
+    "enabled": true,
     "trusted_local_execution": true,
     "pi_command": [
       "pi"
