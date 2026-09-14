@@ -13,7 +13,10 @@
     "worker_may_pick_next_task": false,
     "automatic_agent_calls": false,
     "automatic_resume": false,
-    "progress_polling": false
+    "progress_polling": false,
+    "same_actor_continuation": true,
+    "self_handoff_allowed": false,
+    "stage_boundary_alone_stops_execution": false
   },
   "work_scope": {
     "default": "one-authorized-stage",

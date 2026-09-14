@@ -94,11 +94,17 @@ Use `.ai-flow/prompts/08-codex-entry.md` and
 `.ai-flow/docs/ONE_SENTENCE_PROMPTS.md` for the normal entry.
 
 Do not call, spawn, wake or poll another agent, even via CLI/API/MCP/subagents,
-or start a background coordinator. Publish the handoff to the Issue, give the
-user the filled one-sentence prompt(s), stop writing and end the turn.
+or start a background coordinator. Human control applies when execution crosses
+tool/session/role boundaries; it is not a pause at every internal checkpoint.
+If the next actor is the current actor in the same role/session and remains within
+the current authorized scope, continue directly: do not create a self-handoff,
+do not emit a restart prompt, and do not stop merely because a stage/checkpoint
+ended. When the next actor differs (including a new independent Codex reviewer),
+or a human decision/external wait is required, publish the handoff/condition,
+give the user the filled one-sentence prompt(s), stop writing and end the turn.
 Codex-to-worker handoffs include execution, wrap-up and blocker-report prompts.
-Workers always return a one-sentence prompt for the user to take back to Codex.
-No runtime/local.json readiness, RPC completion or automatic resume is required.
+Workers return a one-sentence prompt when their bounded scope ends or must return
+to Codex. No runtime/local.json readiness, RPC completion or automatic resume is required.
 
 Every change needs an independent Codex review context opened manually by the
 user, bound to current base/head SHAs. Self-review is not independent review.

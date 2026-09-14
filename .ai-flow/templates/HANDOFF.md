@@ -1,11 +1,11 @@
 # Handoff — Issue 内唯一标识 H?
 
-用途：粘贴到 Issue 评论，不创建仓库内实时交接文件。
+用途：仅在 `next_actor != current_actor` 时粘贴到 Issue 评论，不创建仓库内实时交接文件。若接收者仍是当前主体/角色/会话且在授权范围内，不使用本模板，直接继续执行。
 
 - Issue / Goal / PR（无 PR 如实写尚无）：
 - handoff_id / 所替代交接（如有）：
 - 时间（含时区）：
-- 交出者 → 接收者：
+- current_actor → next_actor（不得相同；相同则不是 Handoff）：
 - 当前 status：HANDOFF_READY / BLOCKED / REVIEW_READY / …
 - 下一侧：尚未启动，等待用户手动启动。
 
@@ -35,7 +35,7 @@ Scope / Out of Scope / 必须保持的不变量：
 
 ## 下一动作与停止条件
 
-next_actor / next_action / user_action_required：
+next_actor / next_action / user_action_required（next_actor 必须不同于 current_actor）：
 
 做到哪里即停止、受阻如何返回 Codex：
 
