@@ -1,87 +1,77 @@
 # AI Flow v4.0：一句话提示词
 
-这些短句以仓库已完成 v4.0 接入为前提。`#123`、`H1`、`#456` 只是示例；**Agent 实际输出时必须代入真实编号或评论链接，不能把占位符丢给用户填。** 一个仓库内可用 Issue 编号；跨仓库必须加 `owner/repo`。`H1` 是某个 Issue 内的跨 actor 交接标识，不是进程或通信协议。
+这些短句以仓库已完成 v4.0 接入为前提。`#123`、`H1` 只是示例；Agent 实际输出必须代入真实编号或评论链接。Handoff 只用于 Codex ↔ GLM，不用于 Codex reviewer 子代理。
 
-**先判断是否真的需要短句：`next_actor == current_actor` 且仍在当前角色/会话和授权范围时，直接继续执行，不生成短句、不 self-handoff、不让用户重新启动自己。只有换 actor/独立角色、外部等待、用户决策或人工合并边界才停。**
+**同一 Codex/GLM 在授权范围内直接继续；reviewer 子代理由 Codex 自动调用。只有 Codex ↔ GLM、外部等待、用户决策或人工合并边界才需要你复制短句。**
 
 ## 1. 网页版：规划并写入 Issues
 
 ```text
-按仓库 AI Flow v4.0 规划【目标】，读取现有代码、规则和未合并 PR，复用或创建必要的 GitHub Issues，写清依赖与验收标准，不另建计划文件，最后给我复制到 Codex 的一句话。
+按仓库 AI Flow v4.0 规划【目标】，读取现有代码、规则、Issues 和未合并 PR，复用或创建必要的 GitHub Issues；每个 Task 必须写明 Difficulty、Risk、Recommended implementer（Codex / GLM / Codex-first → GLM）和 Execution mode，Goal 中汇总 L/R、建议实施者、依赖与状态；写清验收标准，不另建计划文件，最后给我复制到 Codex 的一句话。
 ```
 
-## 2. 网页版 → Codex：开始当前阶段
+## 1.1 规范化已有 Goal / Task 的分工字段
+
+适合你现在这种已经有 #339 及子 Issues、但 L/R 和实施者没有统一展示的情况：
 
 ```text
-按 AI Flow v4.0 推进 #123，balanced；同一 Codex 主执行会话在当前授权范围内连续完成应由自己负责的调查、实现、测试和修复，next_actor 仍是自己时不要停止或 self-handoff；只有确需转 zcode/pi、独立审阅、外部等待或用户决策时才写回状态并给我对应一句话后停止，不调用其他 Agent。
+按仓库 AI Flow v4.0 规范化现有 Goal #339 及其当前 Task Issues：读取真实代码、规则、Issues 和未合并 PR，不重建任务、不改业务 Scope/AC；为每个 Task 原地补齐或校准 Difficulty、Risk、Recommended implementer（Codex / GLM / Codex-first → GLM）、Execution mode 和 Routing rationale，并在 Goal #339 增加/更新包含 Task、L/R、建议实施者、执行模式、依赖、状态的汇总表；最后给我当前应启动 Codex 的一句话。
 ```
 
-**L1/L2 方案已经明确时，Codex 校准后即可交接，不必先做无意义的复杂工作。** L3–L5 的未知根因、架构/数据边界、复杂状态由 Codex 先处理；已经直接做完就走验证/独立审阅，不强派施工者。
-
-## 3. Codex → zcode 或 pi：施工
-
-将 Codex 实际生成的这一句贴到你选择的工具，两者使用同一规范。
+## 2. 网页版 → Codex：开始当前 Task
 
 ```text
-按 AI Flow v4.0 作为施工者执行 #123 的交接 H1，先读该 Issue 交接评论和仓库规则，在本次授权范围内连续完成实现、自测和必要修复；内部 checkpoint 不停止，只有范围真正完成、受阻、越界或必须回 Codex 判断时才写回结果，给我返回 Codex 的一句话后停止，不调用其他 Agent、不合并。
+按 AI Flow v4.0 推进 #123，balanced；先核对 Issue 中 L/R、Recommended implementer 和 Execution mode，并按真实代码/PR校准：Codex 自己负责的工作连续完成，明确施工应交 GLM 时写 Handoff 并给我施工、收尾和阻碍三句后停止；实现/验证就绪后自动调用新的只读 reviewer 子代理并接收结果，不让我另开审阅窗口；只在转 GLM、外部等待、用户决策或 MERGE_READY 时停，不自动合并。
 ```
 
-## 4. 要求施工者收尾汇报
-
-正常结束时施工者应主动做这件事；这条用于你主动收尾或要求输出交付结果。
+## 3. Codex → GLM：施工
 
 ```text
-按 AI Flow v4.0 汇报 #123 / H1 的当前结果，安全停止继续修改，列明已完成和未完成验收项、分支与当前 SHA、实际测试及阻碍，写回 Issue/PR，并给我返回 Codex 接收结果的一句话；没有完成就明确未完成。
+按 AI Flow v4.0 作为 GLM 执行 #123 的交接 H1，先读该 Issue 的 Handoff 评论和仓库规则，在本次授权范围内连续完成实现、自测和必要修复；只有范围完成、受阻、越界或必须回 Codex 判断时才写回结果，主动给我返回 Codex 的一句话后停止，不调用 Codex/reviewer、不合并。
 ```
 
-## 5. 要求施工者汇报阻碍
+## 4. 要求 GLM 收尾汇报
 
 ```text
-按 AI Flow v4.0 汇报 #123 / H1 的阻碍，停止继续试错，写清最小复现、实际报错、已尝试方案与失败轮数、现存改动和待处理事项，写回 Issue，给我返回 Codex 排障的一句话；不要调用 Codex 或换工具继续尝试。
+按 AI Flow v4.0 汇报 #123 / H1 的当前 GLM 结果，安全停止继续修改，列明已完成和未完成验收项、分支与当前 SHA、实际测试及阻碍，写回 Issue/PR，并给我返回 Codex 接收结果的一句话；没有完成就明确未完成。
 ```
 
-## 6. zcode / pi → Codex：结果接收
-
-由施工者在结尾生成，你再复制回去；“完成”只表示待接收，不等于独立审阅通过。
+## 5. 要求 GLM 汇报阻碍
 
 ```text
-按 AI Flow v4.0 接收 #123 / H1 的施工结果，读取对应结果评论、PR 和当前 SHA，核对验收与测试并完成 Codex 应承担的处理；若 next_actor 仍是当前 Codex 就直接连续处理，不给我自我重启提示词；只有确需转 worker、独立审阅、外部等待或用户决策时才给我下一条手工提示词后停止，不自动调用、不合并。
+按 AI Flow v4.0 汇报 #123 / H1 的 GLM 阻碍，停止继续试错，写清最小复现、实际报错、已尝试方案与失败轮数、现存改动和待处理事项，写回 Issue，给我返回 Codex 排障的一句话；不要调用 Codex 或自行改换工具继续尝试。
 ```
 
-受阻时改为：
+## 6. GLM → Codex：结果接收
 
 ```text
-按 AI Flow v4.0 处理 #123 / H1 的阻碍，读取该交接的阻碍评论、实际报错与现存改动，由当前 Codex 调查根因；若能在当前授权范围直接解决就连续解决、验证，不停下来交给自己，只有确需换 worker、独立审阅、外部等待或用户决策时才给我一句话后停止，不自动调用、不重复无效尝试。
+按 AI Flow v4.0 接收 #123 / H1 的 GLM 施工结果，读取对应结果评论、PR 和当前 SHA，核对验收与测试并完成 Codex 应承担的处理；当前 Codex 能继续就直接继续，明确施工再次需要 GLM 时才给我新 Handoff；实现/验证达到 REVIEW_READY 后自动调用新的只读 reviewer 子代理，PASS 后核对门禁并停在 MERGE_READY，不自动合并。
 ```
 
-## 7. Codex 实现后：手工开启独立 Codex 审阅会话
-
-下面这句必须贴到**不同于实现者的 Codex 新会话**。同一个对话里改口“现在开始独立审阅”不算独立；仅接收未修改结果也不等于审阅已完成。
+受阻时：
 
 ```text
-按 AI Flow v4.0 在本独立 Codex 会话只读审阅 #123 对应的 PR #456，核实最新 base/head SHA、验收标准、代码和真实验证证据，给出 PASS、CHANGES_REQUIRED 或 INSUFFICIENT_EVIDENCE，写回 PR，并给我返回负责该 Issue 的 Codex 会话的一句话；不修代码、不调用其他 Agent、不合并。
+按 AI Flow v4.0 处理 #123 / H1 的 GLM 阻碍，读取阻碍评论、实际报错与现存改动，由 Codex 调查根因并连续解决能解决的问题；只有新的明确施工确需 GLM、外部等待或用户决策时才给我一句话，达到 REVIEW_READY 后自动调用 reviewer 子代理，不重复无效尝试、不自动合并。
 ```
 
-审阅者交回：
+## 7. reviewer 子代理
 
-```text
-按 AI Flow v4.0 接收 #123 / PR #456 的独立审阅结果，核对审阅评论与最新 SHA；通过则复查门禁并停在 MERGE_READY，未通过先判断整改主体——若应由当前 Codex 处理就直接连续整改和验证，只有确需换 worker、再次独立审阅、外部等待或用户决策时才给我手工转交提示词后停止，不自动调用、不合并。
-```
+**无需用户提示词。** Codex 到 REVIEW_READY 后自动启动新的只读 reviewer 子代理；reviewer 结果自动返回主 Codex。若环境不支持该能力，Codex 应标记 `REVIEW_BLOCKED`，而不是让实现者自审或默认要求你另开窗口。
 
 ## 8. 用户完成合并或解除外部阻碍后
 
 ```text
-按 AI Flow v4.0 继续 #123，先核实上次交接、真实合并状态和最新基线；在当前授权范围内只要 next_actor 仍是当前会话就连续推进，不因阶段/checkpoint 结束而停，到真正需要换 actor、等待外部条件、用户决策或人工合并边界时才给一句话并停止。
+按 AI Flow v4.0 继续 #123，先核实真实合并/等待状态和最新基线；在当前授权范围内连续推进，明确施工才人工转 GLM，达到 REVIEW_READY 自动调用 reviewer 子代理，只在新的跨工具/外部/用户决策或人工合并边界停止。
 ```
 
 ## 9. 多 PR 目标完成后回网页版核对
 
 ```text
-按 AI Flow v4.0 核对 #123 的目标完成情况，读取相关 Issues、已合并 PR 和最终集成验证证据，给出 ACCEPTED、NOT_ACCEPTED 或 EVIDENCE_MISSING；需要补工则更新必要 Issue 并给我交给 Codex 的一句话，不代替工程审阅或人工合并。
+按 AI Flow v4.0 核对 #123 的目标完成情况，读取相关 Issues、已合并 PR、reviewer 子代理结论和最终集成验证证据，给出 ACCEPTED、NOT_ACCEPTED 或 EVIDENCE_MISSING；需要补工则更新 Task 的 L/R、Recommended implementer 和必要 Issue，并给我交给 Codex 的一句话，不代替人工合并。
 ```
 
 ## 使用边界
 
-你不用手工把分支、SHA 和整段结果抄进短句，这些必须由交出者先写进可定位的 Issue/PR 评论。接收者必须重新读取并核实，不凭短句认定成功。
+你不用手工抄分支、SHA 和整段结果；交出者必须先写进可定位的 Issue/PR 评论。接收者重新读取并核实，不凭短句认定成功。
 
-无法写入或读取 GitHub 时，一句话不可能承载未发布的全部上下文：Agent 应明确 `WRITE_ACCESS_MISSING` / `READ_ACCESS_MISSING`，输出一份可粘贴的最小交接摘要，再给短句。此时你需一并转交摘要或先补发评论；禁止只说“看 Issue”却没把内容写进去。
+无法写入或读取 GitHub 时，Agent 应明确 `WRITE_ACCESS_MISSING` / `READ_ACCESS_MISSING`，输出最小待发布摘要，再给短句。此时你需一并转交摘要或先补发评论。
