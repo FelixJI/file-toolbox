@@ -1,14 +1,14 @@
-# Independent Codex Review
+# Codex Reviewer Subagent Result
 
-用途：PR 评论，不能替代平台批准或合并授权。
+用途：PR 审阅评论；由新的只读 reviewer 子代理生成，不能替代平台批准或合并授权。
 
-Issue / PR / 指定交接或待审版本：
+Issue / PR / 待审版本：
 
 reviewed_head_sha / reviewed_base_sha：
 
-独立于实现的会话事实（标识不可得不编造）：
+reviewer context：fresh Codex review subagent（不可得的内部标识不编造）
 
-审阅范围 / 首审或增量复核 / 真实验证范围：
+审阅范围 / 首审或增量复核 / 实际验证范围：
 
 | AC | 证据 / 缺口 |
 |---|---|
@@ -22,6 +22,4 @@ reviewed_head_sha / reviewed_base_sha：
 
 Verdict: PASS / CHANGES_REQUIRED / INSUFFICIENT_EVIDENCE
 
-返回负责该 Issue 的 Codex 会话的一句话：
-
-只读审阅，不改实现、不启动后续 Agent、不合并。
+只读审阅：不改实现、不调用 GLM、不合并。结果自动返回 Codex 主执行；无需用户另开窗口或复制审阅提示词。

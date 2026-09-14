@@ -26,22 +26,26 @@ Difficulty: L? — 理由：
 
 Risk: R? — 理由：
 
-实际实施者：Codex / zcode / pi
+规划建议实施者：Codex / GLM / Codex-first → GLM
 
-## Independent Review
+实际实施者：Codex / GLM / Codex + GLM
 
-独立 Codex 审阅评论：
+## Reviewer Subagent
+
+reviewer：Codex fresh read-only subagent
 
 reviewed_head_sha / reviewed_base_sha：
 
 Verdict: 未审阅 / PASS / CHANGES_REQUIRED / INSUFFICIENT_EVIDENCE
 
-未解决 blockers、新提交后的验证/增量复核：
+审阅评论 / findings / 未解决 blockers：
+
+新提交后的验证与增量复核：
 
 ## Manual Handoff / Merge
 
-Issue 当前交接标识、阶段和下一动作：
+Issue 当前 GLM handoff_id、阶段和下一动作：
 
-用户手工启动下一侧；不自动调用、不自动合并。MERGE_READY 不是合并结果，本文不替代平台门禁或人工授权。
+只有 Codex ↔ GLM 跨工具时由用户手工启动下一侧；reviewer 子代理由 Codex 自动启动。MERGE_READY 不是合并结果，最终合并由用户决定。
 
 发布/生产/真实数据操作另行授权。

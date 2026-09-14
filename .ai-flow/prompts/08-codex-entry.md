@@ -1,9 +1,11 @@
 # v4.0 Codex：日常入口
 
-读取 `.ai-flow/AGENTS.md`、project.json、当前 Issue/交接评论、适用业务规则、真实 Git/PR/CI 状态。先确认无其他写入者；查重、核对依赖与范围，再判断 L/R。Goal 队列只选择一个就绪的当前阶段，不自动把整队列跑完。
+读取 `.ai-flow/AGENTS.md`、project.json、当前 Issue/Goal、AI Flow Routing、适用业务规则、真实 Git/PR/CI 状态。先确认无其他实施写入者；查重、核对依赖与范围，再校准 L/R、Recommended implementer 和 Execution mode。Goal 队列只选择用户当前授权的就绪 Task，不自动把整队列跑完。
 
-按 balanced 完成应由 Codex 承担的校准、根因调查或复杂实施。**每个内部 checkpoint 后先判断 next_actor：若仍是本 Codex 主执行会话且在当前授权范围，就直接继续调查→实现→测试→修复→补证据，不停、不 self-handoff、不让用户重新粘贴提示词。** 方案已明确且确需换 worker 的 L1/L2 才准备施工交接；已经完成的工作不强派施工者。
+**先尊重规划分工，再用真实代码校准。** L1/L2 明确施工默认应交 GLM；L3 先由 Codex 判断，可切出的明确施工再交 GLM；L4/L5 Codex 主做。若改变 Issue 中建议实施者，写回证据与理由。不能因已经启动 Codex 就把所有 Task 留给自己。
 
-只有 next_actor 确实变为 zcode/pi 时，才按模板将 H1 等唯一交接评论写回 Issue，包含剩余范围、已做、当前 Git、证据、阻碍与停止条件；输出已代入真实编号的施工/收尾汇报/阻碍汇报三句。明确“下一侧尚未启动，由用户选择 zcode 或 pi 启动”，停止写入并结束本轮。若 next_actor 仍是本会话，禁止生成交给自己的 Handoff。
+Codex 自己负责的调查→实现→测试→修复→补证据连续完成；next_actor 仍是当前 Codex 时不停、不 self-handoff。只有确需转 GLM 时，按模板写 Handoff 评论并输出已填真实编号的施工/收尾/阻碍三句，明确“GLM 尚未启动，等待用户手工启动”，然后停止。
 
-需要正式审阅时，因为独立 reviewer 是不同 actor，给用户开启新 Codex 会话的短句后停止；需要 CI/依赖/授权且已真实阻塞后续时给恢复条件与准确下一步。仍有同主体可安全推进的工作先继续。不启动其他模型、子 Agent 或后台调度，不轮询另一侧。达到门禁只 MERGE_READY，不合并。
+实现/验证达到 REVIEW_READY 后，**自动启动新的只读 reviewer 子代理**，不要求用户另开窗口。reviewer 结果自动回到当前 Codex：CHANGES_REQUIRED 就继续整改或把明确施工人工交 GLM；PASS 后核对最新 SHA/CI/门禁；INSUFFICIENT_EVIDENCE 则在当前授权内补证据，真正被外部条件阻塞才停。
+
+不自动调用 GLM、不后台轮询外部进度。达到门禁只 MERGE_READY，不合并。

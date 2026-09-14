@@ -80,34 +80,34 @@
 
 
 <!-- AI-FLOW-V4:START -->
-## AI Flow v4.0 — manual handoff
+## AI Flow v4.0 — manual cross-tool handoff
 
 For AI coding workflow tasks, read `.ai-flow/AGENTS.md`, the applicable
 `.ai-flow/AI_CODING_PLAYBOOK.md` sections, and `.ai-flow/project.json`.
 Preserve project-specific business rules and stricter safety requirements.
 
-Issue-first, balanced. Web ChatGPT plans and writes task Issues. Codex owns
-technical routing, complex implementation, result intake and engineering checks.
-The user alone starts each tool/session and controls all cross-agent handoffs.
-zcode or pi performs only the bounded task handed off by Codex.
-Use `.ai-flow/prompts/08-codex-entry.md` and
-`.ai-flow/docs/ONE_SENTENCE_PROMPTS.md` for the normal entry.
+Issue-first, balanced. Web ChatGPT plans and writes task Issues with explicit
+Difficulty, Risk, Recommended implementer and Execution mode; Goal Issues must
+summarize routing. Current implementer names are Codex, GLM, or Codex-first -> GLM.
+Codex recalibrates routing against the real repository before execution.
 
-Do not call, spawn, wake or poll another agent, even via CLI/API/MCP/subagents,
-or start a background coordinator. Human control applies when execution crosses
-tool/session/role boundaries; it is not a pause at every internal checkpoint.
-If the next actor is the current actor in the same role/session and remains within
-the current authorized scope, continue directly: do not create a self-handoff,
-do not emit a restart prompt, and do not stop merely because a stage/checkpoint
-ended. When the next actor differs (including a new independent Codex reviewer),
-or a human decision/external wait is required, publish the handoff/condition,
-give the user the filled one-sentence prompt(s), stop writing and end the turn.
-Codex-to-worker handoffs include execution, wrap-up and blocker-report prompts.
-Workers return a one-sentence prompt when their bounded scope ends or must return
-to Codex. No runtime/local.json readiness, RPC completion or automatic resume is required.
+The user controls Codex <-> GLM cross-tool starts, external-wait resumes and
+final merging. Do not auto-call, wake, callback or poll GLM from Codex or Codex
+from GLM, including through CLI/API/MCP/background coordinators. Same-tool work
+continues through internal checkpoints; do not create self-handoffs.
 
-Every change needs an independent Codex review context opened manually by the
-user, bound to current base/head SHAs. Self-review is not independent review.
+Formal review is the one internal-agent exception: when implementation and
+validation reach REVIEW_READY, Codex automatically starts a fresh read-only
+reviewer subagent. That reviewer independently rereads the Issue, PR, latest
+base/head, diff, code and evidence; it does not edit implementation, call GLM
+or merge. Review results return to Codex without requiring a new user window.
+If a fresh read-only reviewer subagent is unavailable, mark REVIEW_BLOCKED rather
+than substituting author self-review.
+
+Codex-to-GLM handoffs include execution, wrap-up and blocker-report prompts.
+GLM returns a one-sentence prompt when its bounded scope ends or must return to
+Codex. No runtime/local.json readiness, RPC completion or automatic resume is required.
+
 Missing evidence, stale reviews and correctness/security blockers prevent
 MERGE_READY. Agent output does not replace GitHub checks or qualified approvals.
 The user decides merging; no automatic merge, release or real-data operations.

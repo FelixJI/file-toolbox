@@ -1,13 +1,13 @@
-# Handoff — Issue 内唯一标识 H?
+# GLM Handoff — Issue 内唯一标识 H?
 
-用途：仅在 `next_actor != current_actor` 时粘贴到 Issue 评论，不创建仓库内实时交接文件。若接收者仍是当前主体/角色/会话且在授权范围内，不使用本模板，直接继续执行。
+用途：**仅用于 Codex ↔ GLM 的跨工具交接**，粘贴到 Issue 评论；不创建仓库内实时交接文件。Codex 内部 reviewer 子代理不使用本模板；当前主体仍能继续时也不使用本模板。
 
 - Issue / Goal / PR（无 PR 如实写尚无）：
 - handoff_id / 所替代交接（如有）：
 - 时间（含时区）：
-- current_actor → next_actor（不得相同；相同则不是 Handoff）：
-- 当前 status：HANDOFF_READY / BLOCKED / REVIEW_READY / …
-- 下一侧：尚未启动，等待用户手动启动。
+- current_actor → next_actor：codex-main → glm / glm → codex-main
+- 当前 status：HANDOFF_READY / BLOCKED / …
+- 下一侧：尚未启动，等待用户手工启动。
 
 ## 当前现场
 
@@ -15,7 +15,7 @@
 
 实际 base SHA / head SHA：
 
-上一写入者已停止：是 / 否 / 未核实
+上一实施写入者已停止：是 / 否 / 未核实
 
 工作区：clean / dirty；dirty 文件、归属和保留方式：
 
@@ -35,16 +35,16 @@ Scope / Out of Scope / 必须保持的不变量：
 
 ## 下一动作与停止条件
 
-next_actor / next_action / user_action_required（next_actor 必须不同于 current_actor）：
+next_actor / next_action / user_action_required：
 
-做到哪里即停止、受阻如何返回 Codex：
+做到哪里即停止；GLM 受阻/完成如何返回 Codex：
 
 ## 用户复制区
 
-施工一句话（真实 Issue/交接已填）：
+GLM 施工一句话（真实 Issue/交接已填）：
 
-收尾汇报一句话：
+GLM 收尾汇报一句话：
 
-阻碍汇报一句话：
+GLM 阻碍汇报一句话：
 
-不含凭据；已发布摘要不等于已经启动接收者。
+不含凭据；已发布 Handoff 不等于 GLM 已启动。
