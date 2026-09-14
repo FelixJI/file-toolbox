@@ -104,3 +104,61 @@ def test_pre_push_rejects_report_introduced_only_by_merge(flow_repo: Path) -> No
     assert hygiene.pre_push(flow_repo, [f"refs/heads/main {head} refs/heads/main {base}"]) == [
         "BOOTSTRAP_RESULT.md"
     ]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_pre_push_excludes_only_destination_history(flow_repo: Path, existing: bool) -> None:
+    git(flow_repo, "config", "user.name", "Test")
+    git(flow_repo, "config", "user.email", "test@example.invalid")
+    base = git(flow_repo, "rev-parse", "HEAD")
+    remote = flow_repo / "destination.git"
+    other = flow_repo / "other.git"
+    for target in (remote, other):
+        subprocess.run(["git", "init", "--bare", str(target)], check=True)
+    git(flow_repo, "push", str(remote), "main")
+    if existing:
+        git(flow_repo, "push", str(remote), "HEAD:refs/heads/topic")
+    report = flow_repo / "BOOTSTRAP_RESULT.md"
+    report.write_text("legacy", encoding="utf-8")
+    git(flow_repo, "add", report.name)
+    git(flow_repo, "commit", "-qm", "test: legacy report")
+    git(flow_repo, "rm", report.name)
+    git(flow_repo, "commit", "-qm", "test: remove legacy report")
+    head = git(flow_repo, "rev-parse", "HEAD")
+    old = base if existing else "0" * 40
+    lines = [f"refs/heads/topic {head} refs/heads/topic {old}"]
+    # Another remote owning the history must not exempt it for this destination.
+    git(flow_repo, "remote", "add", "other", str(other))
+    git(flow_repo, "push", "other", "main")
+    assert hygiene.pre_push(flow_repo, lines, str(remote)) == [report.name]
+    git(flow_repo, "push", str(remote), "main")
+    assert hygiene.pre_push(flow_repo, lines, str(remote)) == []
+    # A tracking ref may still claim the destination owns history it no longer advertises.
+    git(flow_repo, "remote", "add", "destination", str(remote))
+    git(flow_repo, "fetch", "destination")
+    git(remote, "update-ref", "refs/heads/main", base)
+    assert hygiene.pre_push(flow_repo, lines, str(remote)) == [report.name]
+    git(flow_repo, "push", str(remote), "main")
+    # Exercise Git's real hook arguments, including a URL rather than a remote name.
+    subprocess.run(["uv", "venv", "--python", sys.executable, str(flow_repo / ".venv")], check=True)
+    hygiene.install_hooks(flow_repo)
+    git(flow_repo, "push", str(remote), "HEAD:refs/heads/topic")
+    assert git(flow_repo, "ls-remote", str(remote), "refs/heads/topic").split()[0] == head
+    # Destination history never exempts a report still present at the pushed tip.
+    report.write_text("new", encoding="utf-8")
+    git(flow_repo, "add", report.name)
+    tree = git(flow_repo, "write-tree")
+    head = git(flow_repo, "commit-tree", tree, "-p", head, "-m", "test: reintroduce report")
+    assert hygiene.pre_push(
+        flow_repo, [f"refs/heads/topic {head} refs/heads/topic {old}"], str(remote)
+    ) == [report.name]
+
+
+def test_pre_push_refuses_unavailable_destination(flow_repo: Path) -> None:
+    head = git(flow_repo, "rev-parse", "HEAD")
+    with pytest.raises(ValueError):
+        hygiene.pre_push(
+            flow_repo,
+            [f"refs/heads/main {head} refs/heads/main {'0' * 40}"],
+            str(flow_repo / "missing.git"),
+        )
