@@ -1,33 +1,50 @@
-# Agent交接单
+# Handoff — Issue 内唯一标识 H?
 
-任务/Goal/Issue：
+用途：粘贴到 Issue 评论，不创建仓库内实时交接文件。
 
-PR：
+- Issue / Goal / PR（无 PR 如实写尚无）：
+- handoff_id / 所替代交接（如有）：
+- 时间（含时区）：
+- 交出者 → 接收者：
+- 当前 status：HANDOFF_READY / BLOCKED / REVIEW_READY / …
+- 下一侧：尚未启动，等待用户手动启动。
 
-交出者 → 接收者：
+## 当前现场
 
-当前状态（HANDOFF_REQUIRED / BLOCKED / REVIEW / FIXING 等）：
+分支 / 工作区定位（公开评论不要泄露私密本机路径）：
 
-分支 / head SHA / base SHA：
+实际 base SHA / head SHA：
 
-工作区是否干净、上一写入者是否停止：
+上一写入者已停止：是 / 否 / 未核实
 
-已完成AC及真实证据：
+工作区：clean / dirty；dirty 文件、归属和保留方式：
 
-剩余工作与不能改变的边界：
+## 当前范围
 
-失败最小复现、命令/退出码/日志链接：
+Scope / Out of Scope / 必须保持的不变量：
 
-已尝试方案及同一根因失败轮数：
+本次 AC / checkpoint / 验证方式：
 
-未解决finding：
+## 已完成与证据
 
-Next action（一个具体可执行的下一动作）：
+完成项、真实 command / cwd / exit code / SHA / 证据位置：
 
-完成标准与停止条件：
+## 剩余 / 阻碍
 
-真实调用结果（未调用写“未调用，需要接收者会话启动”）：
+未完成 AC、失败复现、已尝试方案、同根因失败轮数、未解决 finding：
 
-更新时间（含时区）：
+## 下一动作与停止条件
 
-不要复制整段聊天，不包含令牌/密钥/真实敏感数据。
+next_actor / next_action / user_action_required：
+
+做到哪里即停止、受阻如何返回 Codex：
+
+## 用户复制区
+
+施工一句话（真实 Issue/交接已填）：
+
+收尾汇报一句话：
+
+阻碍汇报一句话：
+
+不含凭据；已发布摘要不等于已经启动接收者。

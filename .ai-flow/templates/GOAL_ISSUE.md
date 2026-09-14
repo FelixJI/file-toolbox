@@ -1,42 +1,39 @@
 ---
-name: AI Goal v3
-about: 跨多个语义 PR 的目标与依赖图；单 PR 任务不要额外创建 Goal Issue
+name: AI Goal v4.0
+about: 跨多个语义 PR 的目标与依赖队列
 title: "[AI Goal] "
 labels: ""
 assignees: ""
 ---
 
-## Goal
+## Goal / Scope / Out of Scope
 
-一句话描述整个目标的最终可观察结果。
-
-## Scope / Out of Scope
-
-- Scope：
-- Out of Scope：
+最终可观察目标及边界：
 
 ## Goal Acceptance
 
 - [ ] GAC1：
 - [ ] GAC2：
 
-## Task DAG
+## Task Dependencies
 
-只列需要独立 Issue / PR 验收的语义任务。checkpoint 不写在这里。
+只列需要独立 Issue/PR 验收的语义任务；用真实编号替换示例。checkpoint 不建新 Issue。
 
 ```text
-#101 → #103
-#102 → #103
+Task A → Task C
+Task B → Task C
 ```
 
-## Related Existing Issues / PRs
+## Existing Issues / PRs
 
-复用、冲突、依赖或历史上下文。
+复用、冲突、依赖、当前实际合并状态：
 
-## Integration / Stage Validation
+## Integration Validation
 
-跨 PR 集成验证、兼容性和最终用户路径证据。
+跨 PR 集成、兼容和最终用户路径证据：
 
-## Current Status / Next Action
+## Current Stage / Next Action
 
-Goal 状态、当前 ready Task Issue、待合并/阻断事项。
+当前已就绪 Task、等待/阻碍、用户下一次应启动哪一侧：
+
+不会自动执行队列；每次只推进当前手工启动所授权的阶段。
