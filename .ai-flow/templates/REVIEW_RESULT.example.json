@@ -1,8 +1,0 @@
-{
-  "reviewed_head_sha": "REPLACE_WITH_CURRENT_HEAD_SHA",
-  "reviewed_base_sha": "REPLACE_WITH_ACTUAL_BASE_SHA",
-  "verdict": "INSUFFICIENT_EVIDENCE",
-  "ac_evidence": [],
-  "findings": [],
-  "summary": "Example only: no real diff or verification reviewed. Empty findings do not mean PASS."
-}

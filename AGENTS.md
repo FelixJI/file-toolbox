@@ -79,33 +79,35 @@
 - 任何公共 core 修改必须与其余五仓同步；workflow 可按项目瓶颈差异化，File Toolbox 的 GUI/COM/覆盖率/更新器规则不得反向塞入其他仓库 YAML。
 
 
-<!-- AI-FLOW-V3:START -->
-## AI Flow v3
+<!-- AI-FLOW-V4:START -->
+## AI Flow v4.0 — manual handoff
 
-For AI coding workflow tasks, read `.ai-flow/AGENTS.md` and the applicable
-sections of `.ai-flow/AI_CODING_PLAYBOOK.md`. Use `.ai-flow/project.json` for
-shared policy and validation commands; ignored `.ai-flow/local.json` holds host readiness and CLI settings. Preserve existing project rules
-and stricter safety requirements; reconcile legacy flow rules during setup.
+For AI coding workflow tasks, read `.ai-flow/AGENTS.md`, the applicable
+`.ai-flow/AI_CODING_PLAYBOOK.md` sections, and `.ai-flow/project.json`.
+Preserve project-specific business rules and stricter safety requirements.
 
-Default profile: balanced. Web ChatGPT creates/updates Issue task contracts; Codex controls/routes and performs
-complex work; the already configured pi+GLM performs bounded implementation.
-Read `.ai-flow/prompts/08-batch-run.md` for the one-sentence execution entry.
-The local `.ai-flow/scripts/flow.py` coordinator uses Codex App Server + Pi RPC; dispatches after turn/completed or agent_settled, not process exit.
-After handing off to a detached runner, release the worktree and end the turn;
-do not poll, recursively spawn runners, or resume an unrelated/active session.
-`AI_FLOW_CHILD=1` means report to the outer runner, do not dispatch other agents.
+Issue-first, balanced. Web ChatGPT plans and writes task Issues. Codex owns
+technical routing, complex implementation, result intake and engineering checks.
+The user alone starts each tool/session and controls all cross-agent handoffs.
+zcode or pi performs only the bounded task handed off by Codex.
+Use `.ai-flow/prompts/08-codex-entry.md` and
+`.ai-flow/docs/ONE_SENTENCE_PROMPTS.md` for the normal entry.
 
-Auto-merge is OFF. This runner has no merge or deployment action. It is not a
-security sandbox or an automatic message injector into an existing desktop chat.
+Do not call, spawn, wake or poll another agent, even via CLI/API/MCP/subagents,
+or start a background coordinator. Publish the handoff to the Issue, give the
+user the filled one-sentence prompt(s), stop writing and end the turn.
+Codex-to-worker handoffs include execution, wrap-up and blocker-report prompts.
+Workers always return a one-sentence prompt for the user to take back to Codex.
+No runtime/local.json readiness, RPC completion or automatic resume is required.
 
-### Code review requirements for AI Flow
+Every change needs an independent Codex review context opened manually by the
+user, bound to current base/head SHAs. Self-review is not independent review.
+Missing evidence, stale reviews and correctness/security blockers prevent
+MERGE_READY. Agent output does not replace GitHub checks or qualified approvals.
+The user decides merging; no automatic merge, release or real-data operations.
 
-Use an independent review context and record current head/base SHAs.
-Missing tests, stale reviews and unresolved correctness/security blockers are not
-approval. Revalidate new commits. Instructions do not replace GitHub checks or
-qualified approvals. Never commit machine-local run/probe reports or BOOTSTRAP_RESULT.md.
-Store reports under ignored `.ai-flow/runtime/`; publish brief progress only in Issue/PR text.
-Before commit/push run `.ai-flow/scripts/hygiene.py`; never use git add . / -A.
-Do not refresh shared project.json for local readiness, capabilities or current baseline.
-Do not expose credentials in runtime artifacts or commits.
-<!-- AI-FLOW-V3:END -->
+Keep one implementation writer. Never overwrite user changes, weaken tests or
+bypass permissions. Never commit machine-local reports or BOOTSTRAP_RESULT.md.
+Publish brief progress in Issue/PR text; local diagnostics stay in ignored
+`.ai-flow/runtime/`. Stage explicit paths and run the artifact hygiene guard.
+<!-- AI-FLOW-V4:END -->

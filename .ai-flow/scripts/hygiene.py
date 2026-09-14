@@ -108,6 +108,7 @@ def pre_push(root, lines):
             names = paths(
                 root,
                 "diff-tree",
+                "-m",
                 "--root",
                 "--no-commit-id",
                 "-r",
@@ -133,6 +134,11 @@ def migrate(root, apply=False):
             + " -> .ai-flow/runtime/legacy/"
         )
         source = root / name
+        current = root
+        for part in Path(name).parts:
+            current = current / part
+            if current.is_symlink():
+                raise ValueError("Symlink artifact path refused: " + name)
         if source.is_symlink() or not source.is_file():
             raise ValueError("Inspect missing/symlink artifact manually: " + name)
         # Do not run an all-tree cleanup or unstage unrelated user files.

@@ -1,22 +1,9 @@
-# GPT 网页版：目标 → GitHub Issue 任务合同
+# v4.0 网页版：规划并写入 Issues
 
-目标：【用户自然语言目标】
+针对用户当前目标，先读仓库适用规则、真实代码/测试、相关 Issues 和未合并 PR。复用既有任务，不重复施工，不依赖旧对话猜当前事实。
 
-按当前仓库 AI Flow v3 规划。你可以直接读取仓库，因此先读取适用规则、真实代码/测试、相关 open Issues 与未合并 PR；不要把仓库规则重新抄进输出，也不要另建一套与 Issue 重复的人工计划文件。
+单语义 PR 用一个主 Issue；确需多个独立 PR 才 Goal + Task Issues。一次梳理完整依赖队列，仅细化近期 1–2 项。合同采用仓库模板，写 Scope/Out of Scope、编号 AC、依赖、L/R 理由、验证策略和必要授权。规划路由只是建议，由本地 Codex 复核。
 
-默认以 GitHub Issue 作为长期任务合同：
+有 GitHub 写权限就实际写入，并给真实编号/链接；没有权限输出 WRITE_ACCESS_MISSING 和可发布 Issue Draft，不假称已创建。不要另建长期计划文件，不改代码、不启动任何 Agent。
 
-- 单一可独立验收、预计一个语义 PR 完成的目标：创建或复用一个主 Issue。
-- 确实需要多个独立 PR 的目标：创建一个 Goal Issue，并只为需要独立验收/独立 PR 的语义任务创建 Task Issues。
-- checkpoint、文件级修改、Agent 内部步骤不创建 Issue。
-- 优先复用已有相关 Issue；发现重叠 PR 时记录冲突/依赖，不重复施工。
-- 依赖、难度/风险、AC、验证策略等具体格式直接遵守仓库现有 AI Flow v3 模板与规则。Codex 执行时可基于新证据重新校准路由。
-
-具备 GitHub 写权限时，直接创建/更新这些 Issues；没有写权限时，输出可直接提交的 Issue Draft，并明确 `WRITE_ACCESS_MISSING`。不要退化成另一份长期 plan.md。
-
-完成后只告诉用户：
-1. Goal Issue / 主 Issue 编号与标题；
-2. 创建或复用的 Task Issues（如有）；
-3. 一句话执行入口：`按 AI Flow v3 执行 #<编号>，balanced，推进到可交付边界。`
-
-本网页回合只负责规划和建立任务合同，不实施代码，也不声称已经启动本地 Codex/pi。
+结束给：主 Issue/Goal，必要 Task 队列，一句已填编号的 Codex 入口（见 docs/ONE_SENTENCE_PROMPTS.md）。没有真实 Issue 编号时不得伪造入口：先让用户发布 Draft 后再把真实编号带到 Codex。

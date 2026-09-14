@@ -1,19 +1,13 @@
-# v3.2 快速参考
+# AI Flow v4.0 快速参考
 
-网页：按仓库 AI Flow 规划【目标】，复用/建立必要 Issues，不另建计划文件。
-本地：按 AI Flow 执行 #123，balanced，推进到可交付边界。
+入口：`prompts/08-codex-entry.md`。短句全集：`docs/ONE_SENTENCE_PROMPTS.md`。
 
-| 动作 | 命令 |
-|---|---|
-| 原生握手，无模型生成 | uv run --frozen python .ai-flow/scripts/flow.py doctor |
-| 真实短探针，用现有额度 | uv run --frozen python .ai-flow/scripts/flow.py doctor --live |
-| 查看状态 | uv run --frozen python .ai-flow/scripts/flow.py status |
-| 人工连续查看 | uv run --frozen python .ai-flow/scripts/flow.py watch |
-| 本轮后停 | uv run --frozen python .ai-flow/scripts/flow.py stop |
-| 取消当前原生调用 | uv run --frozen python .ai-flow/scripts/flow.py stop --now |
-| 恢复 v3.2 已暂停任务 | uv run --frozen python .ai-flow/scripts/flow.py resume --detach |
-| 提交检查 | uv run --frozen python .ai-flow/scripts/hygiene.py --staged |
-| 已跟踪产物审计 | uv run --frozen python .ai-flow/scripts/hygiene.py --tracked |
+顺序：网页写 Issues → 用户启动 Codex → 用户启动 zcode/pi（需要时）→ 用户带结果回 Codex → 用户开启独立 Codex 审阅 → 回 Codex 核对 → 用户合并。
 
-工作流源码：Git 管理。local.json/runtime/报告：不提交。brief 交给 Issue/PR，不造证据 commit。
-新 worktree 需要本机 local 配置；升级后的 native 运行不能复用 v3.1 pending。
+技术分工：Codex 负责判断和复杂工作；zcode/pi 负责明确施工。启动权始终由用户掌握。
+
+交接：Issue + 唯一交接标识/评论 + 分支/base/head + 工作区归属 + 证据/阻碍 + 下一步/停止条件。
+
+完成 ≠ 验收；审阅 PASS ≠ 已合并；未启动 ≠ 已交给另一侧。当前最新 SHA 缺证据就不能 MERGE_READY。
+
+本包无 runner、无状态监听、无 Agent 互调；保留的 Python 工具只做安装迁移和 Git 产物检查。

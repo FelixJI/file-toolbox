@@ -1,20 +1,24 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
+  "flow_version": "4.0.0",
   "repository": "FelixJI/file-toolbox",
   "default_branch": "main",
-  "mode": "native-event-driven",
+  "mode": "manual-handoff",
   "profile": "balanced",
-  "max_writers_per_worktree": 1,
-  "default_parallel_writers": 1,
-  "runner": {
-    "max_controller_turns": 24,
-    "max_worker_runs_per_task": 8,
-    "max_pi_runs_per_task": 2,
-    "controller_timeout_seconds": 900,
-    "worker_timeout_seconds": 3600,
-    "review_timeout_seconds": 1800,
-    "preview_chars": 5000,
-    "backend": "native"
+  "worker_tool": "user-selected-zcode-or-pi",
+  "control": {
+    "cross_tool_start": "human",
+    "cross_session_start": "human",
+    "technical_owner": "codex",
+    "worker_may_pick_next_task": false,
+    "automatic_agent_calls": false,
+    "automatic_resume": false,
+    "progress_polling": false
+  },
+  "work_scope": {
+    "default": "one-authorized-stage",
+    "max_active_writers_per_repository": 1,
+    "stacked_prs_default": false
   },
   "validation": {
     "commands": [
@@ -37,35 +41,41 @@
   },
   "risk_paths": {
     "review_required": [
+      "R0",
       "R1",
       "R2",
       "R3"
     ],
     "human_merge_required": [
+      "R0",
+      "R1",
       "R2",
       "R3"
     ]
   },
-  "auto_merge": {
-    "enabled": false,
-    "allowlisted_categories": [],
-    "trusted_gate_verified": false,
-    "note": "This package does not implement a remote enforcement gate."
+  "review": {
+    "independent_codex_session_required": true,
+    "human_starts_review_session": true,
+    "bind_head_and_base_sha": true,
+    "new_commit_requires_recheck": true
+  },
+  "merge": {
+    "mode": "human-only",
+    "automatic": false
   },
   "deployment": {
     "authorized": false,
     "real_data_operations_authorized": false
   },
   "retry_policy": {
-    "pi_same_root_cause_failed_rounds": 2,
+    "worker_same_root_cause_failed_rounds": 2,
     "codex_same_root_cause_failed_rounds": 2,
     "ci_infrastructure_retries": 1
   },
-  "flow_version": "3.2.0",
   "artifact_policy": {
-    "local_config": ".ai-flow/local.json",
-    "runtime_root": ".ai-flow/runtime",
-    "publish_progress": "issue_or_pr_summary",
-    "checkpoint_commits": false
+    "task_and_handoff": "github_issue",
+    "code_test_review": "github_pr",
+    "local_diagnostics": ".ai-flow/runtime/",
+    "checkpoint_report_commits": false
   }
 }
