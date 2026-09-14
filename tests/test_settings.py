@@ -78,6 +78,7 @@ class TestCorruptionTolerance:
 # =====================================================================================
 import multiprocessing  # noqa: E402
 import threading  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
@@ -88,22 +89,32 @@ def _spawn_set_child(key: str) -> None:
 
 
 class TestConcurrentSet:
-    def test_threads_set_different_keys_all_preserved(self, isolated_cwd):
-        """同进程两线程并发 set 不同 key:两个 key 都保留。
+    def test_threads_set_different_keys_all_preserved(self, isolated_cwd, store_lock_probe):
+        """第一个 set 完成读改尚未保存时,第二个 set 必须等待整个事务。"""
+        reached_save = threading.Event()
+        proceed = threading.Event()
+        contended, progressed = store_lock_probe
+        original = settings._save
 
-        旧实现两个线程都先读旧快照再顺序保存,后写者抹掉先写者的 key。
-        """
-        barrier = threading.Barrier(2)
+        def gated_save(data):
+            if "a" in data and "b" not in data:
+                reached_save.set()
+                assert proceed.wait(5)
+            original(data)
 
-        def writer(key: str) -> None:
-            barrier.wait(5)
-            settings.set(key, 1)
-
-        threads = [threading.Thread(target=writer, args=(k,)) for k in ("a", "b")]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=10)
+        with patch.object(settings, "_save", side_effect=gated_save), ThreadPoolExecutor(2) as pool:
+            writer = pool.submit(settings.set, "a", 1)
+            try:
+                assert reached_save.wait(5)
+                contender = pool.submit(settings.set, "b", 1)
+                contender.add_done_callback(lambda _: progressed.set())
+                assert progressed.wait(5), "竞争者必须到达真实锁竞争或完成事务"
+                assert contended.is_set(), "set 读取与保存之间必须保持事务锁"
+                assert not contender.done()
+            finally:
+                proceed.set()
+            writer.result(timeout=5)
+            contender.result(timeout=5)
         assert settings.get("a") == 1
         assert settings.get("b") == 1
 

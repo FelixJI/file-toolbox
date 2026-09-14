@@ -212,7 +212,6 @@ import multiprocessing  # noqa: E402
 import os  # noqa: E402
 import sys  # noqa: E402
 import threading  # noqa: E402
-import time  # noqa: E402
 from concurrent.futures import ThreadPoolExecutor  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest.mock import patch  # noqa: E402
@@ -251,54 +250,76 @@ class TestCrossProcessConsistency:
 
 
 class TestCrossInstanceConsistency:
-    def test_two_instances_add_and_mark_no_lost_update(self, tmp_path):
-        """同目录两个 store 实例并发 mark/add:互不丢记录,最终 [1,2] 且 id1 已撤销。
+    def test_two_instances_add_and_mark_no_lost_update(self, tmp_path, store_lock_probe):
+        """mark 已读取快照但尚未替换时,另一个实例的 add 必须真实竞争同一锁。"""
+        from file_toolbox.common import history
 
-        旧实现 mark 的读-改-写不在同一锁域:并发 add 的记录被旧快照重写抹掉。
-        """
         first = JsonHistoryStore(tmp_path)
         second = JsonHistoryStore(tmp_path)
         first.add_record("rename", {"initial": True})
-        barrier = threading.Barrier(2)
+        reached_write = threading.Event()
+        proceed = threading.Event()
+        contended, progressed = store_lock_probe
+        original = history._replace_file
 
-        def do_mark() -> None:
-            barrier.wait(5)
-            first.mark_undone("rename", 1)
+        def gated_write(target, lines):
+            reached_write.set()
+            assert proceed.wait(5)
+            original(target, lines)
 
-        def do_add() -> None:
-            barrier.wait(5)
-            second.add_record("rename", {"concurrent": True})
-
-        threads = [threading.Thread(target=do_mark), threading.Thread(target=do_add)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=10)
+        with (
+            patch.object(history, "_replace_file", side_effect=gated_write),
+            ThreadPoolExecutor(2) as pool,
+        ):
+            writer = pool.submit(first.mark_undone, "rename", 1)
+            try:
+                assert reached_write.wait(5)
+                contender = pool.submit(second.add_record, "rename", {"concurrent": True})
+                contender.add_done_callback(lambda _: progressed.set())
+                assert progressed.wait(5), "竞争者必须到达真实锁竞争或完成事务"
+                assert contended.is_set(), "mark 未提交时 add 必须被真实锁拒绝即时获取"
+                assert not contender.done()
+            finally:
+                proceed.set()
+            writer.result(timeout=5)
+            assert contender.result(timeout=5) == 2
         records = second.get_records("rename")
         assert [r["id"] for r in records] == [1, 2]
         assert records[0]["undone"] is True
         assert records[1]["undone"] is False
 
-    def test_two_instances_concurrent_add_unique_ids(self, tmp_path):
-        """两个实例并发 add(同一进程):id 唯一连续(线程锁先于文件锁串行化)。"""
+    def test_two_instances_concurrent_add_unique_ids(self, tmp_path, store_lock_probe):
+        """第一个 add 读完最大 id 尚未追加时,第二个 add 不能读取旧快照。"""
         first = JsonHistoryStore(tmp_path)
         second = JsonHistoryStore(tmp_path)
-        barrier = threading.Barrier(2)
+        read_id = threading.Event()
+        proceed = threading.Event()
+        contended, progressed = store_lock_probe
+        original = first._last_id
 
-        def add(store: JsonHistoryStore, tag: str) -> None:
-            barrier.wait(5)
-            store.add_record("pdf", {"tag": tag})
+        def gated_last_id(tool):
+            rid = original(tool)
+            read_id.set()
+            assert proceed.wait(5)
+            return rid
 
-        threads = [
-            threading.Thread(target=add, args=(first, "a")),
-            threading.Thread(target=add, args=(second, "b")),
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=10)
-        ids = sorted(r["id"] for r in first.get_records("pdf"))
-        assert ids == [1, 2]
+        with (
+            patch.object(first, "_last_id", side_effect=gated_last_id),
+            ThreadPoolExecutor(2) as pool,
+        ):
+            writer = pool.submit(first.add_record, "pdf", {"tag": "a"})
+            try:
+                assert read_id.wait(5)
+                contender = pool.submit(second.add_record, "pdf", {"tag": "b"})
+                contender.add_done_callback(lambda _: progressed.set())
+                assert progressed.wait(5), "竞争者必须到达真实锁竞争或完成事务"
+                assert contended.is_set(), "id 读取与追加之间必须保持事务锁"
+                assert not contender.done()
+            finally:
+                proceed.set()
+            assert writer.result(timeout=5) == 1
+            assert contender.result(timeout=5) == 2
+        assert [r["id"] for r in first.get_records("pdf")] == [1, 2]
 
     def test_relative_and_absolute_dirs_share_lock(self, tmp_path, monkeypatch):
         """相对与绝对目录表达指向同一数据根时必须共享同一把锁。"""
@@ -346,7 +367,7 @@ class TestCrossInstanceConsistency:
 
 
 class TestReaderIsolation:
-    def test_reader_blocked_until_rewriter_releases(self, tmp_path):
+    def test_reader_blocked_until_rewriter_releases(self, tmp_path, store_lock_probe):
         """读者不能进入进行中的重写事务:锁内 replace 挂起期间 get_records 阻塞,
         完成后读到完整替换结果(不再观察到截断空文件中间态)。"""
         writer = JsonHistoryStore(tmp_path)
@@ -355,6 +376,7 @@ class TestReaderIsolation:
         reached_replace = threading.Event()
         proceed = threading.Event()
         real_replace = os.replace
+        contended, progressed = store_lock_probe
 
         def gated_replace(src, dst):
             reached_replace.set()
@@ -366,11 +388,15 @@ class TestReaderIsolation:
             ThreadPoolExecutor(2) as pool,
         ):
             writer_future = pool.submit(writer.mark_undone, "rename", 1)
-            assert reached_replace.wait(5), "写事务应到达锁内 replace 边界"
-            reader_future = pool.submit(reader.get_records, "rename")
-            time.sleep(0.3)  # 给读者进入锁等待的时间(持锁方仍阻塞在 proceed)
-            assert not reader_future.done(), "写事务持锁期间读者不应完成"
-            proceed.set()
+            try:
+                assert reached_replace.wait(5), "写事务应到达锁内 replace 边界"
+                reader_future = pool.submit(reader.get_records, "rename")
+                reader_future.add_done_callback(lambda _: progressed.set())
+                assert progressed.wait(5), "读者必须到达真实锁竞争或完成读取"
+                assert contended.is_set(), "重写尚未提交时读者必须真实竞争事务锁"
+                assert not reader_future.done()
+            finally:
+                proceed.set()
             records = reader_future.result(timeout=5)
             writer_future.result(timeout=5)
         assert [r["id"] for r in records] == [1]
