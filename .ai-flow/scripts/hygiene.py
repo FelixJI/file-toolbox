@@ -80,8 +80,22 @@ def violations(root, mode="staged", base=None):
     return sorted({name for name in names if is_local_artifact(name)})
 
 
-def pre_push(root, lines):
+def pre_push(root, lines, destination=None):
     bad = set()
+    exclusions = []
+    if destination:
+        # Query the actual push URL, not tracking refs (which may be stale or belong
+        # to another server). Unknown local objects are not used as exemptions.
+        advertised = git_bytes(root, "ls-remote", "--heads", "--", destination)
+        for row in advertised.decode().splitlines():
+            oid, ref = row.split()
+            if not ref.startswith("refs/heads/"):
+                raise ValueError("Invalid destination branch advertisement")
+            try:
+                known = git_bytes(root, "rev-parse", "--verify", oid + "^{commit}")
+            except ValueError:
+                continue  # conservative: inspect more history until a normal fetch
+            exclusions.append("^" + known.decode().strip())
     for line in lines:
         parts = line.split()
         if len(parts) != 4:
@@ -101,7 +115,10 @@ def pre_push(root, lines):
             # A missing remote object means we cannot safely define the range: fail closed.
             old = git_bytes(root, "rev-parse", "--verify", remote + "^{commit}").decode().strip()
             rev_args += ["^" + old]
-        else:
+        if destination:
+            rev_args += exclusions
+        elif set(remote) == {"0"}:
+            # Compatibility for already-installed v3.2 hooks without destination.
             rev_args += ["--not", "--remotes"]
         commits = git_bytes(root, *rev_args).decode().splitlines()
         for commit in commits:
@@ -206,6 +223,7 @@ def install_hooks(root):
             + "\nroot=$(git rev-parse --show-toplevel) || exit 1\n"
             + 'guard="$root/.ai-flow/scripts/hygiene.py"\n'
             + '[ -f "$guard" ] || guard="$(dirname "$0")/ai-flow-hygiene.py"\n'
+            + ('export AI_FLOW_PUSH_DESTINATION="$2"\n' if name == "pre-push" else "")
             + 'exec uv run --frozen python "$guard" --repo "$root" '
             + flag
             + "\n"
@@ -227,6 +245,7 @@ def main(argv=None):
     group.add_argument("--pre-push", action="store_true")
     group.add_argument("--migrate", action="store_true")
     group.add_argument("--install-hooks", action="store_true")
+    p.add_argument("--push-destination", help="Actual push URL supplied by pre-push $2")
     p.add_argument("--apply", action="store_true")
     args = p.parse_args(argv)
     try:
@@ -241,7 +260,11 @@ def main(argv=None):
             migrate(root, args.apply)
             return 0
         bad = (
-            pre_push(root, sys.stdin.read().splitlines())
+            pre_push(
+                root,
+                sys.stdin.read().splitlines(),
+                args.push_destination or os.environ.get("AI_FLOW_PUSH_DESTINATION"),
+            )
             if args.pre_push
             else violations(
                 root, "tracked" if args.tracked else "branch" if args.base else "staged", args.base
