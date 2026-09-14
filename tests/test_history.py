@@ -251,33 +251,34 @@ class TestCrossProcessConsistency:
 
 class TestCrossInstanceConsistency:
     def test_two_instances_add_and_mark_no_lost_update(self, tmp_path, store_lock_probe):
-        """mark 已读取快照但尚未替换时,另一个实例的 add 必须真实竞争同一锁。"""
-        from file_toolbox.common import history
-
+        """mark 读取快照的边界就必须持锁,不能只在最后替换时才获取锁。"""
         first = JsonHistoryStore(tmp_path)
         second = JsonHistoryStore(tmp_path)
         first.add_record("rename", {"initial": True})
-        reached_write = threading.Event()
+        read_snapshot = threading.Event()
         proceed = threading.Event()
         contended, progressed = store_lock_probe
-        original = history._replace_file
+        original = Path.read_text
 
-        def gated_write(target, lines):
-            reached_write.set()
-            assert proceed.wait(5)
-            original(target, lines)
+        def gated_read(path, *args, **kwargs):
+            text = original(path, *args, **kwargs)
+            if path == tmp_path / "rename.jsonl" and not read_snapshot.is_set():
+                # 原始读取已关闭句柄;暂停在快照交还 mark 之前,而非锁内替换边界。
+                read_snapshot.set()
+                assert proceed.wait(5)
+            return text
 
         with (
-            patch.object(history, "_replace_file", side_effect=gated_write),
+            patch.object(Path, "read_text", gated_read),
             ThreadPoolExecutor(2) as pool,
         ):
             writer = pool.submit(first.mark_undone, "rename", 1)
             try:
-                assert reached_write.wait(5)
+                assert read_snapshot.wait(5)
                 contender = pool.submit(second.add_record, "rename", {"concurrent": True})
                 contender.add_done_callback(lambda _: progressed.set())
                 assert progressed.wait(5), "竞争者必须到达真实锁竞争或完成事务"
-                assert contended.is_set(), "mark 未提交时 add 必须被真实锁拒绝即时获取"
+                assert contended.is_set(), "mark 读取快照时就必须持锁,不能只锁最终替换"
                 assert not contender.done()
             finally:
                 proceed.set()
