@@ -62,3 +62,14 @@ Desktop.ini
 /a_*.xlsx
 
 # uv.lock SHOULD be tracked (intentionally NOT ignored)
+# BEGIN AI-FLOW LOCAL ARTIFACTS
+/.ai-flow/local.json
+/.ai-flow/runtime/
+/.ai-flow/migration-backups/
+/.ai-flow/upgrade-candidates/
+/.ai-flow/reports/
+BOOTSTRAP_RESULT.md
+AI_FLOW_RESULT.md
+AI_FLOW_HANDOFF.md
+AI_FLOW_STATUS.json
+# END AI-FLOW LOCAL ARTIFACTS
