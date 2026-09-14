@@ -5,20 +5,33 @@
   "default_branch": "main",
   "mode": "manual-handoff",
   "profile": "balanced",
-  "worker_tool": "user-selected-zcode-or-pi",
+  "worker_tool": "glm",
   "control": {
     "cross_tool_start": "human",
-    "cross_session_start": "human",
     "technical_owner": "codex",
     "worker_may_pick_next_task": false,
-    "automatic_agent_calls": false,
+    "automatic_external_agent_calls": false,
+    "automatic_review_subagent": true,
     "automatic_resume": false,
-    "progress_polling": false
+    "progress_polling": false,
+    "same_actor_continuation": true,
+    "self_handoff_allowed": false,
+    "stage_boundary_alone_stops_execution": false
   },
   "work_scope": {
     "default": "one-authorized-stage",
     "max_active_writers_per_repository": 1,
     "stacked_prs_default": false
+  },
+  "planning": {
+    "issue_routing_fields_required": true,
+    "goal_routing_summary_required": true,
+    "recommended_implementers": [
+      "Codex",
+      "GLM",
+      "Codex-first -> GLM"
+    ],
+    "codex_must_recalibrate_before_execution": true
   },
   "validation": {
     "commands": [
@@ -54,8 +67,11 @@
     ]
   },
   "review": {
-    "independent_codex_session_required": true,
-    "human_starts_review_session": true,
+    "mode": "codex-review-subagent",
+    "automatic_from_codex": true,
+    "fresh_subagent_required": true,
+    "read_only": true,
+    "implementation_edits_forbidden": true,
     "bind_head_and_base_sha": true,
     "new_commit_requires_recheck": true
   },
@@ -68,7 +84,7 @@
     "real_data_operations_authorized": false
   },
   "retry_policy": {
-    "worker_same_root_cause_failed_rounds": 2,
+    "glm_same_root_cause_failed_rounds": 2,
     "codex_same_root_cause_failed_rounds": 2,
     "ci_infrastructure_retries": 1
   },

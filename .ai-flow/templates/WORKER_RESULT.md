@@ -1,12 +1,12 @@
-# Worker Result — 对应指定交接
+# GLM Result — 对应指定交接
 
 用途：Issue / PR 评论，不作为新报告文件提交。
 
 Issue / handoff_id / 对应交接评论：
 
-结果：WORKER_DONE / HANDOFF_READY（部分收尾）/ BLOCKED
+结果：GLM_DONE / HANDOFF_READY（部分收尾）/ BLOCKED
 
-本会话实际工具：zcode / pi
+本会话实际实施者：GLM
 
 PR（没有写尚无）/ 分支 / 实际 base SHA / head SHA：
 
@@ -30,6 +30,6 @@ PR（没有写尚无）/ 分支 / 实际 base SHA / head SHA：
 
 ## 返回 Codex
 
-下一动作：由用户手工启动 Codex 接收结果/排障，施工者不代为调用。
+下一动作：由用户手工启动 Codex 接收结果/排障，GLM 不代为调用。
 
 已填真实 Issue、交接标识和结果评论的一句话：
