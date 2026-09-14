@@ -10,17 +10,19 @@
 
 普通开发命令、GitHub 评论和当前会话内的调查/实现可由当前 Agent 在既有权限内完成。**跨 Agent 调用一律不做**，包括 Codex → zcode/pi、施工者 → Codex、Codex → 独立 Codex reviewer。CLI、API、MCP、子 Agent、自动工具路由、计划任务、后台监控不是可绕过该边界的替代通道。
 
+**最高优先级连续执行原则：同主体连续执行，异主体才人工交接。** 每个 checkpoint/阶段完成后先判断 `next_actor`：若仍是当前主体、同一角色/会话且没有越出本次授权范围，则立即继续下一步，不建 self-handoff、不要求用户再贴提示词、不仅因阶段名变化而停止。只有主体/独立角色发生变化，或需要用户决策/授权、外部等待、人工合并、超出当前授权范围，才停止并把控制交还用户。Codex 主执行与独立 Codex reviewer 即使都叫 Codex，也属于不同 actor。
+
 ## 2. 人工闭环
 
-1. 网页版复用/创建主 Issue；多语义 PR 才建 Goal + Task Issues。完成后给 Codex 短句。
-2. 用户启动 Codex。Codex 读取 Issue、依赖、实际分支与当前代码，复核 L/R，完成应由自己承担的调查或实现。
-3. 需要明确施工时，Codex 写交接评论并输出施工/收尾汇报/阻碍汇报三条短句，结束本轮。用户选择 zcode 或 pi 并启动。
-4. 施工者按当前交接完成有限范围、自测和交付；完工或受阻都写结果评论，给返回 Codex 的一句话并停止。
-5. 用户把短句交回 Codex。Codex 核查证据；复杂问题直接接手，明确整改可给新交接；需要正式审阅则输出手工开启独立会话的短句。
-6. 用户开启独立 Codex 会话。reviewer 只读审阅并写 PR 结论，再输出交回负责该 Issue 的 Codex 会话的短句。
-7. Codex 复核审阅有效性、当前 SHA、CI/验收和风险；通过则停在 MERGE_READY。用户决定是否合并。真实合并后再次手动启动，才检查依赖并推进下一阶段。
+1. 网页版复用/创建主 Issue；多语义 PR 才建 Goal + Task Issues。规划者与 Codex 是不同 actor，因此完成后给 Codex 短句并停止。
+2. 用户启动 Codex 主执行会话。Codex 读取 Issue、依赖、实际分支与当前代码，复核 L/R，并在同一授权范围内连续完成应由自己承担的调查、设计、复杂实现、测试和修复；内部 checkpoint 不触发人工重启。
+3. 只有确实需要换到 zcode/pi 时，Codex 才写交接评论并输出施工/收尾汇报/阻碍汇报三条短句，然后停止。若下一步仍是 Codex 主执行，就直接继续，不创建交给自己的 Handoff。
+4. 用户选择 zcode 或 pi 并启动。施工者在当前 Handoff 授权范围内连续实现、自测和修复；只有该范围完成、受阻、越界或必须回 Codex 判断时才写结果评论，给返回 Codex 的一句话并停止。内部步骤/测试循环不要求用户再次启动施工者。
+5. 用户把短句交回 Codex。Codex 核查证据；复杂问题由当前会话直接接手并连续处理，只有明确工作需再次换给 worker 才创建新交接；需要正式审阅时，因为 `codex-main → codex-review` 是角色/会话变化，输出手工开启独立会话的短句并停止。
+6. 用户开启独立 Codex reviewer。reviewer 只读审阅并写 PR 结论，再输出交回负责该 Issue 的 Codex 主执行会话的短句并停止；reviewer 不在本会话切换成实现者。
+7. 用户把审阅结果交回 Codex。若 CHANGES_REQUIRED 且整改应由当前 Codex 完成，Codex直接整改、验证并准备下一次独立复核；只有换 worker/独立 reviewer、等待外部条件或需要用户决策时才再次停止。全部门禁通过则停在 MERGE_READY，用户决定是否合并。
 
-不要为满足流程强行让每个角色都写代码。Codex 已完整实现时直接走验证/独立审阅；L1/L2 已明确时快速校准即可交给施工者。若主 Issue 是 Goal，Codex 选择一个依赖满足的 Task，写清本阶段范围，不自动循环整个队列。
+不要为满足流程强行让每个角色都写代码，也不要为满足“人工控制”把同一主体的连续工作切碎。Codex 已完整实现时直接完成验证，再在进入独立审阅这一异角色边界时停止；L1/L2 已明确时快速校准即可交给施工者。若主 Issue 是 Goal，Codex 选择一个依赖满足且属于本次授权的 Task；完成该 Task 后是否进入另一个 Task，按用户授权范围判断，不自动循环整个未授权队列。
 
 ## 3. 难度和风险分离
 
@@ -65,15 +67,15 @@ PLANNED → READY → CODEX_WORKING
                 → MERGE_READY → MERGED → ACCEPTED（目标层可选）
 ```
 
-任何阶段可以进入 BLOCKED、WAITING_CI、WAITING_DEPENDENCY 或 HUMAN_REQUIRED。状态旁另记：`next_actor`、`next_action`、`user_action_required` 和本次 `handoff_id`。这些是事实记录，不会启动下一侧。
+任何阶段可以进入 BLOCKED、WAITING_CI、WAITING_DEPENDENCY 或 HUMAN_REQUIRED。状态旁另记：`current_actor`、`next_actor`、`next_action`、`user_action_required`；只有跨 actor 时才需要本次 `handoff_id`。这些是事实记录，不会启动下一侧。若 `next_actor == current_actor` 且仍在当前授权范围，状态更新后继续工作，不生成交接；若不同，才进入人工交接。
 
 交接标识在**同一个 Issue 内唯一**，例如 H1、H2；读取既有记录后递增，或采用唯一短标识。优先同时给具体评论链接。结果必须指向该交接，不笼统引用“最新一条评论”。返工重新划范围时建 H2，并明确 H1 已完成/已终止/被替代；晚到的 H1 结果不得覆盖 H2 状态。记录时间含时区，不编造本机时区或 session ID。
 
-HANDOFF_READY 表示上一写入者已停止、材料可领取，不表示工作者已启动；只有接收者实际核查并开始才 WORKER_WORKING。WORKER_DONE 只表示施工方声明交付；由 Codex 复核。审阅 PASS 不等于平台批准，不等于已合并。MERGED 依据真实远端结果，不能由一条提示词设定。
+HANDOFF_READY **仅用于跨 actor**：表示上一写入者已停止、材料可领取，不表示接收者已启动；`next_actor == current_actor` 时不得设置 HANDOFF_READY 来“交给自己”。只有接收者实际核查并开始才进入对应工作状态。WORKER_DONE 只表示施工方声明其 Handoff 范围交付；由 Codex 复核。审阅 PASS 不等于平台批准，不等于已合并。MERGED 依据真实远端结果，不能由一条提示词设定。
 
 ## 6. 可复用的一句话与最小交接包
 
-Codex 每次向施工者交接必须输出三条短句：执行本次交接、收尾汇报、阻碍汇报。内部长要求已在仓库规则和 Issue 中，不再塞进短句。实际编号/链接必须已填好；不让用户重新规划分工或猜交给谁。
+Codex 每次**跨 actor 向施工者交接**必须输出三条短句：执行本次交接、收尾汇报、阻碍汇报。若 next_actor 仍是当前 Codex，则直接继续，禁止产生这三句或 self-handoff。内部长要求已在仓库规则和 Issue 中，不再塞进短句。实际编号/链接必须已填好；不让用户重新规划分工或猜交给谁。
 
 交接评论最少包含：Issue/Goal、交接标识、角色、Scope/Out of Scope/AC、分支与工作区、base/head SHA、dirty 文件清单与归属、已完成和剩余工作、真实测试/失败证据、失败轮次、下一动作、停止条件。只记录可获知的事实；没有 PR/提交就明确“尚无”，不要伪造。
 
@@ -95,7 +97,7 @@ Codex 每次向施工者交接必须输出三条短句：执行本次交接、�
 
 修 bug 尽可能补回归；UI 行为要有适用交互证据，数据/兼容行为不能仅用 mock 代替实际集成证明。基线已有失败单独记录，不能据此忽略新增失败。禁止删测试、削弱断言、静默 skip 或改门禁使自己通过。
 
-阶段交付后再 push；精确暂存，不 `git add .` / `-A`。PR 可先为 Draft，施工者不凭自己完成就宣布工程通过。验证不足先列缺口，Codex 接手安排补证据；当前会话不能取得 CI 最终结果就 WAITING_CI，给恢复短句后停止，不循环忙等。
+阶段交付后再 push；精确暂存，不 `git add .` / `-A`。PR 可先为 Draft，施工者不凭自己完成就宣布工程通过。验证不足先列缺口，Codex 接手安排补证据；当前会话不能取得 CI 最终结果且后续确实依赖该结果时才 WAITING_CI，给恢复短句后停止，不循环忙等；若仍有不依赖 CI、且属于当前主体授权范围的安全工作，应先继续完成这些工作，不能把“有 CI 在跑”当作提前结束理由。
 
 合并前必须核对最新 head 和适用基线，不能用旧 SHA 结果。base 更新、merge queue 或集成提交改变结果时，需要相应集成证据。没有权限读结果就是缺证据。
 
@@ -107,7 +109,7 @@ Codex 每次向施工者交接必须输出三条短句：执行本次交接、�
 
 每条 finding 有 ID、定位/复现、影响、严重性与阻塞性。P0/P1、违反 AC、必要证据缺失、可复现正确性/安全/兼容 P2 阻塞；P3 通常建议。结论仅 PASS / CHANGES_REQUIRED / INSUFFICIENT_EVIDENCE，不得“批准但必须修复”。拒绝 finding 要给反证，由独立 reviewer 核实，作者不能自行消除阻塞项。
 
-reviewer 写回 PR 并给返回负责该 Issue 的 Codex 的短句。Codex 做路由：明确施工整改可转 zcode/pi，根因/架构/高不确定性问题自己接手；重新手工转交。每个新提交都需更新证据和独立增量复核。
+reviewer 写回 PR 并给返回负责该 Issue 的 Codex 的短句。Codex 做路由：若根因/架构/高不确定性整改应由当前 Codex 处理，就**直接在当前会话接手并继续**；只有明确施工整改确实需要换到 zcode/pi 时才重新手工转交。每个新提交都需更新证据和独立增量复核；进入 reviewer 又是新的跨角色边界。
 
 ## 10. 有限试错与阻碍
 
