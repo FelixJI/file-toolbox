@@ -4,6 +4,8 @@ from collections.abc import Callable
 
 import pytest
 
+from file_toolbox.updater.coordinator import UpdateRequest
+
 pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtCore import Qt
@@ -31,7 +33,11 @@ class ResultCoordinator:
         return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="1.0.0")
 
     def download_and_apply(
-        self, progress: Callable[[int], None] | None = None
+        self,
+        progress: Callable[[int], None] | None = None,
+        *,
+        request: UpdateRequest | None = None,
+        before_apply: Callable[[], None] | None = None,
     ) -> UpdateApplyResult:
         if progress is not None:
             progress(40)
@@ -49,9 +55,9 @@ def test_download_and_apply_success_emits_progress_and_result(app):
     worker = UpdateWorker(ResultCoordinator(result))
     progress: list[int] = []
     applied: list[UpdateApplyResult] = []
-    worker.progress.connect(progress.append, _DIRECT)
-    worker.applied.connect(applied.append, _DIRECT)
-    worker.do_download_and_apply()
+    worker.progress.connect(lambda req, value: progress.append(value), _DIRECT)
+    worker.applied.connect(lambda req, result: applied.append(result), _DIRECT)
+    worker.do_download_and_apply(worker.start_download())
     assert progress == [40, 100]
     assert applied == [result]
 
@@ -60,21 +66,25 @@ def test_download_and_apply_failure_is_forwarded_as_project_result(app):
     result = UpdateApplyResult(UpdateApplyStatus.FAILED, "完整性校验失败")
     worker = UpdateWorker(ResultCoordinator(result))
     applied: list[UpdateApplyResult] = []
-    worker.applied.connect(applied.append, _DIRECT)
-    worker.do_download_and_apply()
+    worker.applied.connect(lambda req, result: applied.append(result), _DIRECT)
+    worker.do_download_and_apply(worker.start_download())
     assert applied == [result]
 
 
 def test_unexpected_coordinator_exception_is_mapped_without_leaking(app):
     class BrokenCoordinator(ResultCoordinator):
         def download_and_apply(
-            self, progress: Callable[[int], None] | None = None
+            self,
+            progress: Callable[[int], None] | None = None,
+            *,
+            request: UpdateRequest | None = None,
+            before_apply: Callable[[], None] | None = None,
         ) -> UpdateApplyResult:
             raise ConnectionError("网络断开")
 
     worker = UpdateWorker(BrokenCoordinator(UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)))
     applied: list[UpdateApplyResult] = []
-    worker.applied.connect(applied.append, _DIRECT)
-    worker.do_download_and_apply()
+    worker.applied.connect(lambda req, result: applied.append(result), _DIRECT)
+    worker.do_download_and_apply(worker.start_download())
     assert applied[0].status is UpdateApplyStatus.FAILED
     assert "网络断开" in applied[0].message

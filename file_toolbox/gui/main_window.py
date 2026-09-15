@@ -28,7 +28,7 @@ from file_toolbox.common.runtime import is_packaged_runtime
 from file_toolbox.gui.freeze_watchdog import FreezeWatchdog
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
 from file_toolbox.updater import create_update_coordinator
-from file_toolbox.updater.coordinator import UpdateCoordinator
+from file_toolbox.updater.coordinator import UpdateCoordinator, UpdateRequest
 from file_toolbox.updater.models import (
     UpdateApplyResult,
     UpdateApplyStatus,
@@ -204,11 +204,12 @@ class MainWindow(QMainWindow):
         self._update_worker = UpdateWorker(coordinator or create_update_coordinator())
         self._update_worker.ready.connect(self._on_update_ready)
         self._update_worker.progress.connect(self._on_update_progress)
+        self._update_worker.applying.connect(self._on_update_applying)
         self._update_worker.applied.connect(self._on_update_applied)
         self._update_banner.clicked.connect(self._start_download)
         self._pending_update: UpdateCheckResult | None = None
         self._update_dialog: QProgressDialog | None = None
-        self._download_cancelled = False  # 用户取消下载后抑制后续 verified/failed 弹窗
+        self._download_request: UpdateRequest | None = None
 
         self._update_worker.checked.connect(self._on_update_checked)
         self._manual_check_pending = False  # 区分手动 vs 自动检查(关于页懒构造后连接)
@@ -327,7 +328,7 @@ class MainWindow(QMainWindow):
 
     def _start_download(self) -> None:
         """用户点击 banner/关于页"立即更新" → 弹进度对话框 + 向 worker 投递下载请求。"""
-        if self._pending_update is None:
+        if self._pending_update is None or self._download_request is not None:
             return
         update = self._pending_update
         prompt = f"将下载并应用 v{update.version}，应用会在准备完成后退出并重启。是否继续？"
@@ -342,7 +343,10 @@ class MainWindow(QMainWindow):
         ):
             return
         self._update_banner.hide()
-        self._download_cancelled = False  # 新一轮下载,清除取消标记
+        request = self._update_worker.start_download()
+        if request is None:
+            return
+        self._download_request = request
         label = f"正在下载 v{update.version}…"
         dlg = QProgressDialog(label, "取消", 0, 100, self)
         dlg.setWindowTitle(f"更新到 v{update.version}")
@@ -357,18 +361,29 @@ class MainWindow(QMainWindow):
         self._update_dialog = dlg
         dlg.show()
         self._set_about_downloading(True)
-        QMetaObject.invokeMethod(
-            self._update_worker,
-            "do_download_and_apply",
-            Qt.ConnectionType.QueuedConnection,
-        )
 
     def _on_download_cancel(self) -> None:
-        """用户取消下载:抑制后续 verified/failed 弹窗(下载本身无法中断,任其完成)。"""
-        self._download_cancelled = True
-        self._update_worker.cancel_download()
-        self._update_dialog = None
-        self._restore_retry_affordances()
+        """只有提交门接受取消才显示取消;等待该请求结束后开放重试。"""
+        request = self._download_request
+        if request is None:
+            return
+        if self._update_worker.cancel_download(request):
+            self.statusBar().showMessage("正在取消更新，请等待当前请求结束…")
+            self._update_dialog = None
+        elif request.applying:
+            self._on_update_applying(request)
+            if self._update_dialog is not None:
+                self._update_dialog.show()
+        else:
+            self.statusBar().showMessage("更新请求已结束，正在确认结果…")
+
+    def _on_update_applying(self, request: UpdateRequest) -> None:
+        if request is not self._download_request:
+            return
+        self.statusBar().showMessage("正在应用更新，已无法取消；完成后将重启。")
+        if self._update_dialog is not None:
+            self._update_dialog.setCancelButton(None)
+            self._update_dialog.setLabelText("正在应用更新，已无法取消；完成后将重启。")
 
     def _restore_retry_affordances(self) -> None:
         """下载取消/失败后恢复重试入口(状态栏横幅 + 关于页按钮)。"""
@@ -382,20 +397,35 @@ class MainWindow(QMainWindow):
         if about is not None:
             about.set_update_downloading(downloading)
 
-    def _on_update_progress(self, value: int) -> None:
-        if self._update_dialog is None:
+    def _on_update_progress(self, request: UpdateRequest, value: int) -> None:
+        if request is not self._download_request or self._update_dialog is None:
             return
-        self._update_dialog.setValue(max(0, min(100, value)))
-        if value >= 100:
-            self._update_dialog.setLabelText("正在校验并准备更新…")
+        dialog = self._update_dialog
+        dialog.setValue(max(0, min(100, value)))
+        if request is self._download_request and dialog is self._update_dialog and value >= 100:
+            dialog.setLabelText("正在校验并准备更新…")
 
-    def _on_update_applied(self, result: UpdateApplyResult) -> None:
-        """处理 Coordinator 的 apply 结果。"""
+    def _on_update_applied(self, request: UpdateRequest, result: UpdateApplyResult) -> None:
+        """只消费当前请求结果,旧结果不能关闭新请求或安排重复退出。"""
+        if request is not self._download_request:
+            return
+        self._download_request = None
         if self._update_dialog is not None:
             self._update_dialog.close()
             self._update_dialog = None
-        if self._download_cancelled or result.status is UpdateApplyStatus.CANCELLED:
+        if result.status is UpdateApplyStatus.CANCELLED:
+            self.statusBar().showMessage("更新已取消。")
             self._restore_retry_affordances()
+            return
+        if result.status is UpdateApplyStatus.FAILED and request.applying:
+            self._download_request = request
+            self.statusBar().showMessage("更新应用结果不确定，请检查更新状态后重新启动应用。")
+            QMessageBox.warning(
+                self,
+                "更新应用结果不确定",
+                f"{result.message}\n\n已进入应用阶段，无法确认更新器是否接管；"
+                "请检查更新状态后重新启动应用，不要重复提交更新。",
+            )
             return
         if result.status is UpdateApplyStatus.FAILED:
             QMessageBox.warning(

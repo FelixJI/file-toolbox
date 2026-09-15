@@ -17,6 +17,8 @@ from collections.abc import Callable
 
 import pytest
 
+from file_toolbox.updater.coordinator import UpdateRequest
+
 pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtWidgets import QApplication
@@ -43,7 +45,11 @@ class ThreadRecordingCoordinator:
         return UpdateCheckResult(UpdateCheckStatus.LATEST)
 
     def download_and_apply(
-        self, progress: Callable[[int], None] | None = None
+        self,
+        progress: Callable[[int], None] | None = None,
+        *,
+        request: UpdateRequest | None = None,
+        before_apply: Callable[[], None] | None = None,
     ) -> UpdateApplyResult:
         return UpdateApplyResult(UpdateApplyStatus.FAILED, "unused")
 
