@@ -3,6 +3,8 @@
 import os
 from collections.abc import Callable
 
+from file_toolbox.updater.coordinator import UpdateRequest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
@@ -41,7 +43,11 @@ class FakeCoordinator:
         return self.check_result
 
     def download_and_apply(
-        self, progress: Callable[[int], None] | None = None
+        self,
+        progress: Callable[[int], None] | None = None,
+        *,
+        request: UpdateRequest | None = None,
+        before_apply: Callable[[], None] | None = None,
     ) -> UpdateApplyResult:
         if progress is not None:
             progress(50)
@@ -136,9 +142,9 @@ class TestUpdateWorker:
         worker = UpdateWorker(FakeCoordinator(_available()))
         progress: list[int] = []
         applied: list[UpdateApplyResult] = []
-        worker.progress.connect(progress.append, self._DIRECT)
-        worker.applied.connect(applied.append, self._DIRECT)
-        worker.do_download_and_apply()
+        worker.progress.connect(lambda req, value: progress.append(value), self._DIRECT)
+        worker.applied.connect(lambda req, result: applied.append(result), self._DIRECT)
+        worker.do_download_and_apply(worker.start_download())
         assert progress == [50, 100]
         assert applied == [UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)]
 
@@ -191,7 +197,10 @@ class TestMainWindowIntegration:
         )
         quit_calls: list[int] = []
         monkeypatch.setattr(QApplication, "quit", lambda: quit_calls.append(1))
-        win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.CANCELLED))
+        win._download_request = UpdateRequest()
+        win._on_update_applied(
+            win._download_request, UpdateApplyResult(UpdateApplyStatus.CANCELLED)
+        )
         assert quit_calls == []
 
     def test_failed_apply_warns_and_keeps_current_process(self, app, monkeypatch):
@@ -202,5 +211,8 @@ class TestMainWindowIntegration:
             "warning",
             lambda _parent, _title, message: warnings.append(message),
         )
-        win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.FAILED, "损坏包"))
+        win._download_request = UpdateRequest()
+        win._on_update_applied(
+            win._download_request, UpdateApplyResult(UpdateApplyStatus.FAILED, "损坏包")
+        )
         assert "原程序未受影响" in warnings[0]

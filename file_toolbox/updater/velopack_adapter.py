@@ -10,7 +10,7 @@ from typing import Protocol, cast
 
 import velopack
 
-from file_toolbox.updater.coordinator import UpdateCancelled
+from file_toolbox.updater.coordinator import UpdateCancelled, UpdateRequest
 from file_toolbox.updater.models import (
     UpdateApplyResult,
     UpdateApplyStatus,
@@ -156,18 +156,35 @@ class VelopackUpdateCoordinator:
         return self._all_failed()
 
     def download_and_apply(
-        self, progress: Callable[[int], None] | None = None
+        self,
+        progress: Callable[[int], None] | None = None,
+        *,
+        request: UpdateRequest | None = None,
+        before_apply: Callable[[], None] | None = None,
     ) -> UpdateApplyResult:
         """下载并交由 Velopack 安排 apply/restart。"""
 
         if self._selected_manager is None or self._selected_update is None:
             return UpdateApplyResult(UpdateApplyStatus.FAILED, "请先检查更新")
+        request = request or UpdateRequest()
+        manager, update = self._selected_manager, self._selected_update
+
+        def report_progress(value: int) -> None:
+            request.check_cancelled()
+            if progress is not None:
+                progress(value)
+
         try:
+            request.check_cancelled()
             with forward_proxy_environment(self._forward_proxy):
-                self._selected_manager.download_updates(self._selected_update, progress)
-                self._selected_manager.wait_exit_then_apply_updates(
-                    self._selected_update, silent=False, restart=True
-                )
+                manager.download_updates(update, report_progress)
+                request.begin_apply()
+                # 进入提交阶段后消费候选,禁止无新检查的重复 apply。
+                self._selected_manager = None
+                self._selected_update = None
+                if before_apply is not None:
+                    before_apply()
+                manager.wait_exit_then_apply_updates(update, silent=False, restart=True)
         except UpdateCancelled:
             return UpdateApplyResult(UpdateApplyStatus.CANCELLED)
         except Exception as error:

@@ -3,7 +3,7 @@
 线程模型(QThread 事件循环):
   - 检查:主窗口 start() → run() → exec() 启动事件循环;
          主窗口用 invokeMethod(do_check, QueuedConnection) 投递。
-  - 下载/应用:主窗口用 invokeMethod(do_download_and_apply, QueuedConnection) 投递。
+  - 下载/应用:主窗口调用 start_download(),先创建请求再经内部 queued signal 投递。
   两者都在 worker 线程执行,不阻塞 UI。结果模型和 progress 跨线程经信号回主线程。
 
 亲和性注意:queued 方法投递按"接收者对象的亲和性线程"派发,而 QThread 对象
@@ -15,12 +15,12 @@ parent(带 parent 的 QObject 禁止跨线程移动);否则投递的 do_check �
 from __future__ import annotations
 
 import logging
-from threading import Event
+from threading import Lock
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import QPushButton, QWidget
 
-from file_toolbox.updater.coordinator import UpdateCancelled, UpdateCoordinator
+from file_toolbox.updater.coordinator import UpdateCancelled, UpdateCoordinator, UpdateRequest
 from file_toolbox.updater.models import (
     UpdateApplyResult,
     UpdateApplyStatus,
@@ -62,30 +62,36 @@ class UpdateWorker(QThread):
     信号(均跨线程安全投递回主线程):
       ready(UpdateCheckResult)    — 检查到新版本
       checked(UpdateCheckResult)  — 每次检查的可观察结果
-      progress(int)               — SDK 计算的下载百分比
-      applied(UpdateApplyResult)  — apply 安排结果
+      progress(request, int)      — 该请求的下载百分比
+      applying(request)           — 该请求已跨过不可取消边界
+      applied(request, result)    — 该请求的最终结果
 
     用法(主线程):
       worker.start()                                  # 启动线程 + 事件循环
       QMetaObject.invokeMethod(worker, "do_check",
                                Qt.ConnectionType.QueuedConnection)
       # 用户点击后:
-      QMetaObject.invokeMethod(worker, "do_download_and_apply",
-                               Qt.ConnectionType.QueuedConnection)
+      request = worker.start_download()              # 排队前即保留取消状态
 
     生命周期:不得设 parent(亲和性约束,见模块 docstring);由 MainWindow 属性
     引用保活,closeEvent 中 quit/wait 收尾。
     """
 
     ready = Signal(object)  # UpdateCheckResult
-    progress = Signal(int)
-    applied = Signal(object)  # UpdateApplyResult
+    progress = Signal(object, int)  # request, percent
+    applying = Signal(object)  # request 已跨过不可取消提交边界
+    applied = Signal(object, object)  # request, UpdateApplyResult
+    _download_requested = Signal(object)
     checked = Signal(object)  # UpdateCheckResult
 
     def __init__(self, coordinator: UpdateCoordinator) -> None:
         super().__init__()
         self._coordinator = coordinator
-        self._cancel_requested = Event()
+        self._request_lock = Lock()
+        self._active_request: UpdateRequest | None = None
+        self._download_requested.connect(
+            self.do_download_and_apply, Qt.ConnectionType.QueuedConnection
+        )
         # queued 投递按接收者亲和性派发;移入自身线程后 do_check 才在 worker 执行。
         self.moveToThread(self)
 
@@ -113,24 +119,47 @@ class UpdateWorker(QThread):
         if result.status is UpdateCheckStatus.AVAILABLE:
             self.ready.emit(result)
 
-    @Slot()
-    def do_download_and_apply(self) -> None:
-        """由 Coordinator 下载并安排 apply/restart。"""
-        self._cancel_requested.clear()
+    def start_download(self) -> UpdateRequest | None:
+        """在调用线程保留请求后再投递;运行中与已安排 apply 时拒绝重复请求。"""
+        with self._request_lock:
+            if self._active_request is not None:
+                return None
+            request = UpdateRequest()
+            self._active_request = request
+        self._download_requested.emit(request)
+        return request
+
+    @Slot(object)
+    def do_download_and_apply(self, request: UpdateRequest) -> None:
+        """处理对应请求,排队时收到的取消保留到执行。"""
+        with self._request_lock:
+            if request is not self._active_request or not request.claim():
+                return
 
         def report_progress(value: int) -> None:
-            if self._cancel_requested.is_set():
-                raise UpdateCancelled
-            self.progress.emit(value)
+            request.check_cancelled()
+            self.progress.emit(request, value)
 
         try:
-            result = self._coordinator.download_and_apply(progress=report_progress)
+            request.check_cancelled()
+            result = self._coordinator.download_and_apply(
+                progress=report_progress,
+                request=request,
+                before_apply=lambda: self.applying.emit(request),
+            )
+        except UpdateCancelled:
+            result = UpdateApplyResult(UpdateApplyStatus.CANCELLED)
         except Exception as error:
             _logger.exception("更新下载或应用出现未知异常")
             result = UpdateApplyResult(UpdateApplyStatus.FAILED, f"更新失败: {error}")
-        self.applied.emit(result)
+        if request.finish():
+            result = UpdateApplyResult(UpdateApplyStatus.CANCELLED)
+        with self._request_lock:
+            if not request.applying and result.status is not UpdateApplyStatus.APPLY_STARTED:
+                self._active_request = None
+        self.applied.emit(request, result)
 
-    def cancel_download(self) -> None:
-        """线程安全地请求在下一个 SDK progress callback 中止下载。"""
-
-        self._cancel_requested.set()
+    def cancel_download(self, request: UpdateRequest) -> bool:
+        """直接线程安全调用;返回是否在 apply 提交前接受取消。"""
+        with self._request_lock:
+            return request is self._active_request and request.cancel()

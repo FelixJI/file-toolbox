@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from file_toolbox.updater.coordinator import UpdateRequest
+
 pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtCore import QMetaObject
@@ -28,7 +30,11 @@ class LatestCoordinator:
         return UpdateCheckResult(UpdateCheckStatus.LATEST)
 
     def download_and_apply(
-        self, progress: Callable[[int], None] | None = None
+        self,
+        progress: Callable[[int], None] | None = None,
+        *,
+        request: UpdateRequest | None = None,
+        before_apply: Callable[[], None] | None = None,
     ) -> UpdateApplyResult:
         return UpdateApplyResult(UpdateApplyStatus.FAILED, "no update")
 
@@ -161,7 +167,8 @@ def test_on_check_requested_starts_worker(win, monkeypatch):
 
 def test_progress_clamps_to_percentage(win):
     win._update_dialog = MagicMock()
-    win._on_update_progress(140)
+    win._download_request = UpdateRequest()
+    win._on_update_progress(win._download_request, 140)
     win._update_dialog.setValue.assert_called_with(100)
     win._update_dialog.setLabelText.assert_called_with("正在校验并准备更新…")
 
@@ -169,10 +176,11 @@ def test_progress_clamps_to_percentage(win):
 def test_cancel_requests_worker_stop(win):
     win._update_worker = MagicMock()
     win._update_dialog = MagicMock()
+    win._download_request = UpdateRequest()
     win._on_download_cancel()
-    assert win._download_cancelled is True
+    assert win._download_request is not None
     assert win._update_dialog is None
-    win._update_worker.cancel_download.assert_called_once()
+    win._update_worker.cancel_download.assert_called_once_with(win._download_request)
 
 
 def test_apply_started_quits_after_sdk_schedules_update(win, monkeypatch):
@@ -199,7 +207,10 @@ def test_apply_started_quits_after_sdk_schedules_update(win, monkeypatch):
         lambda key, value: settings_calls.append((key, value)),
     )
     win._update_worker = RunningWorkerStub()  # type: ignore[assignment]
-    win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED))
+    win._download_request = UpdateRequest()
+    win._on_update_applied(
+        win._download_request, UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
+    )
     assert quit_calls == [1]
     assert worker_calls == ["quit", ("wait", 2000)]
     assert [key for key, _value in settings_calls] == ["window/geometry"]
@@ -214,7 +225,10 @@ def test_apply_failure_warns_without_quitting(win, monkeypatch):
         lambda _parent, _title, message: warned.append(message),
     )
     monkeypatch.setattr(QApplication, "quit", lambda: quit_calls.append(1))
-    win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.FAILED, "network"))
+    win._download_request = UpdateRequest()
+    win._on_update_applied(
+        win._download_request, UpdateApplyResult(UpdateApplyStatus.FAILED, "network")
+    )
     assert warned and quit_calls == []
 
 
@@ -484,10 +498,9 @@ def test_start_download_confirmed_shows_dialog_and_dispatches(win, monkeypatch):
     try:
         win._start_download()
 
-        assert _FakeMetaObject.invoke_calls
-        assert _FakeMetaObject.invoke_calls[0][1] == "do_download_and_apply"
+        assert win._update_worker._active_request is win._download_request
         assert win._update_dialog is not None
-        assert win._download_cancelled is False
+        assert win._download_request is not None
         # 到 100% 后还要停留显示"正在校验并准备更新…",必须禁用 Qt 的
         # autoClose/autoReset(默认会在 setValue(100) 时隐藏对话框并重置数值)
         assert win._update_dialog.autoClose() is False
@@ -526,18 +539,21 @@ def test_about_tab_lazy_construction_receives_pending_update(win):
     assert "新功能" in about._notes_view.toPlainText()
 
 
-def test_download_cancel_restores_retry_affordances(win):
-    """取消下载后:状态栏横幅恢复显示(可重试),关于页按钮恢复可用。"""
+def test_download_cancel_restores_retry_only_after_result(win):
+    """已接受取消后等待请求结束,不能立刻排入第二轮下载。"""
     win._pending_update = UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9")
     about = _materialize_about(win)
     win._update_banner.hide()
     win._update_dialog = MagicMock()
     win._update_worker = MagicMock()
 
+    win._download_request = UpdateRequest()
     win._on_download_cancel()
 
-    assert win._download_cancelled is True
+    assert win._download_request is not None
     assert win._update_dialog is None
+    assert win._update_banner.isHidden() is True
+    win._on_update_applied(win._download_request, UpdateApplyResult(UpdateApplyStatus.CANCELLED))
     assert win._update_banner.isHidden() is False
     assert about.btn_download_update.isEnabled() is True
     assert about.btn_check_update.isEnabled() is True
@@ -549,7 +565,8 @@ def test_apply_cancelled_result_neither_warns_nor_quits(win, monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *_a, message="": warned.append(message))
     monkeypatch.setattr(QApplication, "quit", lambda: quits.append(1))
 
-    win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.CANCELLED))
+    win._download_request = UpdateRequest()
+    win._on_update_applied(win._download_request, UpdateApplyResult(UpdateApplyStatus.CANCELLED))
 
     assert warned == [] and quits == []
 
@@ -568,7 +585,10 @@ def test_shutdown_survives_update_worker_close_failure(win, monkeypatch):
     monkeypatch.setattr("file_toolbox.common.settings.set", lambda key, value: None)
     win._update_worker = BrokenWorkerStub()  # type: ignore[assignment]
 
-    win._on_update_applied(UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED))
+    win._download_request = UpdateRequest()
+    win._on_update_applied(
+        win._download_request, UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
+    )
 
     assert quits == [1]
 
@@ -576,14 +596,16 @@ def test_shutdown_survives_update_worker_close_failure(win, monkeypatch):
 def test_update_progress_without_dialog_is_noop(win):
     win._update_dialog = None
 
-    win._on_update_progress(80)  # 不应抛异常
+    win._download_request = UpdateRequest()
+    win._on_update_progress(win._download_request, 80)  # 不应抛异常
 
 
 def test_update_progress_partial_value_keeps_download_label(win):
     dialog = MagicMock()
     win._update_dialog = dialog
 
-    win._on_update_progress(45)
+    win._download_request = UpdateRequest()
+    win._on_update_progress(win._download_request, 45)
 
     dialog.setValue.assert_called_once_with(45)
     dialog.setLabelText.assert_not_called()
