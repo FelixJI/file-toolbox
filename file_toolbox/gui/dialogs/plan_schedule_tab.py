@@ -98,7 +98,9 @@ class PlanScheduleTab(QWidget):
         return Path(".")
 
     def _options(self) -> Any:
-        return self._controller.build_options(self.ui.spin_year.value())
+        return self._controller.build_options(
+            self.ui.spin_year.value(), self.ui.cmb_cell.currentIndex()
+        )
 
     # --- 生成 ---
 

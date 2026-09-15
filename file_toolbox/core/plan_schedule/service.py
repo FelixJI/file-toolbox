@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.core.plan_schedule.constants import (
+    CELL_NAME,
     DATE_FORMATS_FULL,
     DATE_FORMATS_NO_YEAR,
     DAY_COLUMN_WIDTH,
@@ -28,6 +29,7 @@ from file_toolbox.core.plan_schedule.constants import (
     MAX_HEADER_SCAN_ROWS,
     NAME_COLUMN_WIDTH,
     NAME_HEADERS,
+    NAME_MODE_DAY_WIDTH_MAX,
     SHEET_NAME,
     START_HEADERS,
     SUPPORTED_SUFFIXES,
@@ -238,7 +240,7 @@ class PlanScheduleService(LoggableMixin):
         assert ws is not None  # 新建工作簿必有默认表
         ws.title = SHEET_NAME
         months = self.plan(items)
-        self._render(ws, months, progress_callback)
+        self._render(ws, months, progress_callback, options.cell_mode)
 
         output_path = self._resolve_output_path(self._normalize_output(output))
         try:
@@ -363,9 +365,17 @@ class PlanScheduleService(LoggableMixin):
     # ==================== 内部实现:输出 ====================
 
     def _render(
-        self, ws: Worksheet, months: list[MonthPlan], progress: ProgressCallback | None
+        self,
+        ws: Worksheet,
+        months: list[MonthPlan],
+        progress: ProgressCallback | None,
+        cell_mode: str,
     ) -> None:
-        """把排布月块渲染进工作表:样式先行、再写值、最后合并 MONTH 行。"""
+        """把排布月块渲染进工作表:样式先行、再写值、最后合并 MONTH 行。
+
+        cell_mode 决定活动日期格内容:index=项点内第几天,name=项点名称
+        (name 模式下日期列按最长名称自适应加宽,不超过 NAME_MODE_DAY_WIDTH_MAX)。
+        """
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
 
@@ -407,7 +417,9 @@ class PlanScheduleService(LoggableMixin):
                     cell.fill = weekend_fill
                     cell.font = weekend_font
 
-            # 项点行:活动日写"项点内第几天"并循环填色;周末空格灰底
+            # 项点行:活动日写"项点内第几天"或项点名称(按 cell_mode)并循环填色;
+            # 周末空格灰底
+            name_mode = cell_mode == CELL_NAME
             for i, (item, cells) in enumerate(mp.items):
                 r = date_row + 1 + i
                 ws.cell(row=r, column=1, value=item.name)
@@ -416,7 +428,7 @@ class PlanScheduleService(LoggableMixin):
                 for d in range(1, mp.days + 1):
                     cell = ws.cell(row=r, column=1 + d)
                     if d in day_index:
-                        cell.value = day_index[d]
+                        cell.value = item.name if name_mode else day_index[d]
                         cell.fill = fill
                     elif d in mp.weekends:
                         cell.fill = weekend_fill
@@ -438,8 +450,13 @@ class PlanScheduleService(LoggableMixin):
             row = parallel_row + 1
 
         ws.column_dimensions["A"].width = NAME_COLUMN_WIDTH
+        day_width = DAY_COLUMN_WIDTH
+        if cell_mode == CELL_NAME:
+            # 名称模式:加宽日期列放下最长项点名(CJK 每字约 2 单位),封顶防 31 列过宽
+            max_len = max((len(item.name) for mp in months for item, _ in mp.items), default=0)
+            day_width = min(2.0 * max_len + 1.0, NAME_MODE_DAY_WIDTH_MAX)
         for c in range(2, 33):  # B..AF 覆盖最长 31 天
-            ws.column_dimensions[get_column_letter(c)].width = DAY_COLUMN_WIDTH
+            ws.column_dimensions[get_column_letter(c)].width = day_width
 
     def _normalize_output(self, output: Path) -> Path:
         """输出统一为 .xlsx。"""

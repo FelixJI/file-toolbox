@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from file_toolbox.core.plan_schedule.constants import CELL_INDEX
+
 
 @dataclass(frozen=True)
 class PlanItem:
@@ -33,6 +35,7 @@ class ScheduleOptions:
     """生成选项(与 CLI 参数 / GUI 控件一一对应)。"""
 
     default_year: int | None = None  # 日期串缺年份时使用的年份;None 表示当前年份
+    cell_mode: str = CELL_INDEX  # 日期格内容:index=第几天 / name=项点名称
 
 
 @dataclass(frozen=True)

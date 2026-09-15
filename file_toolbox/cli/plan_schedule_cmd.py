@@ -6,7 +6,9 @@ import typer
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.plan_schedule import (
+    CELL_INDEX,
     DEFAULT_OUTPUT_NAME,
+    SUPPORTED_CELL_MODES,
     SUPPORTED_SUFFIXES,
     InvalidRow,
     PlanScheduleService,
@@ -24,9 +26,14 @@ def plan_schedule(
     year: int | None = typer.Option(
         None, "--year", help="日期缺年份时使用的年份(如 9-17;默认取当前年份)"
     ),
+    cell: str = typer.Option(
+        CELL_INDEX,
+        "--cell",
+        help="日期格内容:index=项点内第几天(默认),name=项点名称(如 第x列/批次)",
+    ),
     yes: bool = typer.Option(False, "--yes", help="跳过预览直接生成(默认仅预览)"),
 ) -> None:
-    """按项点起止日期生成按月排布表(标记周末、项点内第几天、逐日并行数)。"""
+    """按项点起止日期生成按月排布表(标记周末、日期格写第几天或项点名称、逐日并行数)。"""
     if input_path is None:
         typer.secho("错误:缺少项点清单文件参数", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -41,11 +48,18 @@ def plan_schedule(
             err=True,
         )
         raise typer.Exit(1)
+    if cell not in SUPPORTED_CELL_MODES:
+        typer.secho(
+            f"错误:无效的 --cell: {cell}(可选: {'/'.join(SUPPORTED_CELL_MODES)})",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
 
     if output is None:
         output = input_path.parent / DEFAULT_OUTPUT_NAME
 
-    options = ScheduleOptions(default_year=year)
+    options = ScheduleOptions(default_year=year, cell_mode=cell)
     svc = PlanScheduleService(history_store=JsonHistoryStore())
     try:
         items, invalid = svc.parse(input_path, options)

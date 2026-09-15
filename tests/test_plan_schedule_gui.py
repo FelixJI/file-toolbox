@@ -26,7 +26,10 @@ from file_toolbox.gui.controllers.plan_schedule_controller import (
     PlanScheduleController,  # noqa: E402
 )
 from file_toolbox.gui.dialogs.plan_schedule_tab import PlanScheduleTab  # noqa: E402
-from file_toolbox.gui.generated.ui_plan_schedule_dialog import HEADERS  # noqa: E402
+from file_toolbox.gui.generated.ui_plan_schedule_dialog import (  # noqa: E402
+    CELL_LABELS,
+    HEADERS,
+)
 
 
 @pytest.fixture(scope="module")
@@ -56,19 +59,30 @@ def test_tab_has_expected_table_headers(tab):
 
 
 def test_tab_starts_ready(tab):
-    """新建 Tab 无输入、无结果行、状态就绪、年份默认当前。"""
+    """新建 Tab 无输入、无结果行、状态就绪、年份默认当前、格子内容默认第几天。"""
     assert tab.ui.edit_input.text() == ""
     assert tab.ui.table.rowCount() == 0
     assert tab.ui.lbl_status.text() == "就绪"
     assert tab.ui.spin_year.value() == date.today().year
+    assert tab.ui.cmb_cell.currentIndex() == 0
+    assert [tab.ui.cmb_cell.itemText(i) for i in range(tab.ui.cmb_cell.count())] == CELL_LABELS
 
 
 # ==================== controller(无 Qt) ====================
 
 
 def test_controller_build_options():
-    assert PlanScheduleController.build_options(None) == ScheduleOptions(default_year=None)
-    assert PlanScheduleController.build_options(2027) == ScheduleOptions(default_year=2027)
+    from file_toolbox.core.plan_schedule import CELL_INDEX, CELL_NAME
+
+    assert PlanScheduleController.build_options(None) == ScheduleOptions(
+        default_year=None, cell_mode=CELL_INDEX
+    )
+    assert PlanScheduleController.build_options(2027, 1) == ScheduleOptions(
+        default_year=2027, cell_mode=CELL_NAME
+    )
+    # 越界索引夹回有效范围(防御)
+    assert PlanScheduleController.build_options(2027, -3).cell_mode == CELL_INDEX
+    assert PlanScheduleController.build_options(2027, 99).cell_mode == CELL_NAME
 
 
 def test_controller_format_progress():
@@ -218,8 +232,13 @@ def test_resolve_outdir_chain(tab, make_xlsx, monkeypatch, tmp_path):
 
 
 def test_options_reads_controls(tab):
+    from file_toolbox.core.plan_schedule import CELL_INDEX, CELL_NAME
+
     tab.ui.spin_year.setValue(2027)
-    assert tab._options() == ScheduleOptions(default_year=2027)
+    assert tab._options() == ScheduleOptions(default_year=2027, cell_mode=CELL_INDEX)
+
+    tab.ui.cmb_cell.setCurrentIndex(1)
+    assert tab._options() == ScheduleOptions(default_year=2027, cell_mode=CELL_NAME)
 
 
 def test_populate_table_items_and_invalid(tab):

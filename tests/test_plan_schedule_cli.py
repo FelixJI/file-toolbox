@@ -165,3 +165,34 @@ def test_output_auto_numbered_when_exists(make_xlsx, tmp_path):
     assert r.exit_code == 0
     assert out.read_text(encoding="utf-8") == "precious"
     assert (tmp_path / "计划排布_1.xlsx").is_file()
+
+
+def test_execute_name_cell_mode(make_xlsx, tmp_path):
+    """--cell name:活动日期格写项点名称而非天数序号。"""
+    src = _make_input(
+        make_xlsx,
+        tmp_path,
+        [
+            ["项点名称", "起始日期", "终止日期"],
+            ["合5第8列", date(2026, 9, 17), date(2026, 9, 21)],
+        ],
+    )
+
+    r = runner.invoke(app, ["plan-schedule", str(src), "--yes", "--cell", "name"])
+
+    assert r.exit_code == 0
+    out = tmp_path / "计划排布.xlsx"
+    ws = load_workbook(out)[SHEET_NAME]
+    assert ws["R3"].value == "合5第8列"
+    assert ws["V3"].value == "合5第8列"
+
+
+def test_invalid_cell_rejected(make_xlsx, tmp_path):
+    src = _make_input(
+        make_xlsx,
+        tmp_path,
+        [["项点名称", "起始日期", "终止日期"], ["A", date(2026, 9, 17), date(2026, 9, 21)]],
+    )
+    r = runner.invoke(app, ["plan-schedule", str(src), "--yes", "--cell", "bad"])
+    assert r.exit_code == 1
+    assert "无效的 --cell" in r.output

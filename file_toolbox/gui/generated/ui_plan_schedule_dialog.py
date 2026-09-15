@@ -12,6 +12,7 @@
 ################################################################################
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -29,6 +30,9 @@ HEADERS = ["项点", "开始", "结束", "天数", "状态"]
 # 年份选择范围(日期串缺年份时补全用)
 YEAR_MIN = 2000
 YEAR_MAX = 2100
+
+# 日期格内容下拉框文案(索引 -> 常量值的映射见 controllers/plan_schedule_controller.py)
+CELL_LABELS = ["第几天(1,2,3…)", "项点名称(第x列/批次)"]
 
 
 class Ui_PlanScheduleDialog:
@@ -83,6 +87,14 @@ class Ui_PlanScheduleDialog:
         self.spin_year.setObjectName("spin_year")
         self.spin_year.setRange(YEAR_MIN, YEAR_MAX)  # 默认值由 Tab 构造时设为当前年份
         out_row.addWidget(self.spin_year)
+
+        out_row.addWidget(QLabel("格子内容:", PlanScheduleDialog))
+
+        self.cmb_cell = QComboBox(PlanScheduleDialog)
+        self.cmb_cell.setObjectName("cmb_cell")
+        self.cmb_cell.addItems(CELL_LABELS)
+        self.cmb_cell.setCurrentIndex(0)
+        out_row.addWidget(self.cmb_cell)
 
         layout.addLayout(out_row)
 

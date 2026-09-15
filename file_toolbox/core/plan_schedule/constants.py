@@ -3,6 +3,11 @@
 # 支持的输入格式(纯 openpyxl 读取,与 excel_merge 一致)
 SUPPORTED_SUFFIXES = (".xlsx", ".xlsm")
 
+# 日期格内容模式:index=项点内第几天(1,2,3…,跨月连续,默认);name=项点名称
+CELL_INDEX = "index"
+CELL_NAME = "name"
+SUPPORTED_CELL_MODES = (CELL_INDEX, CELL_NAME)
+
 # 输出文件默认名(CLI/GUI 未指定输出位置时使用;已存在时自动加序号)
 DEFAULT_OUTPUT_NAME = "计划排布.xlsx"
 
@@ -31,6 +36,8 @@ DATE_FORMATS_NO_YEAR = (("%m-%d", "-"), ("%m/%d", "/"), ("%m.%d", "."), ("%m月%
 # 项点名称列 / 日期列宽
 NAME_COLUMN_WIDTH = 14.0
 DAY_COLUMN_WIDTH = 4.5
+# name 模式下日期列按最长项点名自适应加宽,但不超过该上限(避免 31 列过宽)
+NAME_MODE_DAY_WIDTH_MAX = 16.0
 
 # 周末整列浅灰底(DATE 表头 + 项点行 + 并行数行)
 WEEKEND_FILL = "FFF2F2F2"

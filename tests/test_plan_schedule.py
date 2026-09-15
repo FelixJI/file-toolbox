@@ -17,7 +17,13 @@ from file_toolbox.core.plan_schedule import (
     ScheduleOptions,
     ScheduleResult,
 )
-from file_toolbox.core.plan_schedule.constants import ITEM_FILLS, WEEKEND_FILL
+from file_toolbox.core.plan_schedule.constants import (
+    CELL_NAME,
+    DAY_COLUMN_WIDTH,
+    ITEM_FILLS,
+    NAME_MODE_DAY_WIDTH_MAX,
+    WEEKEND_FILL,
+)
 from file_toolbox.core.plan_schedule.service import _EXCEL_SERIAL_EPOCH
 from file_toolbox.core.plan_schedule.types import InvalidRow, MonthPlan, PlanItem
 
@@ -375,6 +381,58 @@ def test_generate_marks_weekends(svc, make_xlsx, tmp_path):
     if saturday < 17:
         assert parallel_sat.fill.fgColor.rgb == WEEKEND_FILL
     assert ws.cell(row=4, column=1 + monday).fill.patternType is None
+
+
+def test_generate_name_mode_writes_item_name(svc, make_xlsx, tmp_path):
+    """cell_mode=name:活动日期格写项点名称(第x列/批次)而非天数序号。
+
+    日期列按最长名称自适应加宽(合5第8列 5 字 -> 2*5+1=11),并行数行不变。
+    """
+    src = _make_input(
+        make_xlsx,
+        [
+            ["项点名称", "起始日期", "终止日期"],
+            ["合5第8列", date(2026, 9, 17), date(2026, 9, 21)],
+            ["杭9第2列", date(2026, 9, 21), date(2026, 9, 27)],
+        ],
+    )
+    result = svc.generate(src, tmp_path / "out.xlsx", ScheduleOptions(cell_mode=CELL_NAME))
+    assert result.success
+    assert result.output is not None
+    ws = load_workbook(result.output)[SHEET_NAME]
+
+    # 每个活动日格子都写项点名称;非活动日仍为空
+    assert [ws.cell(row=3, column=c).value for c in range(18, 23)] == ["合5第8列"] * 5
+    assert [ws.cell(row=4, column=c).value for c in range(22, 29)] == ["杭9第2列"] * 7
+    assert ws.cell(row=3, column=17).value is None
+    # 并行数行不受模式影响
+    assert ws["V5"].value == 2
+    # 活动格填色保持(区分并行项点)
+    assert ws["R3"].fill.fgColor.rgb == ITEM_FILLS[0]
+    # 日期列宽自适应:最长名称 5 字 -> 11.0
+    assert ws.column_dimensions["B"].width == 11.0
+
+
+def test_generate_name_mode_width_capped(svc, make_xlsx, tmp_path):
+    """name 模式列宽封顶:超长名称不超过 NAME_MODE_DAY_WIDTH_MAX。"""
+    long_name = "很长很长的项点名称示例"
+    src = _make_input(
+        make_xlsx,
+        [["项点名称", "起始日期", "终止日期"], [long_name, date(2026, 9, 17), date(2026, 9, 21)]],
+    )
+    result = svc.generate(src, tmp_path / "o.xlsx", ScheduleOptions(cell_mode=CELL_NAME))
+    assert result.success
+    assert result.output is not None
+    ws = load_workbook(result.output)[SHEET_NAME]
+    assert ws.cell(row=3, column=18).value == long_name
+    assert ws.column_dimensions["B"].width == NAME_MODE_DAY_WIDTH_MAX
+    # index 模式(默认)不受长名称影响,保持窄列
+    result2 = svc.generate(src, tmp_path / "o2.xlsx")
+    assert result2.success
+    assert result2.output is not None
+    ws2 = load_workbook(result2.output)[SHEET_NAME]
+    assert ws2.cell(row=3, column=18).value == 1
+    assert ws2.column_dimensions["B"].width == DAY_COLUMN_WIDTH
 
 
 def test_generate_two_month_blocks_and_continuity(svc, make_xlsx, tmp_path):
