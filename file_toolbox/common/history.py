@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import tempfile
+from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -88,23 +89,36 @@ class JsonHistoryStore:
         只重写目标有效记录行,其余原始行(含损坏行、额外字段行)逐行保留;
         目标 id 不存在时不改写文件。整个读-改-替换在同一锁域内完成。
         """
+        self._update_record(tool, record_id, {"undone": True})
+
+    def operation_lock(self, tool: str) -> AbstractContextManager[None]:
+        """串行化同一工具的文件操作及其历史事务,与 JSONL 内部锁分离。"""
+        return file_transaction_lock(self._dir / f"{tool}.operation")
+
+    def update_record_data(self, tool: str, record_id: int, data: dict[str, Any]) -> None:
+        """原子保存进度并保留其他记录/损坏行;缺失记录不得冒充保存成功。"""
+        if not self._update_record(tool, record_id, {"data": data}):
+            raise ValueError(f"历史记录不存在: {tool} #{record_id}")
+
+    def _update_record(self, tool: str, record_id: int, changes: dict[str, Any]) -> bool:
         with file_transaction_lock(self._file(tool)):
             self._dir.mkdir(parents=True, exist_ok=True)
             f = self._file(tool)
             if not f.exists():
-                return
+                return False
             new_lines: list[str] = []
             found = False
             for lineno, line in enumerate(f.read_text(encoding="utf-8").splitlines(), start=1):
                 rec = _parse_record_line(line, f, lineno)
                 if rec is not None and not found and rec["id"] == record_id:
-                    rec["undone"] = True
+                    rec.update(changes)
                     new_lines.append(json.dumps(rec, ensure_ascii=False))
                     found = True
                 else:
                     new_lines.append(line)
             if found:
                 _replace_file(f, new_lines)
+            return found
 
     def clear(self, tool: str) -> int:
         """清空某工具的全部历史(含损坏行),返回清除的有效记录数。"""

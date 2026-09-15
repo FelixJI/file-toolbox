@@ -174,13 +174,13 @@ def test_history_dialog_undo_empty_map(app, tmp_path, monkeypatch):
 
 
 def test_history_dialog_undo_success(app, tmp_path, monkeypatch):
-    """撤销确认 Yes → 反向重命名成功 + mark_undone + 重新加载(行 118-141)。"""
-    store = _store_with_records(
-        tmp_path,
-        "rename",
-        [{"rename_map": {str(tmp_path / "a.txt"): str(tmp_path / "b.txt")}}],
-    )
-    (tmp_path / "b.txt").write_text("x")  # b 存在,反向 b→a
+    """通过真实成功执行生成新版历史,GUI 委托核心撤销并标记完成。"""
+    from file_toolbox.core.batch_rename import FileRenameService
+
+    store = JsonHistoryStore(tmp_path / "history")
+    source, target = tmp_path / "a.txt", tmp_path / "b.txt"
+    source.write_text("x")
+    assert FileRenameService(store).execute_rename({source: target}) == (1, [])
     dlg = HistoryDialog(store, tool="rename")
     dlg.list_widget.setCurrentRow(0)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
@@ -238,13 +238,8 @@ def test_history_dialog_undo_with_errors(app, tmp_path, monkeypatch):
     assert info_calls
 
 
-def test_history_dialog_undo_partial_failure_still_marks_undone(app, tmp_path, monkeypatch):
-    """部分失败(count < len)时,mark_undone 仍被调用(锁定当前行为)。
-
-    回归风险:execute_rename 返回 count=0(全失败)时,当前实现仍调用 mark_undone,
-    把这条历史标记为「已撤销」——即使没真正撤销任何文件。这可能误导用户认为撤销成功。
-    锁定该行为:未来若改为「部分失败不标记已撤销」,该测试应变红提醒有意更新。
-    """
+def test_history_dialog_undo_failure_does_not_mark_undone(app, tmp_path, monkeypatch):
+    """旧记录无法证明成功,必须拒绝且不标记撤销;替换已知错误契约。"""
     store = _store_with_records(
         tmp_path,
         "rename",
@@ -256,10 +251,10 @@ def test_history_dialog_undo_partial_failure_still_marks_undone(app, tmp_path, m
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     dlg._undo_selected()
-    # 当前:部分/全失败仍 mark_undone
+    # 拒绝后记录仍未撤销。
     rec = store.get_record("rename", rid)
     assert rec is not None
-    assert rec["undone"] is True
+    assert rec["undone"] is False
 
 
 def test_history_dialog_undo_rid_none_returns(app, tmp_path, monkeypatch):
@@ -303,3 +298,48 @@ def test_summary_label_pdf_sort():
     )
     assert "12 页" in label and "3 文件" in label and "asc" in label
     assert label.endswith("→ 2 个输出")
+
+
+def test_history_dialog_partial_undo_retry_and_repeat(app, tmp_path, monkeypatch):
+    """真实文件经 GUI 部分撤销、重开对话框重试、重复点击均保持真实进度。"""
+    from file_toolbox.core.batch_rename import FileRenameService
+
+    store = JsonHistoryStore(tmp_path / "history")
+    a, b, x, y = [tmp_path / name for name in ("a.txt", "b.txt", "x.txt", "y.txt")]
+    a.write_text("A")
+    b.write_text("B")
+    assert FileRenameService(store).execute_rename({a: x, b: y}) == (2, [])
+    b.write_text("occupant")
+    questions, messages = [], []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: questions.append(args[2]) or QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *args: messages.append(args[2]) or QMessageBox.StandardButton.Ok,
+    )
+    dlg = HistoryDialog(store)
+    dlg.list_widget.setCurrentRow(0)
+    dlg._undo_selected()
+    assert "已反向重命名 1 个" in messages[-1]
+    assert "剩余 1 个待撤销" in dlg.list_widget.item(0).text()
+    assert "[已撤销]" not in dlg.list_widget.item(0).text()
+    assert a.read_text() == "A" and b.read_text() == "occupant" and y.read_text() == "B"
+    b.unlink()
+    dlg.close()
+    dlg = HistoryDialog(JsonHistoryStore(tmp_path / "history"))
+    dlg.list_widget.setCurrentRow(0)
+    dlg._undo_selected()
+    assert "剩余 1 个" in questions[-1]
+    assert "已反向重命名 1 个" in messages[-1]
+    assert "[已撤销]" in dlg.list_widget.item(0).text()
+    assert a.read_text() == "A" and b.read_text() == "B"
+    assert not x.exists() and not y.exists()
+    dlg.list_widget.setCurrentRow(0)
+    dlg._undo_selected()
+    assert messages[-1] == "该记录已经撤销。"
+    assert len(questions) == 2
+    dlg.close()
