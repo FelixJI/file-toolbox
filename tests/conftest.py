@@ -2,6 +2,7 @@
 
 import io
 import os
+import threading
 import zipfile
 from pathlib import Path
 
@@ -550,3 +551,30 @@ def make_text_pdf(tmp_path):
         return pdf_path
 
     return _make
+
+
+@pytest.fixture
+def store_lock_probe(monkeypatch):
+    """观察真实线程锁拒绝即时获取,不用 sleep 猜测竞争者是否已经执行。"""
+    from file_toolbox.common import store_lock
+
+    contended = threading.Event()
+    progressed = threading.Event()
+    original = store_lock._thread_lock_for
+
+    class ObservedLock:
+        def __init__(self, lock):
+            self.lock = lock
+
+        def acquire(self, *, timeout):
+            if self.lock.acquire(blocking=False):
+                return True
+            contended.set()
+            progressed.set()
+            return self.lock.acquire(timeout=timeout)
+
+        def release(self):
+            self.lock.release()
+
+    monkeypatch.setattr(store_lock, "_thread_lock_for", lambda key: ObservedLock(original(key)))
+    return contended, progressed
