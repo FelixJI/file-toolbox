@@ -23,13 +23,15 @@ def app():
 def dlg(app, tmp_path):
     """每个测试用独立 tmp_path 的历史/模板存储,避免跨测试残留。
 
-    构造后替换 _history 与 _template_svc 为 tmp_path 隔离版本。
+    构造后同步替换界面与核心服务的历史依赖,模板也使用 tmp_path。
     """
     from file_toolbox.common.history import JsonHistoryStore
+    from file_toolbox.core.batch_rename import FileRenameService
     from file_toolbox.core.rename_template import RenameTemplateService
 
     d = FileRenamerDialog()
     d._history = JsonHistoryStore(tmp_path)
+    d._svc = FileRenameService(d._history)
     d._template_svc = RenameTemplateService(tmp_path / "templates.json")
     return d
 
