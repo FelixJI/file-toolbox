@@ -103,12 +103,7 @@ def test_apply_conflict_detection(tmp_path):
 
 
 def test_apply_intra_batch_collision_both_target_same_path(tmp_path):
-    """批内两个文件映射到同一目标:当前实现仅检测与**已存在**文件冲突,不检测批内互撞,
-    故两者都报「就绪」(execute 时第二个会撞已存在)。**锁定当前行为**:两目标路径相同。
-
-    此为已知限制(检测批内冲突需额外逻辑)。锁定它,使未来若新增批内冲突检测,
-    该测试会变红提醒有意更新预期。
-    """
+    """批内目标相同必须同时冲突,不能锁定旧的两项就绪错误契约。"""
     a = tmp_path / "a.txt"
     b = tmp_path / "b.txt"
     a.write_text("x")
@@ -121,9 +116,9 @@ def test_apply_intra_batch_collision_both_target_same_path(tmp_path):
         ],
     )
     assert result[a][0] == result[b][0]  # 同一目标路径 x.txt
-    # 两者当前都报就绪(批内冲突未检测)
-    assert "准备" in result[a][1]
-    assert "准备" in result[b][1]
+    # 两项都不得执行。
+    assert "冲突" in result[a][1]
+    assert "冲突" in result[b][1]
 
 
 def test_execute_rename(tmp_path):
@@ -544,14 +539,14 @@ def test_apply_operations_empty_files_returns_empty(tmp_path):
     assert _svc().apply_operations([], [{"type": "add_prefix", "params": {"text": "P_"}}]) == {}
 
 
-def test_apply_operations_empty_operations_marks_ready_unchanged(tmp_path):
+def test_apply_operations_empty_operations_marks_noop_unchanged(tmp_path):
     """空操作列表 → 文件名不变,标记就绪(new_path == 原路径)。锁定当前行为。"""
     f = tmp_path / "a.txt"
     f.write_text("x")
     result = _svc().apply_operations([f], [])
     new_path, status = result[f]
     assert new_path == f
-    assert "准备" in status
+    assert "无变化" in status
 
 
 # ---------------------------------------------------------------------------

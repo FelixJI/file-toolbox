@@ -23,13 +23,15 @@ def app():
 def dlg(app, tmp_path):
     """每个测试用独立 tmp_path 的历史/模板存储,避免跨测试残留。
 
-    构造后替换 _history 与 _template_svc 为 tmp_path 隔离版本。
+    构造后同步替换界面与核心服务的历史依赖,模板也使用 tmp_path。
     """
     from file_toolbox.common.history import JsonHistoryStore
+    from file_toolbox.core.batch_rename import FileRenameService
     from file_toolbox.core.rename_template import RenameTemplateService
 
     d = FileRenamerDialog()
     d._history = JsonHistoryStore(tmp_path)
+    d._svc = FileRenameService(d._history)
     d._template_svc = RenameTemplateService(tmp_path / "templates.json")
     return d
 
@@ -261,7 +263,11 @@ def test_execute_failure_keeps_old_paths(dlg, monkeypatch, tmp_path):
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
-    monkeypatch.setattr(dlg._svc, "execute_rename", lambda m: (0, ["权限不足: a.txt"]))
+    from file_toolbox.core.rename_execution import RenameResult
+
+    monkeypatch.setattr(
+        dlg._svc, "execute_rename_result", lambda m: RenameResult(errors=["权限不足: a.txt"])
+    )
     dlg._execute()
     assert f1.exists()
     assert dlg.selected_files == [f1]
@@ -271,13 +277,13 @@ def test_execute_failure_keeps_old_paths(dlg, monkeypatch, tmp_path):
 def test_sync_selected_paths_partial_success(dlg, tmp_path):
     """_sync_selected_paths_after_rename:仅同步成功项(原路径消失且新路径存在)。"""
     old1, new1 = tmp_path / "a.txt", tmp_path / "P_a.txt"
-    old2, new2 = tmp_path / "b.txt", tmp_path / "P_b.txt"
+    old2 = tmp_path / "b.txt"
     new1.write_text("1")  # 已改名成功:仅新路径存在
     old2.write_text("2")  # 改名失败:old2 仍在,new2 不存在
     dlg.selected_files = [old1, old2]
     dlg.ui.list_files.addItem(str(old1))
     dlg.ui.list_files.addItem(str(old2))
-    dlg._sync_selected_paths_after_rename({old1: new1, old2: new2})
+    dlg._sync_selected_paths_after_rename({old1: new1})
     assert dlg.selected_files == [new1, old2]
     assert dlg.ui.list_files.item(0).text() == str(new1)
     assert dlg.ui.list_files.item(1).text() == str(old2)
@@ -289,7 +295,7 @@ def test_sync_selected_paths_nothing_renamed_is_noop(dlg, tmp_path):
     f1.write_text("x")
     dlg.selected_files = [f1]
     dlg.ui.list_files.addItem(str(f1))
-    dlg._sync_selected_paths_after_rename({f1: tmp_path / "P_a.txt"})
+    dlg._sync_selected_paths_after_rename({})
     assert dlg.selected_files == [f1]
     assert dlg.ui.list_files.item(0).text() == str(f1)
 

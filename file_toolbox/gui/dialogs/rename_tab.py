@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService, OperationType
+from file_toolbox.core.rename_execution import PlanState
 from file_toolbox.core.rename_template import RenameTemplateService
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.operation_params import OperationParamCollector
@@ -157,17 +158,19 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         if not valid:
             QMessageBox.warning(self, "操作无效", msg)
             return
-        result = self._svc.apply_operations(self.selected_files, self.operations)
-        ready = {old: new for old, (new, s) in result.items() if "准备" in s}
+        result = self._svc.plan_operations(self.selected_files, self.operations)
+        ready = {
+            old: entry.target for old, entry in result.items() if entry.state == PlanState.READY
+        }
         if not ready:
             QMessageBox.warning(self, "无可执行", "没有就绪的文件(可能全部冲突或无变化)。")
             return
         reply = QMessageBox.question(self, "确认执行", f"将重命名 {len(ready)} 个文件,是否继续?")
         if reply != QMessageBox.StandardButton.Yes:
             return
-        count, errors = self._svc.execute_rename(ready)
-        # 历史记录已下沉 FileRenameService.execute_rename(注入了 history_store)
-        self._sync_selected_paths_after_rename(ready)
+        outcome = self._svc.execute_rename_result(ready)
+        count, errors = outcome.count, outcome.messages
+        self._sync_selected_paths_after_rename(outcome.successful)
         QMessageBox.information(
             self,
             "完成",
@@ -178,16 +181,12 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
     def _sync_selected_paths_after_rename(self, rename_map: dict[Path, Path]) -> None:
         """执行后把 selected_files 与文件列表控件同步到重命名后的新路径。
 
-        成功项判定为"原路径已消失且新路径存在"(失败/目标已存在项保持原路径)。
+        调用方只传入核心报告的实际成功项,不根据路径存在状态猜测。
         不同步的话,随后刷新的预览会基于已不存在的旧路径计算:状态列误报
         "文件名冲突",大小/时间列显示"未知"(与内容替换 Tab 执行后即刷新的行为
         不一致)。
         """
-        renamed = {
-            str(old): str(new)
-            for old, new in rename_map.items()
-            if not old.exists() and new.exists()
-        }
+        renamed = {str(old): str(new) for old, new in rename_map.items()}
         if not renamed:
             return
         self.selected_files = [Path(renamed.get(str(p), str(p))) for p in self.selected_files]
