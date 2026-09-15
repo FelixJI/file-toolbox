@@ -125,3 +125,27 @@ def test_invalid_boolean_cli_is_diagnostic_without_writing(tmp_path, monkeypatch
     )
     assert result.exit_code != 0 and "布尔值" in result.output
     assert source.read_text() == "a" and not (tmp_path / "b.txt").exists()
+
+
+@pytest.mark.parametrize(
+    "value,expected", [("00", False), (" 0 ", False), ("+1", True), ("2", True), ("-1", True)]
+)
+@pytest.mark.parametrize("quoted", [False, True])
+@pytest.mark.parametrize(
+    "kind,key", [("replace_text", "case_sensitive"), ("regex_replace", "ignore_case")]
+)
+def test_integer_boolean_spellings_preserve_existing_semantics(
+    value, expected, quoted, kind, key, tmp_path
+):
+    source = tmp_path / "A.txt"
+    source.write_text("A")
+    raw = f'"{value}"' if quoted else value
+    field = "find" if kind == "replace_text" else "pattern"
+    op = parse_op(f"{kind}:{field}=a,replace=b,{key}={raw}")
+    svc = FileRenameService()
+    assert svc.validate_operations([op])[0]
+    assert op["params"][key] is expected
+    insensitive = expected if key == "ignore_case" else not expected
+    assert svc.plan_operations([source], [op])[source].target.name == (
+        "b.txt" if insensitive else "A.txt"
+    )

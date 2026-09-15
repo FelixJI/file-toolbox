@@ -26,7 +26,7 @@ class ParamRule:
       用于文本类参数(find/replace):op_parser._coerce 会把裸数字值转为 int,
       而文本替换场景"把 2024 替换为 2026"应保持字符串语义,否则 re.subn/text.replace
       收到 int 会报 TypeError。
-    - bool_keys: 布尔配置接受 bool、0/1 或 true/false 文本,归一化为 bool。
+    - bool_keys: 布尔配置接受 bool、整数或 true/false 文本,按既有整数真值归一化为 bool。
     - extra: 业务自定义校验 (operation, index) -> (ok, msg),返回 (True,"") 表示通过。
     """
 
@@ -89,10 +89,16 @@ def validate_params(
         value = params[key]
         if isinstance(value, bool):
             continue
-        if isinstance(value, int) and value in (0, 1):
+        if isinstance(value, int):
             params[key] = bool(value)
-        elif isinstance(value, str) and value.lower() in ("true", "false", "0", "1"):
-            params[key] = value.lower() in ("true", "1")
+        elif isinstance(value, str):
+            if value.lower() in ("true", "false"):
+                params[key] = value.lower() == "true"
+            else:
+                try:
+                    params[key] = bool(int(value))
+                except ValueError:
+                    return False, f"{label} {n}: {key} 必须是布尔值"
         else:
             return False, f"{label} {n}: {key} 必须是布尔值"
 
