@@ -149,3 +149,58 @@ def test_integer_boolean_spellings_preserve_existing_semantics(
     assert svc.plan_operations([source], [op])[source].target.name == (
         "b.txt" if insensitive else "A.txt"
     )
+
+
+@pytest.mark.parametrize("value,number", [("true", 1), ("TRUE", 1), ("false", 0)])
+@pytest.mark.parametrize("key", ["start", "digits"])
+def test_numeric_boolean_spellings_match_raw_and_gui(value, number, key, tmp_path):
+    source = tmp_path / "a.txt"
+    source.write_text("a")
+    quoted = parse_op(f'add_number:{key}="{value}",format=none')
+    raw = parse_op(f"add_number:{key}={value},format=none")
+    gui = {"type": "add_number", "params": {key: bool(number), "format": "none"}}
+    svc = FileRenameService()
+    outcomes = [svc.validate_operations([op]) for op in (quoted, raw, gui)]
+    assert outcomes[0] == outcomes[1] == outcomes[2]
+    assert outcomes[0][0] is not (key == "digits" and number == 0)
+    if outcomes[0][0]:
+        assert quoted == raw == gui
+        plans = [svc.plan_operations([source], [op]) for op in (quoted, raw, gui)]
+        assert plans[0] == plans[1] == plans[2]
+
+
+@pytest.mark.parametrize("kind", ["prefix", "suffix"])
+@pytest.mark.parametrize("value,number", [("true", 1), ("TRUE", 1), ("false", 0)])
+def test_delete_count_boolean_spellings_match_raw_and_gui(kind, value, number, tmp_path):
+    source = tmp_path / "ABCDE.txt"
+    source.write_text("a")
+    ops = [
+        parse_op(f'delete_chars:delete_type={kind},value="{value}"'),
+        parse_op(f"delete_chars:delete_type={kind},value={value}"),
+        {"type": "delete_chars", "params": {"delete_type": kind, "value": bool(number)}},
+    ]
+    svc = FileRenameService()
+    for op in ops:
+        assert svc.validate_operations([op])[0]
+        expected = "ABCDE.txt" if number == 0 else ("BCDE.txt" if kind == "prefix" else "ABCD.txt")
+        assert svc.plan_operations([source], [op])[source].target.name == expected
+
+
+@pytest.mark.parametrize("value", ["true", "false", "001"])
+def test_delete_text_keeps_quoted_literal(value, tmp_path):
+    source = tmp_path / f"a{value}.txt"
+    source.write_text("a")
+    op = parse_op(f'delete_chars:delete_type=text,value="{value}"')
+    svc = FileRenameService()
+    assert svc.validate_operations([op])[0]
+    assert svc.plan_operations([source], [op])[source].target.name == "a.txt"
+
+
+@pytest.mark.parametrize("kind,expected", [("prefix", "BCDE.txt"), ("suffix", "ABCD.txt")])
+def test_delete_count_preserves_existing_numeric_scalar(kind, expected, tmp_path):
+    source = tmp_path / "ABCDE.txt"
+    source.write_text("a")
+    op = {"type": "delete_chars", "params": {"delete_type": kind, "value": 1.5}}
+    svc = FileRenameService()
+    assert svc.validate_operations([op])[0]
+    assert svc.plan_operations([source], [op])[source].target.name == expected

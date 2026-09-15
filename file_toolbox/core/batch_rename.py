@@ -41,6 +41,8 @@ def _validate_add_number(operation: dict[str, Any], index: int) -> tuple[bool, s
             value = params.get(key, default)
             if not isinstance(value, (str, int)):
                 raise TypeError("序号参数需要整数")
+            if isinstance(value, str) and value.lower() in ("true", "false"):
+                value = value.lower() == "true"
             params[key] = int(value)
         digits = params["digits"]
         if digits < 1:
@@ -55,6 +57,23 @@ def _validate_add_number(operation: dict[str, Any], index: int) -> tuple[bool, s
     except (TypeError, ValueError):
         return False, f"操作 {n}: 序号参数必须是数字"
     return True, ""
+
+
+def _validate_delete_chars(operation: dict[str, Any], index: int) -> tuple[bool, str]:
+    """数量模式保留旧布尔整数语义;文本模式保留字面内容。"""
+    params = operation.get("params", {})
+    value = params["value"]
+    if params.get("delete_type", "prefix") in ("prefix", "suffix"):
+        if isinstance(value, (int, float)):
+            try:
+                params["value"] = str(int(value))
+            except (ValueError, OverflowError):
+                return False, f"操作 {index + 1}: 删除数量必须是有限数字"
+        elif isinstance(value, str) and value.lower() in ("true", "false"):
+            params["value"] = str(int(value.lower() == "true"))
+    return validate_params(
+        operation, index, {OperationType.DELETE_CHARS.value: ParamRule(string_keys=("value",))}
+    )
 
 
 # 参数校验规则表(声明式,由 FileRenameService._validate_params 复用)。
@@ -83,7 +102,9 @@ RENAME_PARAM_RULES: dict[str, ParamRule] = {
         string_keys=("format", "custom_template", "position"), extra=_validate_add_number
     ),
     OperationType.DELETE_CHARS.value: ParamRule(
-        required=("value",), empty_messages={"value": "删除值不能为空"}, string_keys=("value",)
+        required=("value",),
+        empty_messages={"value": "删除值不能为空"},
+        extra=_validate_delete_chars,
     ),
     OperationType.ADD_DATE.value: ParamRule(string_keys=("format", "position", "source")),
 }
