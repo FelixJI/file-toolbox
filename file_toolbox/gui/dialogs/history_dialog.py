@@ -1,6 +1,6 @@
 """历史记录对话框:查看各工具操作历史(基于 JsonHistoryStore)。
 
-rename 历史额外提供「撤销」按钮:把 rename_map 反转后执行反向重命名。
+rename 历史额外提供「撤销」按钮:由核心验证记录并持久化逐项恢复进度。
 其余工具(PDF/文件夹/发票/考勤)操作不可逆，仅展示记录。
 """
 
@@ -24,9 +24,14 @@ from file_toolbox.core.batch_rename import FileRenameService
 
 def _summary_label(tool: str, data: dict[str, Any]) -> str:
     """根据工具类型与记录数据,生成一行摘要。"""
+    if not isinstance(data, dict):
+        return "记录数据无效"
     if tool == "rename":
-        n = len(data.get("rename_map", {}))
-        return f"{n} 个文件"
+        mapping = data.get("rename_map", {})
+        n = len(mapping) if isinstance(mapping, dict) else 0
+        remaining = data.get("undo_remaining")
+        suffix = f", 剩余 {len(remaining)} 个待撤销" if isinstance(remaining, list) else ""
+        return f"{n} 个文件" + suffix
     if tool == "replace":
         n = len(data.get("files", []))
         return f"{n} 个文件"
@@ -86,7 +91,7 @@ class HistoryDialog(QDialog):
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         layout.addWidget(self.list_widget)
 
-        # rename 支持「撤销」:把 rename_map 反转后执行反向重命名
+        # rename 支持由核心校验并恢复尚未撤销的文件。
         self.btn_undo = QPushButton("撤销选中项(反向重命名)")
         self.btn_undo.setVisible(tool == "rename")
         self.btn_undo.clicked.connect(self._undo_selected)
@@ -116,7 +121,9 @@ class HistoryDialog(QDialog):
             self.list_widget.addItem(item)
 
     def _undo_selected(self) -> None:
-        """对选中的 rename 历史记录执行反向重命名并标记已撤销。"""
+        """恢复选中记录的剩余文件;全部完成后才标记已撤销。"""
+        if self._tool != "rename":
+            return
         item = self.list_widget.currentItem()
         if item is None:
             QMessageBox.information(self, "提示", "请先选择一条记录。")
@@ -128,32 +135,31 @@ class HistoryDialog(QDialog):
         if record is None:
             QMessageBox.warning(self, "错误", "找不到该记录。")
             return
-        rename_map = record.get("data", {}).get("rename_map", {})
-        if not rename_map:
+        data = record.get("data", {})
+        rename_map = data.get("rename_map", {}) if isinstance(data, dict) else {}
+        if not isinstance(rename_map, dict) or not rename_map:
             QMessageBox.information(self, "提示", "该记录无可撤销的映射。")
             return
 
-        # 反转:{原:新} -> {新:原},用 Path 包装
-        reverse_map: dict[Path, Path] = {}
-        for old_str, new_str in rename_map.items():
-            new_path = Path(new_str)
-            old_path = Path(old_str)
-            # 反向时跳过已撤销(目标不存在)或不一致的情况,由 service 兜底
-            reverse_map[new_path] = old_path
+        if record.get("undone"):
+            QMessageBox.information(self, "提示", "该记录已经撤销。")
+            return
 
+        remaining = data.get("undo_remaining", list(rename_map))
+        count = len(remaining) if isinstance(remaining, list) else len(rename_map)
         reply = QMessageBox.question(
             self,
             "确认撤销",
-            f"将把 {len(reverse_map)} 个文件改回原名。仅在文件未被进一步移动/重命名时有效。继续?",
+            f"将尝试把剩余 {count} 个文件改回原名。仅恢复可确认归属且原路径未被占用的文件。继续?",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        svc = FileRenameService()
-        count, errors = svc.execute_rename(reverse_map)
-        self._history.mark_undone(self._tool, rid)
+        svc = FileRenameService(self._history)
+        outcome = svc.undo_record(rid)
+        count, errors = outcome.count, outcome.messages
         msg = f"已反向重命名 {count} 个文件。"
         if errors:
             msg += "\n部分失败:\n" + "\n".join(errors)
-        QMessageBox.information(self, "撤销完成", msg)
+        QMessageBox.information(self, "撤销结果", msg)
         self._load()

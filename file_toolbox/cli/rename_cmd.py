@@ -8,6 +8,7 @@ from file_toolbox.cli.op_parser import parse_ops
 from file_toolbox.common.file_utils import expand_files
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService
+from file_toolbox.core.rename_execution import PlanState
 
 
 def rename(
@@ -34,22 +35,24 @@ def rename(
         typer.secho(f"错误:{msg}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    result = svc.apply_operations(all_files, operations)
+    result = svc.plan_operations(all_files, operations)
 
     typer.echo("预览:")
-    for old, (new, status) in result.items():
-        typer.echo(f"  {old.name}  ->  {new.name}   [{status}]")
+    for old, entry in result.items():
+        typer.echo(f"  {old.name}  ->  {entry.target.name}   [{entry.message}]")
 
-    ready = sum(1 for _, s in result.values() if "准备" in s)
-    conflict = sum(1 for _, s in result.values() if "冲突" in s)
-    error = sum(1 for _, s in result.values() if "错误" in s)
+    ready = sum(entry.state == PlanState.READY for entry in result.values())
+    conflict = sum(entry.state == PlanState.CONFLICT for entry in result.values())
+    error = sum(entry.state == PlanState.INVALID for entry in result.values())
     typer.echo(f"\n共 {len(result)} 个文件: 就绪 {ready}, 冲突 {conflict}, 错误 {error}")
 
     if not yes:
         typer.echo("\n(预览模式,加 --yes 执行)")
         return
 
-    rename_map = {old: new for old, (new, s) in result.items() if "准备" in s}
+    rename_map = {
+        old: entry.target for old, entry in result.items() if entry.state == PlanState.READY
+    }
     count, errors = svc.execute_rename(rename_map)
     typer.secho(f"\n已重命名 {count} 个文件", fg=typer.colors.GREEN)
     for e in errors:

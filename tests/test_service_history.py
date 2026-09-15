@@ -35,7 +35,8 @@ def test_rename_service_records_history(tmp_path):
     records = store.get_records("rename")
     assert len(records) == 1
     data = records[0]["data"]
-    assert set(data.keys()) == {"rename_map"}
+    assert set(data.keys()) == {"rename_map", "schema_version", "file_ids"}
+    assert data["schema_version"] == 2
     assert data["rename_map"] == {str(f): str(new_path)}
     # new_path 真的被创建(执行成功)
     assert new_path.exists()

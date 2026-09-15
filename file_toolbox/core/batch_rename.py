@@ -10,6 +10,14 @@ from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import get_file_info
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.op_schema import ParamRule, validate_params
+from file_toolbox.core.rename_execution import (
+    PlanEntry,
+    PlanState,
+    RenameResult,
+    execute,
+    plan_mapping,
+    undo_record,
+)
 
 
 class OperationType(Enum):
@@ -104,35 +112,32 @@ class FileRenameService(BaseOperationService):
         Returns:
             字典: {原路径: (新路径, 状态消息)}
         """
-        result = {}
+        return {
+            old: (entry.target, entry.message)
+            for old, entry in self.plan_operations(files, operations).items()
+        }
 
+    def plan_operations(
+        self, files: list[Path], operations: list[dict[str, Any]]
+    ) -> dict[Path, PlanEntry]:
+        """核心计划状态决定可执行项,中文消息只用于展示。"""
+        mapping: dict[Path, Path] = {}
+        errors: dict[Path, PlanEntry] = {}
         for idx, file_path in enumerate(files):
             try:
-                # 获取原始文件名和扩展名
-                original_name = file_path.stem
-                extension = file_path.suffix
-                parent = file_path.parent
-
-                # 依次应用所有操作
-                new_name = original_name
+                name = file_path.stem
                 for operation in operations:
-                    new_name = self._apply_single_operation(
-                        new_name, extension, operation, idx, len(files), file_path
+                    name = self._apply_single_operation(
+                        name, file_path.suffix, operation, idx, len(files), file_path
                     )
-
-                # 构建新路径
-                new_path = parent / (new_name + extension)
-
-                # 检查冲突
-                if new_path.exists() and new_path != file_path:
-                    result[file_path] = (new_path, "⚠️ 文件名冲突")
-                else:
-                    result[file_path] = (new_path, "✓ 准备就绪")
-
-            except Exception as e:
-                result[file_path] = (file_path, f"❌ 错误: {e!s}")
-
-        return result
+                if not name or any(c in name for c in "\\/\x00"):
+                    raise ValueError("输出必须是非空文件名,不能包含路径")
+                mapping[file_path] = file_path.parent / (name + file_path.suffix)
+            except Exception as exc:
+                errors[file_path] = PlanEntry(file_path, PlanState.INVALID, str(exc))
+        plan = plan_mapping(mapping)
+        plan.update(errors)
+        return {path: plan[path] for path in files}
 
     def _apply_single_operation(
         self,
@@ -326,48 +331,23 @@ class FileRenameService(BaseOperationService):
 
         return name
 
+    def execute_rename_result(self, rename_map: dict[Path, Path]) -> RenameResult:
+        """返回实际成功映射、逐项错误和独立的历史保存错误。"""
+        return execute(rename_map, self._history_store)
+
     def execute_rename(self, rename_map: dict[Path, Path]) -> tuple[int, list[str]]:
-        """
-        执行实际的重命名操作
+        """旧接口薄适配;计数只包含真实成功操作。"""
+        result = self.execute_rename_result(rename_map)
+        return result.count, result.messages
 
-        Args:
-            rename_map: {原路径: 新路径}
-
-        Returns:
-            (成功数量, 失败消息列表)
-        """
-        success_count = 0
-        errors = []
-
-        for old_path, new_path in rename_map.items():
-            try:
-                # 跳过相同路径
-                if old_path == new_path:
-                    continue
-
-                # 检查新路径是否已存在
-                if new_path.exists():
-                    errors.append(f"目标已存在: {new_path.name}")
-                    continue
-
-                # 执行重命名
-                old_path.rename(new_path)
-                success_count += 1
-
-            except PermissionError:
-                errors.append(f"权限不足: {old_path.name}")
-            except Exception as e:
-                errors.append(f"{old_path.name}: {e!s}")
-
-        # 记录历史(执行后):记录传入的 rename_map(调用方已过滤为就绪项——
-        # CLI rename_cmd 与 GUI rename_tab._execute 在调用前均剔除冲突/未就绪项,
-        # 故此处仅含实际尝试执行的映射)。形状 {"rename_map": {str: str}} 与原 GUI
-        # 内联写入一致。history_dialog 仅读 len(rename_map),数量即本次实际执行项数。
-        if self._history_store is not None:
-            self._history_store.add_record(
-                "rename", {"rename_map": {str(k): str(v) for k, v in rename_map.items()}}
-            )
-        return success_count, errors
+    def undo_record(self, record_id: int) -> RenameResult:
+        """由核心校验记录并恢复;GUI 不自行反转映射或标记成功。"""
+        if self._history_store is None:
+            return RenameResult(errors=["未配置历史存储"])
+        try:
+            return undo_record(self._history_store, record_id)
+        except (OSError, ValueError, TimeoutError) as exc:
+            return RenameResult(errors=[f"未能读取/锁定撤销记录: {exc}"])
 
     def get_file_info(self, file_path: Path) -> dict[str, Any]:
         """获取文件信息(委托给通用工具,保持单一实现)。"""
