@@ -24,12 +24,14 @@ REPLACE_PARAM_RULES: dict[str, ParamRule] = {
         # find/replace 是文本值:op_parser._coerce 会把裸数字(如 replace=2026)转 int,
         # 文本替换语义要求字符串,否则 re.subn/text.replace 收到 int 报 TypeError。
         string_keys=("find", "replace"),
+        bool_keys=("case_sensitive",),
     ),
     ReplaceOperationType.REGEX_REPLACE.value: ParamRule(
         required=("pattern",),
         empty_messages={"pattern": "正则表达式不能为空"},
         regex_key="pattern",
-        string_keys=("replace",),
+        string_keys=("pattern", "replace"),
+        bool_keys=("ignore_case",),
     ),
 }
 

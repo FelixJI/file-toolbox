@@ -21,10 +21,12 @@ class ParamRule:
     - required: 这些键不能为空(空字符串/None/缺失均视为无效)。
     - empty_messages: required 键 -> 该键为空时的中文提示(缺省回退到 "{key} 不能为空")。
     - regex_key: 该键的值需能被 re.compile 编译为合法正则(且为必填)。
-    - string_keys: 这些键的值在校验时强制转为 str(就地修改 params)。
+    - string_keys: 文本/数值/布尔标量在校验时转为 str(就地修改 params);
+      容器等无效类型返回诊断,不把其 repr 当作文本使用。
       用于文本类参数(find/replace):op_parser._coerce 会把裸数字值转为 int,
       而文本替换场景"把 2024 替换为 2026"应保持字符串语义,否则 re.subn/text.replace
       收到 int 会报 TypeError。
+    - bool_keys: 布尔配置接受 bool、0/1 或 true/false 文本,归一化为 bool。
     - extra: 业务自定义校验 (operation, index) -> (ok, msg),返回 (True,"") 表示通过。
     """
 
@@ -32,6 +34,7 @@ class ParamRule:
     empty_messages: dict[str, str] = field(default_factory=dict)
     regex_key: str | None = None
     string_keys: tuple[str, ...] = ()
+    bool_keys: tuple[str, ...] = ()
     extra: ExtraValidator | None = None
 
 
@@ -71,8 +74,27 @@ def validate_params(
     # 0. 文本类参数强制 str:op_parser._coerce 会把裸数字(如 replace=2026)转 int,
     #    而文本替换语义要求字符串,否则 re.subn/text.replace 收到 int 会报 TypeError。
     for key in rule.string_keys:
-        if key in params and params[key] is not None:
-            params[key] = str(params[key])
+        if key not in params:
+            continue
+        value = params[key]
+        if value is None and key in rule.required:
+            continue  # 必填错误沿用业务提示。
+        if not isinstance(value, (str, int, float, bool)):
+            return False, f"{label} {n}: {key} 必须是文本或数字/布尔标量"
+        params[key] = str(value)
+
+    for key in rule.bool_keys:
+        if key not in params:
+            continue
+        value = params[key]
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value in (0, 1):
+            params[key] = bool(value)
+        elif isinstance(value, str) and value.lower() in ("true", "false", "0", "1"):
+            params[key] = value.lower() in ("true", "1")
+        else:
+            return False, f"{label} {n}: {key} 必须是布尔值"
 
     # 1. 必填字段非空
     for key in rule.required:
