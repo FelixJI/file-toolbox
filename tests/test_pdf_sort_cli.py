@@ -3,6 +3,7 @@
 全部基于程序化生成的虚构 PDF(reportlab 文字页),纯 Python、跨平台。
 """
 
+import pytest
 from pypdf import PdfReader
 from typer.testing import CliRunner
 
@@ -172,3 +173,29 @@ def test_output_auto_numbered_when_exists(make_text_pdf, tmp_path):
     assert r.exit_code == 0
     assert out.read_text(encoding="utf-8") == "precious"
     assert (tmp_path / "a_排序_1.pdf").is_file()
+
+
+@pytest.mark.parametrize("history_fails", [False, True])
+def test_cancelled_partial_result_prints_outputs_and_nonzero(
+    make_text_pdf, monkeypatch, tmp_path, history_fails
+):
+    from file_toolbox.core.pdf_sort import PdfSortService, SortedFile, SortResult
+
+    source = make_text_pdf("a.pdf", ["Date: 2", "Date: 1"])
+    output = tmp_path / "a_排序.pdf"
+    partial = SortResult(sorted_files=[SortedFile(source.name, output)], cancelled=True)
+
+    def sort(*_args, **_kwargs):
+        if history_fails:
+            from file_toolbox.common.operation_errors import HistorySaveError
+
+            raise HistorySaveError(partial, OSError("history denied"))
+        return partial
+
+    monkeypatch.setattr(PdfSortService, "sort", sort)
+    result = runner.invoke(app, ["pdf-sort", str(source), "-p", "Date", "--yes"])
+    assert result.exit_code == 1
+    assert str(output) in result.output
+    assert "已取消: 处理 1 个文件, 写出 1 个输出" in result.output
+    assert "完成:" not in result.output
+    assert ("history denied" in result.output) is history_fails

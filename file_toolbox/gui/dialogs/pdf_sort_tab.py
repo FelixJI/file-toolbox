@@ -153,6 +153,7 @@ class PdfSortTab(QWidget):
         worker.progress.connect(self._on_progress)
         worker.finished_ok.connect(self._on_sort_ok)
         worker.failed.connect(self._on_sort_failed)
+        worker.warning.connect(self._on_history_warning)
         self._worker = worker  # 持有引用防 GC
         self.ui.btn_sort.setEnabled(False)
         self.ui.lbl_status.setText("排序中…")
@@ -167,13 +168,21 @@ class PdfSortTab(QWidget):
         self._populate_table(result)
         summary = self._controller.summarize(result)
         self.ui.lbl_status.setText(summary)
-        if result.success:
-            outputs = [Path(f.output) for f in result.sorted_files if f.output is not None]
-            if outputs:
-                settings.set(_LAST_OUTDIR_KEY, str(outputs[0].parent))
+        outputs = [Path(f.output) for f in result.sorted_files if f.output is not None]
+        if outputs:
+            settings.set(_LAST_OUTDIR_KEY, str(outputs[0].parent))
+        if result.cancelled:
+            details = "\n".join(str(path) for path in outputs)
+            QMessageBox.warning(
+                self, "排序已取消", summary + "\n" + details + "\n源文件均未被修改。"
+            )
+        elif result.success:
             QMessageBox.information(self, "排序完成", summary)
         else:
             QMessageBox.warning(self, "未生成输出", summary + "\n\n源文件均未被修改。")
+
+    def _on_history_warning(self, msg: str) -> None:
+        QMessageBox.warning(self, "历史保存失败", msg)
 
     def _on_sort_failed(self, msg: str) -> None:
         self._worker = None

@@ -36,6 +36,7 @@ from file_toolbox.core.attendance.types import (
     SourceAttendance,
     UnmatchedAttendance,
 )
+from file_toolbox.core.rename_execution import rename_no_replace
 
 CancelCheck = Callable[[], bool]
 _INVALID_SHEET_CHARS_RE = re.compile(r"[\\/*?:\[\]]")
@@ -99,7 +100,13 @@ class AttendanceService:
             )
             if not staging.is_file() or staging.stat().st_size == 0:
                 raise AttendanceError("Excel 未生成有效的结果副本")
-            os.replace(staging, request.output_path)
+            if request.allow_overwrite:
+                os.replace(staging, request.output_path)
+            else:
+                try:
+                    rename_no_replace(staging, request.output_path)
+                except FileExistsError as exc:
+                    raise AttendanceError("输出文件已存在，请确认覆盖后重试") from exc
         except InterruptedError as exc:
             cleanup_error = self._cleanup_staging(staging)
             if cleanup_error is not None:
