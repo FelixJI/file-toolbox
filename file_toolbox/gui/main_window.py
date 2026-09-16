@@ -236,7 +236,12 @@ class MainWindow(QMainWindow):
             return
         label, factory, attr = spec
         del self._lazy_specs[index]
-        tab = _construct_tab(factory, label)
+        try:
+            tab = _construct_tab(factory, label)
+        except BaseException:
+            # 构造期间移出登记避免重入;失败必须恢复,让下次切换可以重试。
+            self._lazy_specs[index] = spec
+            raise
         setattr(self, attr, tab)
         current = self._tabs.currentIndex()
         self._tabs.blockSignals(True)
@@ -262,7 +267,14 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         """标签页切换:先补建懒 Tab,再更新历史按钮可用状态(关于页无历史 → 禁用)。"""
 
-        self._ensure_tab(index)
+        try:
+            self._ensure_tab(index)
+        except Exception as error:
+            _logger.exception("Tab 构造失败 index=%d", index)
+            self.statusBar().showMessage(f"页面加载失败，切换后可重试: {error}")
+            self.btn_history.setEnabled(False)
+            return
+        self.statusBar().showMessage("就绪")
         tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
         self.btn_history.setEnabled(tool is not None)
 

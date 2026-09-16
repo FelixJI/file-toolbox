@@ -623,3 +623,54 @@ def test_close_event_survives_update_worker_quit_failure(win):
 
     worker.quit.assert_called_once()
     assert event.isAccepted() is True
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_lazy_factory_failure_keeps_registration_and_allows_retry(win, failures):
+    from PySide6.QtWidgets import QWidget
+
+    calls = []
+    placeholder = win._tabs.widget(1)
+    labels = [win._tabs.tabText(i) for i in range(win._tabs.count())]
+
+    def factory():
+        calls.append(True)
+        if len(calls) <= failures:
+            raise RuntimeError("temporary tab failure")
+        return QWidget()
+
+    win._lazy_specs[1] = ("建文件夹", factory, "_mkdir_tab")
+    for _ in range(failures):
+        with pytest.raises(RuntimeError, match="temporary tab failure"):
+            win._ensure_tab(1)
+        assert 1 in win._lazy_specs and win._mkdir_tab is None
+        assert win._tabs.widget(1) is placeholder
+        assert not win._tabs.signalsBlocked()
+    win._ensure_tab(1)
+    tab = win._mkdir_tab
+    assert tab is not None and win._tabs.widget(1) is tab
+    assert 1 not in win._lazy_specs
+    assert [win._tabs.tabText(i) for i in range(win._tabs.count())] == labels
+    win._ensure_tab(1)
+    assert len(calls) == failures + 1 and win._mkdir_tab is tab
+
+
+def test_failed_tab_switch_reports_error_then_recovers_history_button(win):
+    from PySide6.QtWidgets import QWidget
+
+    calls = []
+
+    def factory():
+        calls.append(True)
+        if len(calls) == 1:
+            raise RuntimeError("temporary tab failure")
+        return QWidget()
+
+    win._lazy_specs[1] = ("建文件夹", factory, "_mkdir_tab")
+    win._tabs.setCurrentIndex(1)
+    assert "temporary tab failure" in win.statusBar().currentMessage()
+    assert not win.btn_history.isEnabled() and win._mkdir_tab is None
+    win._tabs.setCurrentIndex(0)
+    win._tabs.setCurrentIndex(1)
+    assert win.btn_history.isEnabled() and win._mkdir_tab is not None
+    assert "temporary tab failure" not in win.statusBar().currentMessage()
