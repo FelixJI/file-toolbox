@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from file_toolbox.common.history import JsonHistoryStore
+from file_toolbox.common.operation_errors import OperationResultError, preserve_history_result
 from file_toolbox.core.invoice.dedupe import (
     DEDUPE,
     KEEP_ALL,
@@ -87,22 +88,27 @@ class InvoiceService:
         from file_toolbox.core.invoice.exporters.json_exporter import export_json
 
         written: list[Path] = []
-        if fmt in ("excel", "both"):
-            written.append(export_excel(result.invoices, output_path))
-        if fmt in ("json", "both"):
-            jp = json_path or output_path.with_suffix(".json")
-            written.append(export_json(result.invoices, jp, dedupe_strategy, result.failed))
+        target = output_path
+        try:
+            if fmt in ("excel", "both"):
+                written.append(export_excel(result.invoices, target))
+            if fmt in ("json", "both"):
+                target = json_path or output_path.with_suffix(".json")
+                written.append(export_json(result.invoices, target, dedupe_strategy, result.failed))
+        except Exception as error:
+            raise OperationResultError(written, f"导出失败:{target}: {error}") from error
         if self._history_store is not None:
-            self._history_store.add_record(
-                "invoice",
-                {
-                    "file_count": file_count if file_count is not None else 0,
-                    "invoice_count": invoice_count if invoice_count is not None else 0,
-                    "dedupe_strategy": dedupe_strategy,
-                    "fmt": fmt,
-                    "outputs": [str(w) for w in written],
-                },
-            )
+            with preserve_history_result(written):
+                self._history_store.add_record(
+                    "invoice",
+                    {
+                        "file_count": file_count if file_count is not None else 0,
+                        "invoice_count": invoice_count if invoice_count is not None else 0,
+                        "dedupe_strategy": dedupe_strategy,
+                        "fmt": fmt,
+                        "outputs": [str(w) for w in written],
+                    },
+                )
         return written
 
     @staticmethod

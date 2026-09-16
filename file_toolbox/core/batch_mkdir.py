@@ -8,6 +8,7 @@ from typing import ClassVar
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.operation_errors import preserve_history_result
 
 
 class ConflictStrategy(Enum):
@@ -316,17 +317,14 @@ class FolderCreatorService(LoggableMixin):
                             success=False,
                             error_message=f"创建文件夹失败: {item.path}\n{e!s}",
                         )
-                        self._record_history(root, structure_count, strategy, result)
-                        return result
-
-            result = CreateResult(
-                created_count=created_count,
-                skipped_count=skipped_count,
-                total_count=total_count,
-                success=True,
-            )
-            self._record_history(root, structure_count, strategy, result)
-            return result
+                        break
+            else:
+                result = CreateResult(
+                    created_count=created_count,
+                    skipped_count=skipped_count,
+                    total_count=total_count,
+                    success=True,
+                )
 
         except Exception as e:
             self.logger.error(f"批量创建文件夹失败: {e}")
@@ -337,8 +335,10 @@ class FolderCreatorService(LoggableMixin):
                 success=False,
                 error_message=f"批量创建文件夹时出错: {e!s}",
             )
+        # 历史失败不能被重新当作创建失败,也不能触发第二次历史写入。
+        with preserve_history_result(result):
             self._record_history(root, structure_count, strategy, result)
-            return result
+        return result
 
     def _record_history(
         self,

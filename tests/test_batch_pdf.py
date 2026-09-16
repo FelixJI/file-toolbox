@@ -218,7 +218,7 @@ def test_batch_generate_merge_mode_success(tmp_path, monkeypatch):
     assert progress  # 进度回调被调用
 
 
-def test_batch_generate_merge_failure_appends_error(tmp_path, monkeypatch):
+def test_batch_generate_merge_failure_marks_inputs_failed(tmp_path, monkeypatch):
     svc = PDFGeneratorService()
     files = [tmp_path / "a.docx"]
     files[0].write_bytes(b"stub")
@@ -228,7 +228,10 @@ def test_batch_generate_merge_failure_appends_error(tmp_path, monkeypatch):
     config = {"output_mode": OUTPUT_MERGE, "same_as_source": True, "merge_filename": "M.pdf"}
     results = svc.batch_generate(files, config)
 
-    # 合并失败 → 末尾追加一个失败结果
+    # 合并失败 → 输入未产生最终输出,不得保留中间转换成功状态
+    assert len(results) == 1
+    assert results[0]["source"] == files[0]
+    assert results[0]["output"] == tmp_path / "M.pdf"
     assert results[-1]["success"] is False
     assert results[-1]["error"] == "merge broke"
 

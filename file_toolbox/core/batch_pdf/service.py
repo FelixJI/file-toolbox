@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from file_toolbox.common.history import JsonHistoryStore
+from file_toolbox.common.operation_errors import preserve_history_result
 
 from .constants import (
     DPI_DEFAULT,
@@ -38,6 +39,7 @@ class PDFGeneratorService:
         self._ppt_converter = PptConverter(self._engine_manager)
         self._image_converter = ImageConverter()
         self.temp_files: list[Path] = []
+        self._cleanup_errors: list[Exception] = []
 
     def get_file_type(self, file_path: Path) -> str | None:
         """
@@ -179,7 +181,7 @@ class PDFGeneratorService:
         # 对于其他文件类型，先生成可编辑PDF
         if pdf_type == PDF_TYPE_IMAGE:
             # 图片型：先生成临时可编辑PDF，再转换
-            temp_pdf = output_path.parent / f"_temp_{output_path.name}"
+            temp_pdf = self._new_temp_pdf(output_path.name)
             try:
                 success, error = self._generate_editable_pdf(file_path, temp_pdf, config)
                 if not success:
@@ -199,16 +201,11 @@ class PDFGeneratorService:
                     scale_mode=scale_mode,
                 )
 
-                # 清理临时文件
-                with contextlib.suppress(Exception):
-                    temp_pdf.unlink()
-
                 return success, error
             except Exception as e:
-                # 清理临时文件
-                with contextlib.suppress(Exception):
-                    temp_pdf.unlink()
                 return False, f"生成图片型PDF失败: {e!s}"
+            finally:
+                self._cleanup_temp_pdf(temp_pdf)
         else:
             # 可编辑型：直接生成
             return self._generate_editable_pdf(file_path, output_path, config)
@@ -288,9 +285,7 @@ class PDFGeneratorService:
             # 确定输出文件名
             if output_mode == OUTPUT_MERGE:
                 # 合并模式：先输出到临时目录
-                temp_dir = Path(tempfile.gettempdir()) / "pdf_generator"
-                temp_dir.mkdir(exist_ok=True)
-                output_path = temp_dir / f"{file_path.stem}_{idx}.pdf"
+                output_path = self._new_temp_pdf(f"{file_path.stem}_{idx}.pdf")
             else:
                 output_path = self.get_output_filename(file_path, out_dir)
 
@@ -331,26 +326,15 @@ class PDFGeneratorService:
                 temp_pdfs, merge_output, config.get("print_mode", PRINT_MODE_SINGLE)
             )
 
-            # 清理临时文件
-            for temp_pdf in temp_pdfs:
-                with contextlib.suppress(Exception):
-                    temp_pdf.unlink()
+            # 每个输入的成功状态表示最终产物,不能指向即将删除的中间文件。
+            for result in results:
+                if result["success"]:
+                    result["output"] = merge_output
+                    result["success"] = success
+                    result["error"] = error
 
-            if success:
-                # 更新结果
-                for result in results:
-                    if result["success"]:
-                        result["output"] = merge_output
-            else:
-                # 合并失败
-                results.append(
-                    {
-                        "source": Path("合并操作"),
-                        "output": merge_output,
-                        "success": False,
-                        "error": error,
-                    }
-                )
+        for temp_pdf in list(self.temp_files):
+            self._cleanup_temp_pdf(temp_pdf)
 
         if progress_callback:
             progress_callback(total, total, "完成")
@@ -362,20 +346,21 @@ class PDFGeneratorService:
         if self._history_store is not None:
             ok = sum(1 for r in results if r.get("success"))
             fail = len(results) - ok
-            self._history_store.add_record(
-                "pdf",
-                {
-                    "files": [str(f) for f in files],
-                    "success": ok,
-                    "failed": fail,
-                    "config": {
-                        "pdf_type": config.get("pdf_type"),
-                        "output_mode": config.get("output_mode"),
-                        "engine": config.get("engine"),
-                        "dpi": config.get("dpi"),
+            with preserve_history_result(results):
+                self._history_store.add_record(
+                    "pdf",
+                    {
+                        "files": [str(f) for f in files],
+                        "success": ok,
+                        "failed": fail,
+                        "config": {
+                            "pdf_type": config.get("pdf_type"),
+                            "output_mode": config.get("output_mode"),
+                            "engine": config.get("engine"),
+                            "dpi": config.get("dpi"),
+                        },
                     },
-                },
-            )
+                )
         return results
 
     def get_file_info(self, file_path: Path) -> dict[str, Any]:
@@ -390,16 +375,39 @@ class PDFGeneratorService:
         """
         return get_file_info(file_path, SUPPORTED_FORMATS)
 
-    def close(self, _from_del: bool = False) -> None:  # pragma: no cover
-        """关闭Office应用。
+    def _new_temp_pdf(self, name: str) -> Path:
+        # 每个中间文件拥有独立目录,不覆盖或清理其他调用的临时文件。
+        path = Path(tempfile.mkdtemp(prefix="file-toolbox-pdf-")) / name
+        self.temp_files.append(path)
+        return path
 
-        _from_del:由 __del__ 调用时为 True,透传给 engine_manager.close 以跳过
-        gc.collect()——在 GC 链里再触发 gc.collect() 会与 pywin32/Windows 堆交互
-        导致 0xc0000374 堆损坏(EngineManager.__del__ 与 PDFGeneratorService.__del__
-        都可能进入此路径)。
-        """
-        with contextlib.suppress(Exception):
-            self._engine_manager.close(_from_del=_from_del)
+    def _cleanup_temp_pdf(self, path: Path) -> None:
+        try:
+            path.unlink(missing_ok=True)
+            path.parent.rmdir()
+        except Exception as error:
+            self._cleanup_errors.append(error)
+        else:
+            self.temp_files.remove(path)
+
+    def close(self, _from_del: bool = False, *, strict: bool = False) -> None:
+        """释放本次临时文件和 Office;析构时不触发文件清理或嵌套 GC。"""
+        if _from_del:
+            with contextlib.suppress(Exception):
+                self._engine_manager.close(_from_del=True)
+            return
+        for path in list(self.temp_files):
+            self._cleanup_temp_pdf(path)
+        errors, self._cleanup_errors = self._cleanup_errors, []
+        try:
+            if strict:
+                self._engine_manager.close(strict=True)
+            else:
+                self._engine_manager.close()
+        except Exception as error:
+            errors.append(error)
+        if strict and errors:
+            raise ExceptionGroup("PDF 资源释放失败: " + "; ".join(map(str, errors)), errors)
 
     def __del__(self) -> None:  # pragma: no cover
         """析构函数"""

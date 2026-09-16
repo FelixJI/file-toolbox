@@ -174,7 +174,7 @@ def test_cleanup_temp_files_skips_missing(tmp_path):
 
 
 def test_cleanup_temp_files_permission_error_retries(tmp_path, monkeypatch):
-    """PermissionError 时重试最多 max_attempts(2)次;最终仍失败则跳过不抛。"""
+    """PermissionError 时重试最多 max_attempts(2)次;最终仍失败则保留待清理项,默认不抛。"""
     svc = FileConverterService()
     f = tmp_path / "locked.docx"
     f.write_text("x")
@@ -192,7 +192,7 @@ def test_cleanup_temp_files_permission_error_retries(tmp_path, monkeypatch):
 
     # 2 次尝试(0 和 1,attempt < max_attempts-1=1 → 第 0 次 continue,第 1 次 break)
     assert call_count["n"] == 2
-    assert svc.temp_files == []
+    assert svc.temp_files == [f]  # #81: 保留失败项,严格 close 不得丢失错误证据
 
     # 恢复并清理
     monkeypatch.setattr(Path, "unlink", real_unlink)
@@ -200,7 +200,7 @@ def test_cleanup_temp_files_permission_error_retries(tmp_path, monkeypatch):
 
 
 def test_cleanup_temp_files_generic_exception_swallowed(tmp_path, monkeypatch):
-    """非 PermissionError 异常被静默吞掉,不抛出。"""
+    """默认不抛非 PermissionError,但保留失败项供严格关闭报告。"""
     svc = FileConverterService()
     f = tmp_path / "bad.docx"
     f.write_text("x")
@@ -211,7 +211,7 @@ def test_cleanup_temp_files_generic_exception_swallowed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "unlink", raising_unlink)
     svc.cleanup_temp_files()  # 不应抛
-    assert svc.temp_files == []
+    assert svc.temp_files == [f]  # #81: 保留失败项,严格 close 不得丢失错误证据
 
 
 def test_close_calls_cleanup(tmp_path):

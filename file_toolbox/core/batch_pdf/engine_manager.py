@@ -341,7 +341,7 @@ class EngineManager(LoggableMixin):
         """初始化PowerPoint应用，支持引擎切换"""
         return self._init_office_app("ppt", engine)
 
-    def close(self, _from_del: bool = False) -> None:
+    def close(self, _from_del: bool = False, *, strict: bool = False) -> None:
         """关闭Office应用。
 
         _from_del:由 __del__ 调用时为 True,此时跳过末尾的 gc.collect()——在 GC 链中
@@ -350,6 +350,7 @@ class EngineManager(LoggableMixin):
         import gc
         import time
 
+        errors: list[Exception] = []
         for spec in _APP_CONFIG.values():
             app = getattr(self, spec.app_attr, None)
             if app is not None:
@@ -357,6 +358,7 @@ class EngineManager(LoggableMixin):
                     app.Quit()
                 except Exception as e:
                     self.logger.error(f"关闭{spec.label}应用失败: {e}")
+                    errors.append(e)
                 setattr(self, spec.app_attr, None)
                 setattr(self, spec.engine_attr, None)
 
@@ -365,6 +367,8 @@ class EngineManager(LoggableMixin):
         if not _from_del:
             gc.collect()
             time.sleep(0.1)
+        if strict and not _from_del and errors:
+            raise ExceptionGroup("Office 释放失败: " + "; ".join(map(str, errors)), errors)
 
     def __del__(self) -> None:  # pragma: no cover
         """析构函数"""

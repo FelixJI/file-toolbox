@@ -5,6 +5,7 @@ from pathlib import Path
 
 import typer
 
+from file_toolbox.cli.resources import run_reported
 from file_toolbox.common.file_utils import expand_files
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.pdf_sort import (
@@ -89,7 +90,7 @@ def pdf_sort(
         raise typer.Exit(1)
 
     options = SortOptions(pattern=pattern, order=order, unmatched=unmatched)
-    svc = PdfSortService(history_store=JsonHistoryStore())
+    svc = PdfSortService(history_store=JsonHistoryStore() if yes else None)
 
     if not yes:
         try:
@@ -115,7 +116,7 @@ def pdf_sort(
         return
 
     try:
-        result = svc.sort(sources, options, output=output)
+        result, history_failed = run_reported(lambda: svc.sort(sources, options, output=output))
     except ValueError as e:
         typer.secho(f"错误:{e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
@@ -134,4 +135,7 @@ def pdf_sort(
     else:
         reason = "已取消" if result.cancelled else result.error_message
         typer.secho(f"\n失败: {reason}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    if result.failed or history_failed:
         raise typer.Exit(1)
