@@ -169,7 +169,7 @@ def test_rename_execute_echoes_failures(tmp_path, monkeypatch):
     monkeypatch.setattr(FileRenameService, "execute_rename", fake_execute)
 
     r = runner.invoke(app, ["rename", str(f), "--op", "add_prefix:text=P_", "--yes"])
-    assert r.exit_code == 0, r.output
+    assert r.exit_code == 1, r.output  # #81: 保留错误明细,同时返回失败
     # 失败行被 echo(行 73)
     assert "失败" in r.output
     assert "权限不足: a.txt" in r.output

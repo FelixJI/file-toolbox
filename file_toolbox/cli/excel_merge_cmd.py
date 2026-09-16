@@ -65,7 +65,7 @@ def excel_merge(
         output = sources[0].parent / DEFAULT_OUTPUT_NAME
 
     options = MergeOptions(naming=naming, mode=mode, include_hidden=include_hidden)
-    svc = ExcelMergeService(history_store=JsonHistoryStore())
+    svc = ExcelMergeService(history_store=JsonHistoryStore() if yes else None)
 
     if not yes:
         plans, failed = svc.plan_sheets(sources, options)
@@ -98,4 +98,7 @@ def excel_merge(
     else:
         reason = "已取消" if result.cancelled else result.error_message
         typer.secho(f"\n失败: {reason}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    if result.failed:
         raise typer.Exit(1)

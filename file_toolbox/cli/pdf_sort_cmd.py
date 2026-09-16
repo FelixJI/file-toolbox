@@ -89,7 +89,7 @@ def pdf_sort(
         raise typer.Exit(1)
 
     options = SortOptions(pattern=pattern, order=order, unmatched=unmatched)
-    svc = PdfSortService(history_store=JsonHistoryStore())
+    svc = PdfSortService(history_store=JsonHistoryStore() if yes else None)
 
     if not yes:
         try:
@@ -134,4 +134,7 @@ def pdf_sort(
     else:
         reason = "已取消" if result.cancelled else result.error_message
         typer.secho(f"\n失败: {reason}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    if result.failed:
         raise typer.Exit(1)
