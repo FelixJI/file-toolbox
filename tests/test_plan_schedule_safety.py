@@ -35,16 +35,17 @@ def test_history_failure_keeps_written_result(tmp_path):
 
 
 @pytest.mark.parametrize("mode", ["index", "name"])
-def test_literal_name_round_trip(tmp_path, mode):
+@pytest.mark.parametrize("name", ["=1+1", "  项点 A  "])
+def test_literal_name_round_trip(tmp_path, mode, name):
     result = PlanScheduleService().generate(
-        input_book(tmp_path, "=1+1"), tmp_path / "out.xlsx", ScheduleOptions(cell_mode=mode)
+        input_book(tmp_path, name), tmp_path / "out.xlsx", ScheduleOptions(cell_mode=mode)
     )
     wb = load_workbook(result.output)
     try:
-        assert wb.active["A3"].value == "=1+1"
+        assert wb.active["A3"].value == name
         assert wb.active["A3"].data_type == "s"
         if mode == "name":
-            assert wb.active["R3"].value == "=1+1"
+            assert wb.active["R3"].value == name
             assert wb.active["R3"].data_type == "s"
     finally:
         wb.close()
@@ -156,3 +157,9 @@ def test_cli_and_gui_report_history_warning(tmp_path, monkeypatch):
         ScheduleResult(output=output, warning_message="历史未保存")
     )
     assert "已排布" in summary and "历史未保存" in summary
+
+
+def test_whitespace_only_name_is_invalid(tmp_path):
+    items, invalid = PlanScheduleService().parse(input_book(tmp_path, "  "))
+    assert items == []
+    assert len(invalid) == 1 and invalid[0].error == "缺少项点名称"

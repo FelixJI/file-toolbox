@@ -106,8 +106,8 @@ class PlanScheduleService(LoggableMixin):
             end_v = self._cell(row, end_col)
             if self._is_blank(name_v) and self._is_blank(start_v) and self._is_blank(end_v):
                 continue  # 整行空:跳过(清单常见尾部空行)
-            name = self._text(name_v)
-            if not name:
+            name = name_v if isinstance(name_v, str) else self._text(name_v)
+            if not name.strip():
                 invalid.append(InvalidRow(row_no, "缺少项点名称"))
                 continue
             start = self._parse_date(start_v, options.default_year)
