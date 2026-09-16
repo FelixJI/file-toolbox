@@ -674,3 +674,39 @@ def test_failed_tab_switch_reports_error_then_recovers_history_button(win):
     win._tabs.setCurrentIndex(1)
     assert win.btn_history.isEnabled() and win._mkdir_tab is not None
     assert "temporary tab failure" not in win.statusBar().currentMessage()
+
+
+@pytest.mark.parametrize("failed_tab_first", [False, True])
+@pytest.mark.parametrize("update_state", ["uncertain", "cancelling", "applying"])
+def test_tab_switch_preserves_update_message(win, monkeypatch, failed_tab_first, update_state):
+    if failed_tab_first:
+        label, original, attr = win._lazy_specs[1]
+
+        def broken():
+            raise RuntimeError("temporary tab failure")
+
+        win._lazy_specs[1] = (label, broken, attr)
+        win._tabs.setCurrentIndex(1)
+        win._lazy_specs[1] = (label, original, attr)
+    request = UpdateRequest()
+    win._download_request = request
+    if update_state == "cancelling":
+        monkeypatch.setattr(win._update_worker, "cancel_download", lambda _request: True)
+        win._on_download_cancel()
+        expected = "正在取消"
+    else:
+        request.begin_apply()
+        if update_state == "uncertain":
+            monkeypatch.setattr(QMessageBox, "warning", lambda *_args: None)
+            win._on_update_applied(
+                request, UpdateApplyResult(UpdateApplyStatus.FAILED, "apply failed")
+            )
+            expected = "不确定"
+        else:
+            win._on_update_applying(request)
+            expected = "正在应用"
+    message = win.statusBar().currentMessage()
+    assert expected in message
+    win._tabs.setCurrentIndex(0 if failed_tab_first else 1)
+    assert win.statusBar().currentMessage() == message
+    assert win._download_request is request
