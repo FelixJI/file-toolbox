@@ -710,3 +710,40 @@ def test_tab_switch_preserves_update_message(win, monkeypatch, failed_tab_first,
     win._tabs.setCurrentIndex(0 if failed_tab_first else 1)
     assert win.statusBar().currentMessage() == message
     assert win._download_request is request
+
+
+@pytest.mark.parametrize("update_state", ["uncertain", "cancelling", "applying"])
+def test_failed_tab_restores_preexisting_update_message(win, monkeypatch, update_state):
+    request = UpdateRequest()
+    win._download_request = request
+    if update_state == "cancelling":
+        monkeypatch.setattr(win._update_worker, "cancel_download", lambda _request: True)
+        win._on_download_cancel()
+    else:
+        request.begin_apply()
+        if update_state == "uncertain":
+            monkeypatch.setattr(QMessageBox, "warning", lambda *_args: None)
+            win._on_update_applied(
+                request, UpdateApplyResult(UpdateApplyStatus.FAILED, "apply failed")
+            )
+        else:
+            win._on_update_applying(request)
+    message = win.statusBar().currentMessage()
+    label, original, attr = win._lazy_specs[1]
+
+    def broken():
+        raise RuntimeError("temporary tab failure")
+
+    win._lazy_specs[1] = (label, broken, attr)
+    win._tabs.setCurrentIndex(1)
+    assert "temporary tab failure" in win.statusBar().currentMessage()
+    # 另一个未构造页面也失败时,不能把第一次页面错误当成要恢复的业务状态。
+    other_label, _, other_attr = win._lazy_specs[2]
+    win._lazy_specs[2] = (other_label, broken, other_attr)
+    win._tabs.setCurrentIndex(2)
+    win._tabs.setCurrentIndex(0)
+    assert win.statusBar().currentMessage() == message
+    assert win._download_request is request
+    win._lazy_specs[1] = (label, original, attr)
+    win._tabs.setCurrentIndex(1)
+    assert win.statusBar().currentMessage() == message

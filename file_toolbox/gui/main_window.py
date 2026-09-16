@@ -150,6 +150,7 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         self._tabs = tabs
         self._tab_error_message: str | None = None
+        self._status_before_tab_error = ""
         self._rename_tab: FileRenamerDialog | None = None
         self._mkdir_tab: BatchFolderCreatorDialog | None = None
         self._pdf_tab: PDFGeneratorDialog | None = None
@@ -272,12 +273,14 @@ class MainWindow(QMainWindow):
             self._ensure_tab(index)
         except Exception as error:
             _logger.exception("Tab 构造失败 index=%d", index)
+            if self.statusBar().currentMessage() != self._tab_error_message:
+                self._status_before_tab_error = self.statusBar().currentMessage()
             self._tab_error_message = f"页面加载失败，切换后可重试: {error}"
             self.statusBar().showMessage(self._tab_error_message)
             self.btn_history.setEnabled(False)
             return
         if self.statusBar().currentMessage() == self._tab_error_message:
-            self.statusBar().showMessage("就绪")
+            self.statusBar().showMessage(self._status_before_tab_error)
         self._tab_error_message = None
         tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
         self.btn_history.setEnabled(tool is not None)
