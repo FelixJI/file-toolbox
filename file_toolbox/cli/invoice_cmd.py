@@ -45,7 +45,7 @@ def invoice(
         )
         raise typer.Exit(1)
 
-    svc = InvoiceService(history_store=JsonHistoryStore())
+    svc = InvoiceService(history_store=JsonHistoryStore() if yes else None)
     result = svc.parse_files(all_files, dedupe_strategy=dedupe)
 
     # 预览输出
@@ -94,3 +94,6 @@ def invoice(
     typer.secho(f"\n已导出 {len(written)} 个文件:", fg=typer.colors.GREEN)
     for w in written:
         typer.echo(f"  {w}")
+
+    if result.failed:
+        raise typer.Exit(1)

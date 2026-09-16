@@ -84,7 +84,8 @@ def test_cli_pdf_records_history(tmp_path, monkeypatch):
     src = tmp_path / "photo.png"
     Image.new("RGB", (10, 10), (255, 0, 0)).save(str(src))
     r = runner.invoke(
-        app, ["pdf", str(src), "--pdf-type", "editable", "--engine", "auto", "--dpi", "150"]
+        app,
+        ["pdf", "--yes", str(src), "--pdf-type", "editable", "--engine", "auto", "--dpi", "150"],
     )
     assert r.exit_code == 0, r.output
 
@@ -106,7 +107,8 @@ def test_cli_mkdir_records_history(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     root = tmp_path / "root"
     r = runner.invoke(
-        app, ["mkdir", "--root", str(root), "--levels", "项目A/文档", "--on-conflict", "merge"]
+        app,
+        ["mkdir", "--yes", "--root", str(root), "--levels", "项目A/文档", "--on-conflict", "merge"],
     )
     assert r.exit_code == 0, r.output
 

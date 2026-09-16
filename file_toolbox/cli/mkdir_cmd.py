@@ -1,4 +1,4 @@
-"""mkdir 命令:批量创建文件夹层级。"""
+"""mkdir 命令:批量创建文件夹层级,默认预览,--yes 执行。"""
 
 from pathlib import Path
 
@@ -15,10 +15,13 @@ def mkdir(
     levels: list[str] = typer.Option([], "--levels", help='层级,用 / 分隔,如 "部门A/项目1"'),
     from_table: Path | None = typer.Option(None, "--from-table", help="从 Tab 分隔文件读结构"),
     on_conflict: str = typer.Option("merge", "--on-conflict", help="skip|merge"),
+    yes: bool = typer.Option(False, "--yes", help="确认创建目录(默认仅预览)"),
 ) -> None:
     """批量创建文件夹。"""
-    strategy = _STRATEGY_MAP.get(on_conflict, ConflictStrategy.MERGE)
-    svc = FolderCreatorService(history_store=JsonHistoryStore())
+    if on_conflict not in _STRATEGY_MAP:
+        raise typer.BadParameter("必须为 skip 或 merge", param_hint="--on-conflict")
+    strategy = _STRATEGY_MAP[on_conflict]
+    svc = FolderCreatorService(history_store=JsonHistoryStore() if yes else None)
     structures: list[tuple[str, ...]] = []
 
     if from_table:
@@ -43,6 +46,10 @@ def mkdir(
     for it in items:
         mark = "[已存在]" if it.exists else "[新建]"
         typer.echo(f"  {mark} {it.path}")
+
+    if not yes:
+        typer.echo("(预览模式,加 --yes 创建目录)")
+        return
 
     result = svc.create_folders(items, strategy, root=str(root), structure_count=len(structures))
     typer.secho(
