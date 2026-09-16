@@ -348,75 +348,89 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 if progress_callback:
                     progress_callback(processed, total_files)
 
-        # 2. 处理 Word 文档(先创建备份)
+        # 2. 处理 Word 文档:只有备份成功或明确禁用备份的文件才进入写入批次。
         if docx_files and not is_cancelled():
-            # 为所有Word文档创建备份(可由 CLI --no-backup 关闭)
-            backup_paths = []
+            word_start = processed
+            word_skipped = 0
+            ready_word: list[Path] = []
             for file_path in docx_files:
-                if not keep_backup:
-                    continue
+                if is_cancelled():
+                    break
                 try:
-                    backup_path = self._create_backup(file_path)
-                    backup_paths.append((file_path, backup_path))
+                    if keep_backup:
+                        self._create_backup(file_path)
+                    ready_word.append(file_path)
                 except Exception as e:
                     errors.append(f"{file_path.name}: 备份失败 - {e!s}")
+                    word_skipped += 1
+                    processed += 1
+                    if progress_callback:
+                        progress_callback(processed, total_files)
 
             def word_file_callback(file_idx: int) -> None:
                 nonlocal processed
-                processed = len(text_files) + file_idx
+                processed = word_start + word_skipped + file_idx
                 if progress_callback:
                     progress_callback(processed, total_files)
 
-            result = self._word_handler.batch_replace(
-                docx_files,
-                operations,
-                keep_new_format,
-                cancel_check,
-                word_file_callback,
-            )
+            if ready_word and not is_cancelled():
+                result = self._word_handler.batch_replace(
+                    ready_word,
+                    operations,
+                    keep_new_format,
+                    cancel_check,
+                    word_file_callback,
+                )
+                success_count += result["success_count"]
+                total_replacements += result["total_replacements"]
+                errors.extend(result["errors"])
 
-            success_count += result["success_count"]
-            total_replacements += result["total_replacements"]
-            errors.extend(result["errors"])
+            if not is_cancelled():
+                processed = word_start + len(docx_files)
+                if progress_callback:
+                    progress_callback(processed, total_files)
 
-            processed = len(text_files) + len(docx_files)
-
-            if progress_callback:
-                progress_callback(processed, total_files)
-
-        # 3. 处理 Excel 文档(先创建备份)
+        # 3. 处理 Excel 文档:只有备份成功或明确禁用备份的文件才进入写入批次。
         if xlsx_files and not is_cancelled():
-            # 为所有Excel文档创建备份(可由 CLI --no-backup 关闭)
+            excel_start = processed
+            excel_skipped = 0
+            ready_excel: list[Path] = []
             for file_path in xlsx_files:
-                if not keep_backup:
-                    continue
+                if is_cancelled():
+                    break
                 try:
-                    backup_path = self._create_backup(file_path)
+                    if keep_backup:
+                        self._create_backup(file_path)
+                    ready_excel.append(file_path)
                 except Exception as e:
                     errors.append(f"{file_path.name}: 备份失败 - {e!s}")
+                    excel_skipped += 1
+                    processed += 1
+                    if progress_callback:
+                        progress_callback(processed, total_files)
 
             def excel_file_callback(file_idx: int) -> None:
                 nonlocal processed
-                processed = len(text_files) + len(docx_files) + file_idx
+                processed = excel_start + excel_skipped + file_idx
                 if progress_callback:
                     progress_callback(processed, total_files)
 
-            result = self._excel_handler.batch_replace(
-                xlsx_files,
-                operations,
-                keep_new_format,
-                cancel_check,
-                excel_file_callback,
-            )
+            if ready_excel and not is_cancelled():
+                result = self._excel_handler.batch_replace(
+                    ready_excel,
+                    operations,
+                    keep_new_format,
+                    cancel_check,
+                    excel_file_callback,
+                )
+                success_count += result["success_count"]
+                total_replacements += result["total_replacements"]
+                errors.extend(result["errors"])
 
-            success_count += result["success_count"]
-            total_replacements += result["total_replacements"]
-            errors.extend(result["errors"])
-
-            processed = len(text_files) + len(docx_files) + len(xlsx_files)
-
-            if progress_callback:
-                progress_callback(processed, total_files)
+            if not is_cancelled():
+                processed = excel_start + len(xlsx_files)
+                if progress_callback:
+                    progress_callback(processed, total_files)
 
         self.converter.cleanup_temp_files()
 

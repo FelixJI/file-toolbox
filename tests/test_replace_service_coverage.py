@@ -17,6 +17,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from file_toolbox.core.batch_replace.service import ContentReplaceService
 
 SIMPLE = {"type": "simple_replace", "params": {"find": "old", "replace": "new"}}
@@ -539,3 +541,104 @@ def test_preview_replace_conversion_exception_handled(tmp_path, monkeypatch):
 
     assert "错误" in result[f]["status"]
     assert "convert boom" in result[f]["status"]
+
+
+@pytest.mark.parametrize("suffix", [".doc", ".docx", ".xls", ".xlsx"])
+@pytest.mark.parametrize("all_fail", [False, True])
+def test_office_backup_failure_never_dispatches_file(tmp_path, monkeypatch, suffix, all_fail):
+    svc = _svc_with_mocks()
+    svc._backup_dir = tmp_path / "backups"
+    svc._backup_dir.mkdir()
+    files = [tmp_path / f"{name}{suffix}" for name in ("bad", "good")]
+    for path in files:
+        path.write_bytes(b"before")
+    backup = svc._create_backup
+
+    def maybe_backup(path):
+        if all_fail or path == files[0]:
+            raise OSError("backup denied")
+        return backup(path)
+
+    monkeypatch.setattr(svc, "_create_backup", maybe_backup)
+    handler = svc._word_handler if suffix in (".doc", ".docx") else svc._excel_handler
+    upgrade = suffix in (".doc", ".xls")
+
+    def write(received, operations, keep_new, cancel, callback):
+        assert keep_new is upgrade and operations == [SIMPLE]
+        for index, path in enumerate(received):
+            callback(index)
+            path.write_bytes(b"after")
+        return {"success_count": len(received), "total_replacements": len(received), "errors": []}
+
+    handler.batch_replace.side_effect = write
+    progress = []
+    success, count, errors = svc.execute_replace(
+        files,
+        [SIMPLE],
+        keep_new_format=upgrade,
+        progress_callback=lambda done, total: progress.append((done, total)),
+    )
+    assert files[0].read_bytes() == b"before"
+    assert all("backup denied" in error for error in errors)
+    assert len(errors) == (2 if all_fail else 1)
+    assert (success, count) == ((0, 0) if all_fail else (1, 1))
+    if all_fail:
+        handler.batch_replace.assert_not_called()
+        assert files[1].read_bytes() == b"before"
+    else:
+        assert handler.batch_replace.call_args.args[0] == [files[1]]
+        assert files[1].read_bytes() == b"after"
+        backups = list(svc._backup_dir.iterdir())
+        assert len(backups) == 1 and backups[0].read_bytes() == b"before"
+    assert progress[-1] == (2, 2)
+    assert [done for done, _ in progress] == sorted(done for done, _ in progress)
+
+
+@pytest.mark.parametrize(
+    "suffix,handler_name", [(".doc", "_word_handler"), (".xls", "_excel_handler")]
+)
+def test_legacy_explicit_no_backup_keeps_upgrade_flag(tmp_path, monkeypatch, suffix, handler_name):
+    svc = _svc_with_mocks()
+    path = tmp_path / ("old" + suffix)
+    path.write_bytes(b"before")
+    backup = MagicMock(side_effect=AssertionError("backup must not run"))
+    monkeypatch.setattr(svc, "_create_backup", backup)
+    handler = getattr(svc, handler_name)
+    handler.batch_replace.return_value = {"success_count": 1, "total_replacements": 2, "errors": []}
+    assert svc.execute_replace([path], [SIMPLE], keep_new_format=True, keep_backup=False) == (
+        1,
+        2,
+        [],
+    )
+    backup.assert_not_called()
+    assert handler.batch_replace.call_args.args[:3] == ([path], [SIMPLE], True)
+
+
+@pytest.mark.parametrize(
+    "suffix,handler_name", [(".docx", "_word_handler"), (".xlsx", "_excel_handler")]
+)
+def test_cancel_during_office_backup_stops_before_dispatch(
+    tmp_path, monkeypatch, suffix, handler_name
+):
+    svc = _svc_with_mocks()
+    files = [tmp_path / f"{name}{suffix}" for name in ("a", "b")]
+    for path in files:
+        path.write_bytes(b"before")
+    backed = []
+
+    def backup(path):
+        backed.append(path)
+        return tmp_path / "backup"
+
+    monkeypatch.setattr(svc, "_create_backup", backup)
+    progress = []
+    assert svc.execute_replace(
+        files,
+        [SIMPLE],
+        cancel_check=lambda: bool(backed),
+        progress_callback=lambda done, total: progress.append((done, total)),
+    ) == (0, 0, [])
+    assert backed == [files[0]]
+    getattr(svc, handler_name).batch_replace.assert_not_called()
+    assert all(path.read_bytes() == b"before" for path in files)
+    assert (2, 2) not in progress
