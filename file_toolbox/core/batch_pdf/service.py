@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from file_toolbox.common.history import JsonHistoryStore
+from file_toolbox.common.operation_errors import preserve_history_result
 
 from .constants import (
     DPI_DEFAULT,
@@ -362,20 +363,21 @@ class PDFGeneratorService:
         if self._history_store is not None:
             ok = sum(1 for r in results if r.get("success"))
             fail = len(results) - ok
-            self._history_store.add_record(
-                "pdf",
-                {
-                    "files": [str(f) for f in files],
-                    "success": ok,
-                    "failed": fail,
-                    "config": {
-                        "pdf_type": config.get("pdf_type"),
-                        "output_mode": config.get("output_mode"),
-                        "engine": config.get("engine"),
-                        "dpi": config.get("dpi"),
+            with preserve_history_result(results):
+                self._history_store.add_record(
+                    "pdf",
+                    {
+                        "files": [str(f) for f in files],
+                        "success": ok,
+                        "failed": fail,
+                        "config": {
+                            "pdf_type": config.get("pdf_type"),
+                            "output_mode": config.get("output_mode"),
+                            "engine": config.get("engine"),
+                            "dpi": config.get("dpi"),
+                        },
                     },
-                },
-            )
+                )
         return results
 
     def get_file_info(self, file_path: Path) -> dict[str, Any]:
@@ -390,7 +392,7 @@ class PDFGeneratorService:
         """
         return get_file_info(file_path, SUPPORTED_FORMATS)
 
-    def close(self, _from_del: bool = False) -> None:  # pragma: no cover
+    def close(self, _from_del: bool = False, *, strict: bool = False) -> None:  # pragma: no cover
         """关闭Office应用。
 
         _from_del:由 __del__ 调用时为 True,透传给 engine_manager.close 以跳过
@@ -398,8 +400,11 @@ class PDFGeneratorService:
         导致 0xc0000374 堆损坏(EngineManager.__del__ 与 PDFGeneratorService.__del__
         都可能进入此路径)。
         """
-        with contextlib.suppress(Exception):
-            self._engine_manager.close(_from_del=_from_del)
+        if strict and not _from_del:
+            self._engine_manager.close(strict=True)
+        else:
+            with contextlib.suppress(Exception):
+                self._engine_manager.close(_from_del=_from_del)
 
     def __del__(self) -> None:  # pragma: no cover
         """析构函数"""

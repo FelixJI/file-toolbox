@@ -16,6 +16,7 @@ from pypdf import PdfReader, PdfWriter
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.operation_errors import preserve_history_result
 from file_toolbox.core.pdf_sort.constants import (
     SORTED_MARKER,
     SUPPORTED_SUFFIXES,
@@ -157,7 +158,8 @@ class PdfSortService(LoggableMixin):
             sum(1 for f in sorted_files if f.output is not None),
         )
         result = SortResult(sorted_files=sorted_files, failed=failed)
-        self._record_history(result, total, options)
+        with preserve_history_result(result):
+            self._record_history(result, total, options)
         return result
 
     # ==================== 内部实现 ====================

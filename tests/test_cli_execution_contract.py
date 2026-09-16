@@ -64,7 +64,7 @@ def test_service_closes_without_masking_primary_error(command, failure, tmp_path
     def run(*args, **kwargs):
         raise failure
 
-    def close():
+    def close(**kwargs):
         closed.append(True)
         raise RuntimeError("cleanup broke")
 
@@ -102,7 +102,9 @@ def test_pdf_partial_failure_closes_and_retains_paths(tmp_path, monkeypatch):
             "error": "conversion broke",
         },
     ]
-    service = SimpleNamespace(batch_generate=lambda *args: rows, close=lambda: closed.append(True))
+    service = SimpleNamespace(
+        batch_generate=lambda *args: rows, close=lambda **kwargs: closed.append(True)
+    )
     monkeypatch.setattr("file_toolbox.cli.pdf_cmd.PDFGeneratorService", lambda **kwargs: service)
     result = CliRunner().invoke(app, ["pdf", str(a), str(b), "--yes"])
     assert result.exit_code == 1 and closed == [True]
@@ -188,7 +190,7 @@ def test_invoice_partial_failure_reports_export(ofd_sample, tmp_path):
 def test_replace_closes_each_exit_path(phase, tmp_path, monkeypatch):
     closed = []
 
-    def close():
+    def close(**kwargs):
         closed.append(True)
         if phase == "close_failure":
             raise RuntimeError("cleanup failed")
@@ -208,3 +210,131 @@ def test_replace_closes_each_exit_path(phase, tmp_path, monkeypatch):
     result = CliRunner().invoke(app, args)
     assert closed == [True]
     assert (result.exit_code == 0) == (phase in ("preview", "success"))
+
+
+@pytest.mark.parametrize("command", ["pdf", "replace"])
+def test_real_service_cleanup_failure_is_visible(command, tmp_path, monkeypatch, make_text_pdf):
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.core.batch_replace.file_converter import FileConverterService
+    from file_toolbox.core.batch_replace.service import ContentReplaceService
+
+    monkeypatch.setattr(ContentReplaceService, "_get_office_pids", lambda *args: [])
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("underlying cleanup failed")
+
+    if command == "pdf":
+        source = make_text_pdf("source.pdf", ["x"])
+        monkeypatch.setattr(EngineManager, "close", fail)
+        args = ["pdf", str(source), "--yes"]
+    else:
+        source = tmp_path / "source.txt"
+        source.write_text("foo")
+        monkeypatch.setattr(FileConverterService, "close", fail)
+        args = [
+            "replace",
+            str(source),
+            "--op",
+            "simple_replace:find=foo,replace=bar",
+            "--yes",
+            "--no-backup",
+        ]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code != 0
+    assert "underlying cleanup failed" in result.output
+
+
+@pytest.mark.parametrize("command", ["pdf", "replace", "excel-merge", "pdf-sort", "invoice"])
+def test_history_failure_retains_real_completed_result(
+    command, tmp_path, monkeypatch, make_text_pdf, make_xlsx, ofd_sample
+):
+    from file_toolbox.common.history import JsonHistoryStore
+    from file_toolbox.core.batch_replace.service import ContentReplaceService
+
+    monkeypatch.setattr(ContentReplaceService, "_get_office_pids", lambda *args: [])
+
+    def fail(*args, **kwargs):
+        raise OSError("history disk full")
+
+    monkeypatch.setattr(JsonHistoryStore, "add_record", fail)
+    if command == "pdf":
+        source = make_text_pdf("source.pdf", ["x"])
+        (tmp_path / "source_1.pdf").write_bytes(b"occupied")
+        expected = tmp_path / "source_2.pdf"
+        args = ["pdf", str(source), "--yes"]
+    elif command == "replace":
+        expected = tmp_path / "source.txt"
+        expected.write_text("foo")
+        args = [
+            "replace",
+            str(expected),
+            "--op",
+            "simple_replace:find=foo,replace=bar",
+            "--yes",
+            "--no-backup",
+        ]
+    elif command == "excel-merge":
+        source = make_xlsx("source.xlsx", {"Sheet": [["v"]]})
+        expected = tmp_path / "out.xlsx"
+        args = ["excel-merge", str(source), "--output", str(expected), "--yes"]
+    elif command == "pdf-sort":
+        source = make_text_pdf("source.pdf", ["Date: 2", "Date: 1"])
+        expected = tmp_path / "out.pdf"
+        args = [
+            "pdf-sort",
+            str(source),
+            "--pattern",
+            r"Date: (\d)",
+            "--output",
+            str(expected),
+            "--yes",
+        ]
+    else:
+        expected = tmp_path / "out.json"
+        args = ["invoice", str(ofd_sample), "--format", "json", "--output", str(expected), "--yes"]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 1 and expected.is_file()
+    assert "history disk full" in result.output
+    if command == "replace":
+        assert expected.read_text() == "bar" and "处理 1 个文件" in result.output
+    else:
+        assert expected.name in result.output
+
+
+def test_engine_strict_close_attempts_all_apps(monkeypatch):
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    manager = EngineManager()
+    calls = []
+
+    def quit_word():
+        calls.append("word")
+        raise RuntimeError("Quit failed")
+
+    manager._word_app = SimpleNamespace(Quit=quit_word)
+    manager._excel_app = SimpleNamespace(Quit=lambda: calls.append("excel"))
+    with pytest.raises(ExceptionGroup, match="Quit failed"):
+        manager.close(strict=True)
+    assert calls == ["word", "excel"]
+
+
+def test_converter_strict_close_reports_locked_temp(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from file_toolbox.core.batch_replace.file_converter import FileConverterService
+
+    converter = FileConverterService()
+    source = tmp_path / "temporary.docx"
+    source.touch()
+    converter.temp_files.append(source)
+    real_unlink = Path.unlink
+
+    def unlink(path, *args, **kwargs):
+        if path == source:
+            raise PermissionError("locked temporary file")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    with pytest.raises(ExceptionGroup, match="locked temporary file"):
+        converter.close(strict=True)
+    assert source in converter.temp_files

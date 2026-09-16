@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from file_toolbox.cli.resources import close_on_exit
+from file_toolbox.cli.resources import close_on_exit, run_reported
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_pdf import PDFGeneratorService
 from file_toolbox.core.batch_pdf.constants import (
@@ -67,8 +67,8 @@ def pdf(
         typer.echo(f"  [{cur}/{total}] {msg}")
 
     svc = PDFGeneratorService(history_store=JsonHistoryStore())
-    with close_on_exit(svc.close):
-        results = svc.batch_generate(files, config, progress)
+    with close_on_exit(lambda: svc.close(strict=True)):
+        results, history_failed = run_reported(lambda: svc.batch_generate(files, config, progress))
         ok = sum(1 for r in results if r["success"])
         fail = sum(1 for r in results if not r["success"])
         for r in results:
@@ -80,5 +80,5 @@ def pdf(
             f"\n完成: 成功 {ok}, 失败 {fail}",
             fg=typer.colors.GREEN if fail == 0 else typer.colors.YELLOW,
         )
-        if fail:
+        if fail or history_failed:
             raise typer.Exit(1)

@@ -15,6 +15,7 @@ from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import format_file_size
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.operation_errors import preserve_history_result
 from file_toolbox.common.paths import get_backup_dir
 from file_toolbox.core.batch_replace.file_converter import FileConverterService
 from file_toolbox.core.batch_replace.handlers.excel_handler import ExcelHandler
@@ -75,23 +76,27 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 continue
         return pids
 
-    def _kill_new_office_processes(self, process_name: str, pids_before: list[int]) -> None:
+    def _kill_new_office_processes(
+        self, process_name: str, pids_before: list[int], *, strict: bool = False
+    ) -> None:
         """强制结束新启动的 Office 进程"""
         current_pids = self._get_office_pids(process_name)
         new_pids = set(current_pids) - set(pids_before)
 
+        errors: list[Exception] = []
         for pid in new_pids:
-            with contextlib.suppress(
-                psutil.AccessDenied,
-                psutil.NoSuchProcess,
-                psutil.TimeoutExpired,
-                psutil.ZombieProcess,
-            ):
+            try:
                 process = psutil.Process(pid)
                 if process.name().casefold() != process_name.casefold():
                     continue
                 process.kill()
                 process.wait(timeout=5)
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                pass  # 已消失的进程不再持有需要释放的资源。
+            except (psutil.AccessDenied, psutil.TimeoutExpired) as error:
+                errors.append(error)
+        if strict and errors:
+            raise ExceptionGroup("进程释放失败: " + "; ".join(map(str, errors)), errors)
 
     def is_supported_file(self, file_path: Path) -> bool:
         """检查文件是否为支持的格式"""
@@ -418,10 +423,11 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         # 记录历史(执行后):无论是否有 errors 都记录,与原 GUI replace_tab 内联
         # 写入一致。形状 {"files": [str], "operations": operations}。
         if self._history_store is not None:
-            self._history_store.add_record(
-                "replace",
-                {"files": [str(f) for f in files], "operations": operations},
-            )
+            with preserve_history_result((success_count, total_replacements, errors)):
+                self._history_store.add_record(
+                    "replace",
+                    {"files": [str(f) for f in files], "operations": operations},
+                )
         return success_count, total_replacements, errors
 
     def _count_matches(self, file_path: Path, operations: list[dict[str, Any]]) -> int:
@@ -458,25 +464,38 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
             return None
 
-    def close(self, _from_del: bool = False) -> None:
-        """关闭服务,释放资源。
-
-        _from_del:由 __del__ 调用时为 True,此时跳过末尾的进程清理与潜在
-        gc 交互——在解释器关闭链中调用进程清理 API 不安全。
-        """
-        with contextlib.suppress(Exception):
-            self.converter.close()
+    def close(self, _from_del: bool = False, *, strict: bool = False) -> None:
+        """显式严格关闭汇总失败;析构仍跳过进程清理,保持原安全行为。"""
+        errors: list[Exception] = []
+        try:
+            if strict and not _from_del:
+                self.converter.close(strict=True)
+            else:
+                self.converter.close()
+        except Exception as error:
+            errors.append(error)
         if _from_del:
             return
-        try:
-            if self._lock.acquire(blocking=False):
-                try:
-                    self._kill_new_office_processes("WINWORD.EXE", self._initial_word_pids)
-                    self._kill_new_office_processes("EXCEL.EXE", self._initial_excel_pids)
-                finally:
-                    self._lock.release()
-        except Exception:
-            pass
+        acquired = self._lock.acquire(blocking=False)
+        if acquired:
+            try:
+                for name, pids in (
+                    ("WINWORD.EXE", self._initial_word_pids),
+                    ("EXCEL.EXE", self._initial_excel_pids),
+                ):
+                    try:
+                        if strict:
+                            self._kill_new_office_processes(name, pids, strict=True)
+                        else:
+                            self._kill_new_office_processes(name, pids)
+                    except Exception as error:
+                        errors.append(error)
+            finally:
+                self._lock.release()
+        elif strict:
+            errors.append(RuntimeError("服务仍在运行,无法释放资源"))
+        if strict and errors:
+            raise ExceptionGroup("资源释放失败: " + "; ".join(map(str, errors)), errors)
 
     def _create_backup(self, file_path: Path) -> Path:
         """创建文件备份

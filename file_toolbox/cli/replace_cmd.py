@@ -5,7 +5,7 @@ from pathlib import Path
 import typer
 
 from file_toolbox.cli.op_parser import parse_ops
-from file_toolbox.cli.resources import close_on_exit
+from file_toolbox.cli.resources import close_on_exit, run_reported
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_replace import ContentReplaceService
 
@@ -26,7 +26,7 @@ def replace(
         raise typer.Exit(1)
 
     svc = ContentReplaceService(history_store=JsonHistoryStore() if yes else None)
-    with close_on_exit(svc.close):
+    with close_on_exit(lambda: svc.close(strict=True)):
         valid, msg = svc.validate_operations(operations)
         if not valid:
             typer.secho(f"错误:{msg}", fg=typer.colors.RED, err=True)
@@ -42,9 +42,11 @@ def replace(
             typer.echo(f"\n总匹配 {matched} 处。(加 --yes 执行,执行前自动备份)")
             return
 
-        success, total, errors = svc.execute_replace(files, operations, keep_backup=keep_backup)
+        (success, total, errors), history_failed = run_reported(
+            lambda: svc.execute_replace(files, operations, keep_backup=keep_backup)
+        )
         typer.secho(f"\n完成: 处理 {success} 个文件, 替换 {total} 处", fg=typer.colors.GREEN)
         for e in errors:
             typer.secho(f"  失败: {e}", fg=typer.colors.YELLOW)
-        if errors:
+        if errors or history_failed:
             raise typer.Exit(1)

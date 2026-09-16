@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from file_toolbox.cli.resources import run_reported
 from file_toolbox.common.file_utils import expand_files
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.excel_merge import (
@@ -85,8 +86,13 @@ def excel_merge(
         typer.echo("(预览模式,加 --yes 执行;输出永不覆盖已有文件)")
         return
 
-    result = svc.merge(
-        sources, output, options, progress_callback=lambda c, t, m: typer.echo(f"  [{c}/{t}] {m}")
+    result, history_failed = run_reported(
+        lambda: svc.merge(
+            sources,
+            output,
+            options,
+            progress_callback=lambda c, t, m: typer.echo(f"  [{c}/{t}] {m}"),
+        )
     )
     for f in result.failed:
         typer.secho(f"  失败: {f.file} - {f.error}", fg=typer.colors.YELLOW)
@@ -100,5 +106,5 @@ def excel_merge(
         typer.secho(f"\n失败: {reason}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    if result.failed:
+    if result.failed or history_failed:
         raise typer.Exit(1)

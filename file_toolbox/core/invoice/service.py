@@ -5,6 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from file_toolbox.common.history import JsonHistoryStore
+from file_toolbox.common.operation_errors import preserve_history_result
 from file_toolbox.core.invoice.dedupe import (
     DEDUPE,
     KEEP_ALL,
@@ -93,16 +94,17 @@ class InvoiceService:
             jp = json_path or output_path.with_suffix(".json")
             written.append(export_json(result.invoices, jp, dedupe_strategy, result.failed))
         if self._history_store is not None:
-            self._history_store.add_record(
-                "invoice",
-                {
-                    "file_count": file_count if file_count is not None else 0,
-                    "invoice_count": invoice_count if invoice_count is not None else 0,
-                    "dedupe_strategy": dedupe_strategy,
-                    "fmt": fmt,
-                    "outputs": [str(w) for w in written],
-                },
-            )
+            with preserve_history_result(written):
+                self._history_store.add_record(
+                    "invoice",
+                    {
+                        "file_count": file_count if file_count is not None else 0,
+                        "invoice_count": invoice_count if invoice_count is not None else 0,
+                        "dedupe_strategy": dedupe_strategy,
+                        "fmt": fmt,
+                        "outputs": [str(w) for w in written],
+                    },
+                )
         return written
 
     @staticmethod
