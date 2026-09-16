@@ -182,6 +182,37 @@ def test_parse_date_direct_edge_branches(svc):
     assert svc._parse_date("  ", 2026) is None
     assert svc._parse_date(object(), 2026) is None
     assert svc._parse_date(0, 2026) is None
+    assert svc._parse_date(-1, 2026) is None
+
+
+def test_parse_date_out_of_range_numbers_return_none(svc):
+    """超出 date/timedelta 范围或非有限的数值 → None(行级无效,不抛 OverflowError)。"""
+    assert svc._parse_date(20260917, 2026) is None  # 越界整数,不按 YYYYMMDD 解释
+    assert svc._parse_date(20260917.0, 2026) is None
+    assert svc._parse_date(10**12, 2026) is None
+    assert svc._parse_date(float("inf"), 2026) is None
+    assert svc._parse_date(float("-inf"), 2026) is None
+    assert svc._parse_date(float("nan"), 2026) is None
+
+
+def test_generate_continues_after_out_of_range_numeric_row(svc, make_xlsx, tmp_path):
+    """越界数值日期(20260917/20260918)只作废该行,后续有效行照常生成输出。"""
+    src = make_xlsx(
+        "list.xlsx",
+        {
+            "S": [
+                ["项点名称", "起始日期", "终止日期"],
+                ["坏数值", 20260917, 20260918],
+                ["正常", date(2026, 9, 17), date(2026, 9, 21)],
+            ]
+        },
+    )
+    result = svc.generate(src, tmp_path / "out.xlsx")
+    assert result.success
+    assert result.output is not None and result.output.is_file()
+    assert [it.name for it in result.items] == ["正常"]
+    assert [inv.row for inv in result.invalid] == [2]
+    assert result.invalid[0].error == "起始日期无法识别:20260917"
 
 
 # ==================== 排布计算 ====================
@@ -355,7 +386,8 @@ def test_generate_layout_matches_delivery_template(svc, make_xlsx, tmp_path):
 
 
 def test_generate_marks_weekends(svc, make_xlsx, tmp_path):
-    """周末:DATE 表头灰底红字;项点行/并行数行的空周末格灰底;工作日无底色。"""
+    """周末整列灰底优先:DATE 灰底红字;项点/并行数行周末列灰底(含活动值格),
+    非周末活动格保留项点填色,工作日无值格无底色。"""
     src = _make_input(
         make_xlsx,
         [["项点名称", "起始日期", "终止日期"], ["A", date(2026, 9, 17), date(2026, 9, 21)]],
@@ -365,22 +397,32 @@ def test_generate_marks_weekends(svc, make_xlsx, tmp_path):
     assert result.output is not None
     ws = load_workbook(result.output)[SHEET_NAME]
 
-    saturday = next(d for d in range(1, 31) if date(2026, 9, d).weekday() == 5)
-    sunday = saturday + 1
-    monday = sunday + 1
+    saturday = next(d for d in range(17, 22) if date(2026, 9, d).weekday() == 5)  # 19,区间内
+    sunday = saturday + 1  # 20
+    monday = sunday + 1  # 21,区间最后一天
+    # DATE 行:周末表头灰底红字
     sat_cell = ws.cell(row=2, column=1 + saturday)
     assert sat_cell.fill.fgColor.rgb == WEEKEND_FILL
     assert sat_cell.font.color.rgb == "FFC00000"
-    # 项点行(第 3 行):17 起始,周末格若不在项点区间内应为灰底
-    item_weekend = ws.cell(row=3, column=1 + saturday)
-    if saturday < 17:
-        assert item_weekend.fill.fgColor.rgb == WEEKEND_FILL
-        assert item_weekend.value is None
-    # 并行数行(第 4 行):空周末格灰底;周一无填色、无值
+    # 项点行(第 3 行):周末活动格灰底优先、值保留;非周末活动格保留项点填色
+    item_sat = ws.cell(row=3, column=1 + saturday)
+    assert item_sat.value == 3  # 9/19 = 项点内第 3 天
+    assert item_sat.fill.fgColor.rgb == WEEKEND_FILL
+    assert ws.cell(row=3, column=1 + sunday).fill.fgColor.rgb == WEEKEND_FILL
+    item_mon = ws.cell(row=3, column=1 + monday)
+    assert item_mon.value == 5
+    assert item_mon.fill.fgColor.rgb == ITEM_FILLS[0]
+    # 项点行:区间外的空周末格仍灰底、无值
+    item_empty_sat = ws.cell(row=3, column=1 + saturday + 7)  # 9/26
+    assert item_empty_sat.value is None
+    assert item_empty_sat.fill.fgColor.rgb == WEEKEND_FILL
+    # 并行数行(第 4 行):非零并行数的周末格灰底优先、值保留;周一有值无填色
     parallel_sat = ws.cell(row=4, column=1 + saturday)
-    if saturday < 17:
-        assert parallel_sat.fill.fgColor.rgb == WEEKEND_FILL
-    assert ws.cell(row=4, column=1 + monday).fill.patternType is None
+    assert parallel_sat.value == 1
+    assert parallel_sat.fill.fgColor.rgb == WEEKEND_FILL
+    parallel_mon = ws.cell(row=4, column=1 + monday)
+    assert parallel_mon.value == 1
+    assert parallel_mon.fill.patternType is None
 
 
 def test_generate_name_mode_writes_item_name(svc, make_xlsx, tmp_path):
@@ -407,8 +449,10 @@ def test_generate_name_mode_writes_item_name(svc, make_xlsx, tmp_path):
     assert ws.cell(row=3, column=17).value is None
     # 并行数行不受模式影响
     assert ws["V5"].value == 2
-    # 活动格填色保持(区分并行项点)
+    # 活动格填色保持(区分并行项点);周末活动格灰底优先、名称值保留
     assert ws["R3"].fill.fgColor.rgb == ITEM_FILLS[0]
+    assert ws["T3"].value == "合5第8列"  # 9/19 周六
+    assert ws["T3"].fill.fgColor.rgb == WEEKEND_FILL
     # 日期列宽自适应:最长名称 5 字 -> 11.0
     assert ws.column_dimensions["B"].width == 11.0
 

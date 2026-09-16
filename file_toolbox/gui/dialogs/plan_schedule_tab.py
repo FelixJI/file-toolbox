@@ -13,7 +13,13 @@ from typing import Any
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHeaderView,
+    QMessageBox,
+    QTableWidgetItem,
+    QWidget,
+)
 
 from file_toolbox.common import settings
 from file_toolbox.common.history import JsonHistoryStore
@@ -39,7 +45,10 @@ class PlanScheduleTab(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.ui = Ui_PlanScheduleDialog()
-        self.ui.setupUi(self)
+        self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
+        # .ui 无法表达整表列宽 Stretch(uic 仅支持 stretchLastSection 等属性),
+        # 该显示行为等价迁移自原手写布局,留在 Tab 设置
+        self.ui.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.ui.spin_year.setValue(date.today().year)
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()

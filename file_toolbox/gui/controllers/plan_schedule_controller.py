@@ -13,7 +13,20 @@ from file_toolbox.core.plan_schedule import (
     ScheduleResult,
 )
 
-# 下拉框索引 -> 常量值(与 generated/ui_plan_schedule_dialog.py 的 CELL_LABELS 顺序一致)
+# ---- 展示常量(自 generated/ui_plan_schedule_dialog.py 迁入;布局文本的权威源是
+# forms/plan_schedule_dialog.ui,此处常量与其保持一致并由生成契约测试校验) ----
+
+# 结果表格列头(与解析结果字段一一对应)
+HEADERS = ["项点", "开始", "结束", "天数", "状态"]
+
+# 年份选择范围(日期串缺年份时补全用;对应 .ui 中 spin_year 的 min/max)
+YEAR_MIN = 2000
+YEAR_MAX = 2100
+
+# 日期格内容下拉框文案(索引顺序与 _CELL_BY_INDEX 一一对应)
+CELL_LABELS = ["第几天(1,2,3…)", "项点名称(第x列/批次)"]
+
+# 下拉框索引 -> 常量值(顺序与 CELL_LABELS 一致)
 _CELL_BY_INDEX = (CELL_INDEX, CELL_NAME)
 
 

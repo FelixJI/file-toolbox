@@ -1,10 +1,12 @@
 """计划排布 Tab GUI 测试:控件结构、选项映射、模板导出、输出目录解析、端到端生成。
 
 不触发真实 COM,仅基于程序化生成的虚构 xlsx。UI 由
-generated/ui_plan_schedule_dialog.py(Ui_PlanScheduleDialog)构建,本测试验证接入正确。
+generated/ui_plan_schedule_dialog.py(Ui_PlanScheduleDialog,自 forms/plan_schedule_dialog.ui
+经 pyside6-uic 生成)构建,本测试验证接入正确。
 """
 
 import time
+import xml.etree.ElementTree as ET
 from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -22,14 +24,17 @@ from file_toolbox.core.plan_schedule import (  # noqa: E402
     ScheduleOptions,
     ScheduleResult,
 )
-from file_toolbox.gui.controllers.plan_schedule_controller import (
-    PlanScheduleController,  # noqa: E402
-)
-from file_toolbox.gui.dialogs.plan_schedule_tab import PlanScheduleTab  # noqa: E402
-from file_toolbox.gui.generated.ui_plan_schedule_dialog import (  # noqa: E402
+from file_toolbox.gui.controllers.plan_schedule_controller import (  # noqa: E402
     CELL_LABELS,
     HEADERS,
+    YEAR_MAX,
+    YEAR_MIN,
+    PlanScheduleController,
 )
+from file_toolbox.gui.dialogs.plan_schedule_tab import PlanScheduleTab  # noqa: E402
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_UI_SOURCE = _REPO_ROOT / "file_toolbox" / "gui" / "forms" / "plan_schedule_dialog.ui"
 
 
 @pytest.fixture(scope="module")
@@ -66,6 +71,86 @@ def test_tab_starts_ready(tab):
     assert tab.ui.spin_year.value() == date.today().year
     assert tab.ui.cmb_cell.currentIndex() == 0
     assert [tab.ui.cmb_cell.itemText(i) for i in range(tab.ui.cmb_cell.count())] == CELL_LABELS
+
+
+def test_tab_table_header_sections_stretch(tab):
+    """整表列宽 Stretch 迁移自原手写布局,由 Tab 在 setupUi 后设置(.ui 无法表达)。"""
+    from PySide6.QtWidgets import QHeaderView
+
+    mode = tab.ui.table.horizontalHeader().sectionResizeMode(0)
+    assert mode == QHeaderView.ResizeMode.Stretch
+
+
+# ==================== UI 生成契约(.ui 源 ↔ 生成模块 ↔ 展示常量) ====================
+
+
+def _ui_root() -> ET.Element:
+    return ET.parse(_UI_SOURCE).getroot()
+
+
+def _ui_widget(name: str) -> ET.Element:
+    widget = next((w for w in _ui_root().iter("widget") if w.get("name") == name), None)
+    assert widget is not None, f".ui 源缺少控件 {name}"
+    return widget
+
+
+def _ui_prop(widget: ET.Element, name: str) -> ET.Element:
+    prop = next((p for p in widget.findall("property") if p.get("name") == name), None)
+    assert prop is not None, f".ui 中 {widget.get('name')} 缺少属性 {name}"
+    return prop
+
+
+def test_ui_source_registered_for_uic_regen():
+    """.ui 已登记 regen_ui 映射且不在 HANDMADE,--check 实际覆盖本模块。"""
+    import sys
+
+    sys.path.insert(0, str(_REPO_ROOT))
+    from scripts.regen_ui import HANDMADE, UI_SOURCES
+
+    mapping = {m.ui_module: m.ui_file for m in UI_SOURCES}
+    assert mapping.get("ui_plan_schedule_dialog.py") == "plan_schedule_dialog.ui"
+    assert "ui_plan_schedule_dialog.py" not in HANDMADE
+    assert _UI_SOURCE.is_file()
+
+
+def test_ui_widget_object_names_preserved():
+    """关键控件 objectName 与迁移前手写布局等价。"""
+    names = {w.get("name") for w in _ui_root().iter("widget")}
+    assert {
+        "edit_input",
+        "btn_browse_input",
+        "btn_template",
+        "edit_outdir",
+        "btn_browse",
+        "spin_year",
+        "cmb_cell",
+        "btn_generate",
+        "lbl_status",
+        "table",
+    } <= names
+
+
+def test_ui_table_columns_match_controller_headers():
+    """.ui 表格列文本/列数与 controller HEADERS 契约一致。"""
+    table = _ui_widget("table")
+    columns = [c.findtext("property/string") for c in table.findall("column")]
+    assert columns == HEADERS
+    assert _ui_prop(table, "columnCount").findtext("number") == str(len(HEADERS))
+
+
+def test_ui_combo_items_match_controller_cell_labels():
+    """.ui 下拉框条目/默认索引与 controller CELL_LABELS 契约一致。"""
+    combo = _ui_widget("cmb_cell")
+    items = [i.findtext("property/string") for i in combo.findall("item")]
+    assert items == CELL_LABELS
+    assert _ui_prop(combo, "currentIndex").findtext("number") == "0"
+
+
+def test_ui_spin_year_range_matches_controller_constants():
+    """.ui 年份输入范围与 controller YEAR_MIN/YEAR_MAX 契约一致。"""
+    spin = _ui_widget("spin_year")
+    assert int(_ui_prop(spin, "minimum").findtext("number")) == YEAR_MIN
+    assert int(_ui_prop(spin, "maximum").findtext("number")) == YEAR_MAX
 
 
 # ==================== controller(无 Qt) ====================

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import calendar
+import math
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -344,8 +345,17 @@ class PlanScheduleService(LoggableMixin):
         if isinstance(value, date):
             return value
         if isinstance(value, (int, float)):
+            if isinstance(value, float) and not math.isfinite(value):
+                return None
             serial = int(value)
-            return _EXCEL_SERIAL_EPOCH + timedelta(days=serial) if serial > 0 else None
+            if serial <= 0:
+                return None
+            try:
+                return _EXCEL_SERIAL_EPOCH + timedelta(days=serial)
+            except OverflowError:
+                # 超出 date/timedelta 可表示范围的数值(如 20260917)按行级无效处理,
+                # 不按 YYYYMMDD 猜测,也不让整张清单中断
+                return None
         if isinstance(value, str):
             text = value.strip()
             if not text:
@@ -419,8 +429,8 @@ class PlanScheduleService(LoggableMixin):
                     cell.fill = weekend_fill
                     cell.font = weekend_font
 
-            # 项点行:活动日写"项点内第几天"或项点名称(按 cell_mode)并循环填色;
-            # 周末空格灰底
+            # 项点行:活动日写"项点内第几天"或项点名称(按 cell_mode);周末列灰底
+            # 优先(活动格也灰),非周末活动格保留项点填色
             name_mode = cell_mode == CELL_NAME
             for i, (item, cells) in enumerate(mp.items):
                 r = date_row + 1 + i
@@ -433,11 +443,12 @@ class PlanScheduleService(LoggableMixin):
                         cell.value = item.name if name_mode else day_index[d]
                         if name_mode:
                             cell.data_type = "s"
-                        cell.fill = fill
-                    elif d in mp.weekends:
+                    if d in mp.weekends:
                         cell.fill = weekend_fill
+                    elif d in day_index:
+                        cell.fill = fill
 
-            # 并行数行:每天并行项点数(>=1 才写)
+            # 并行数行:每天并行项点数(>=1 才写);周末列灰底优先(非零并行数也灰)
             parallel_row = date_row + 1 + len(mp.items)
             label = ws.cell(row=parallel_row, column=1, value="并行数")
             label.font = bold_font
@@ -446,7 +457,7 @@ class PlanScheduleService(LoggableMixin):
                 count = mp.parallel.get(d, 0)
                 if count:
                     cell.value = count
-                elif d in mp.weekends:
+                if d in mp.weekends:
                     cell.fill = weekend_fill
 
             # 值与样式全部就位后再合并 MONTH 行
