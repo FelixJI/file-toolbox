@@ -687,3 +687,53 @@ def test_explicit_sheet_names_reject_invalid_excel_names(tmp_path, sheet_name):
 
     with pytest.raises(AttendanceError, match="Sheet 名"):
         AttendanceService(FakeExcel(source)).preview(request)
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_generate_handles_output_created_during_write(tmp_path, overwrite):
+    request = _request(tmp_path, overwrite=overwrite)
+    history = MagicMock()
+
+    class RacingExcel(FakeExcel):
+        def write_output(self, staging_path, plan, prepared, cancel_check=None):
+            super().write_output(staging_path, plan, prepared, cancel_check)
+            request.output_path.write_bytes(b"other-writer")
+
+    service = AttendanceService(RacingExcel(_source(31)), history)
+    if overwrite:
+        result = service.generate(request)
+        assert result.output_path == request.output_path
+        assert request.output_path.read_bytes() == b"template-filled"
+        history.add_record.assert_called_once()
+    else:
+        with pytest.raises(AttendanceError, match="输出文件已存在.*确认覆盖"):
+            service.generate(request)
+        assert request.output_path.read_bytes() == b"other-writer"
+        history.add_record.assert_not_called()
+    assert list(tmp_path.glob(".*.tmp.xlsx")) == []
+    assert request.source_path.read_bytes() == b"source"
+    assert request.plan.template_path.read_bytes() == b"template"
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_generate_no_replace_commit_failure_preserves_error_and_staging_contract(
+    tmp_path, monkeypatch, cleanup_fails
+):
+    request = _request(tmp_path)
+    history = MagicMock()
+    service = AttendanceService(FakeExcel(_source(31)), history)
+
+    def denied(_source, _target):
+        raise PermissionError("commit denied")
+
+    monkeypatch.setattr("file_toolbox.core.attendance.service.rename_no_replace", denied)
+    if cleanup_fails:
+        monkeypatch.setattr(service, "_cleanup_staging", lambda _path: OSError("cleanup denied"))
+    with pytest.raises(AttendanceError, match="commit denied") as caught:
+        service.generate(request)
+    assert ("临时文件清理失败" in str(caught.value)) is cleanup_fails
+    assert bool(list(tmp_path.glob(".*.tmp.xlsx"))) is cleanup_fails
+    assert not request.output_path.exists()
+    history.add_record.assert_not_called()
+    assert request.source_path.read_bytes() == b"source"
+    assert request.plan.template_path.read_bytes() == b"template"
