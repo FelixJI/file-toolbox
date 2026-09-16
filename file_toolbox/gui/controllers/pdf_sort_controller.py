@@ -42,7 +42,12 @@ class PdfSortController:
     def summarize(self, result: SortResult) -> str:
         """排序结束后的状态栏一行摘要。"""
         if result.cancelled:
-            return "已取消"
+            if not result.sorted_files and not result.failed:
+                return "已取消"
+            return (
+                f"已取消,已处理 {len(result.sorted_files)} 个文件,"
+                f"已写出 {result.written_count} 个输出,{len(result.failed)} 个失败"
+            )
         if not result.success:
             return f"失败:{result.error_message or '未处理任何文件'}"
         written = result.written_count

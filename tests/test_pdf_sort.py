@@ -442,3 +442,42 @@ def test_dataclass_defaults():
     page = PagePlan(page=0, key="", matched=False)
     assert page.new_index == -1 and page.note == ""
     assert FailedFile("a.pdf", "e").error == "e"
+
+
+@pytest.mark.parametrize("history_fails", [False, True])
+def test_cancel_preserves_completed_failed_and_history(make_text_pdf, tmp_path, history_fails):
+    from unittest.mock import MagicMock
+
+    from file_toolbox.common.operation_errors import HistorySaveError
+
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"broken pdf")
+    unchanged = make_text_pdf("same.pdf", ["Date: 1", "Date: 2"])
+    source = make_text_pdf("sorted.pdf", ["Date: 2", "Date: 1"])
+    pending = make_text_pdf("pending.pdf", ["Date: 2", "Date: 1"])
+    output = tmp_path / "sorted_排序.pdf"
+    history = MagicMock() if history_fails else JsonHistoryStore(tmp_path / "h")
+    if history_fails:
+        history.add_record.side_effect = OSError("history denied")
+    service = PdfSortService(history)
+    args = ([bad, unchanged, source, pending], SortOptions(pattern=r"Date: (\d+)"))
+    if history_fails:
+        with pytest.raises(HistorySaveError, match="history denied") as caught:
+            service.sort(*args, cancel_check=output.exists)
+        result = caught.value.result
+        history.add_record.assert_called_once()
+    else:
+        result = service.sort(*args, cancel_check=output.exists)
+        records = history.get_records("pdf_sort")
+        assert len(records) == 1
+        assert records[0]["data"]["outputs"] == [str(output)]
+        assert records[0]["data"]["success"] is False
+        assert records[0]["data"]["cancelled"] is True
+    assert result.cancelled and not result.success and result.written_count == 1
+    assert [item.file for item in result.sorted_files] == ["same.pdf", "sorted.pdf"]
+    assert result.sorted_files[0].output is None
+    assert result.sorted_files[1].output == output
+    assert [item.file for item in result.failed] == ["bad.pdf"]
+    assert not (tmp_path / "pending_排序.pdf").exists()
+    with output.open("rb") as stream:
+        assert "Date: 1" in PdfReader(stream).pages[0].extract_text()
