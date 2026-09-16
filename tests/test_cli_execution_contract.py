@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from file_toolbox.cli.main import app
@@ -26,7 +27,7 @@ def test_mkdir_invalid_strategy_does_not_write(tmp_path):
     result = CliRunner().invoke(
         app, ["mkdir", "--root", str(tmp_path), "--levels", "a", "--on-conflict", "typo"]
     )
-    assert result.exit_code != 0 and "on-conflict" in result.output
+    assert result.exit_code != 0 and "on-conflict" in Text.from_ansi(result.output).plain
     assert not (tmp_path / "a").exists()
 
 
@@ -147,7 +148,7 @@ def test_pdf_invalid_option_no_output(flag, value, tmp_path):
     source = tmp_path / "a.png"
     source.touch()
     result = CliRunner().invoke(app, ["pdf", str(source), flag, value, "--yes"])
-    assert result.exit_code != 0 and flag in result.output
+    assert result.exit_code != 0 and flag in Text.from_ansi(result.output).plain
     assert not source.with_suffix(".pdf").exists()
 
 
