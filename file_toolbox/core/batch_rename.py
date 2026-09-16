@@ -37,8 +37,14 @@ def _validate_add_number(operation: dict[str, Any], index: int) -> tuple[bool, s
     params: dict[str, Any] = operation.get("params", {})
     n = index + 1
     try:
-        int(params.get("start", 1))  # 验证参数有效性
-        digits = int(params.get("digits", 3))
+        for key, default in (("start", 1), ("digits", 3)):
+            value = params.get(key, default)
+            if not isinstance(value, (str, int)):
+                raise TypeError("序号参数需要整数")
+            if isinstance(value, str) and value.lower() in ("true", "false"):
+                value = value.lower() == "true"
+            params[key] = int(value)
+        digits = params["digits"]
         if digits < 1:
             return False, f"操作 {n}: 序号位数必须大于0"
 
@@ -48,33 +54,59 @@ def _validate_add_number(operation: dict[str, Any], index: int) -> tuple[bool, s
                 return False, f"操作 {n}: 自定义格式模板不能为空"
             if "{n}" not in custom_template:
                 return False, f"操作 {n}: 自定义格式必须包含 {{n}} 作为序号占位符"
-    except ValueError:
+    except (TypeError, ValueError):
         return False, f"操作 {n}: 序号参数必须是数字"
     return True, ""
+
+
+def _validate_delete_chars(operation: dict[str, Any], index: int) -> tuple[bool, str]:
+    """数量模式保留旧布尔整数语义;文本模式保留字面内容。"""
+    params = operation.get("params", {})
+    value = params["value"]
+    if params.get("delete_type", "prefix") in ("prefix", "suffix"):
+        if isinstance(value, (int, float)):
+            try:
+                params["value"] = str(int(value))
+            except (ValueError, OverflowError):
+                return False, f"操作 {index + 1}: 删除数量必须是有限数字"
+        elif isinstance(value, str) and value.lower() in ("true", "false"):
+            params["value"] = str(int(value.lower() == "true"))
+    return validate_params(
+        operation, index, {OperationType.DELETE_CHARS.value: ParamRule(string_keys=("value",))}
+    )
 
 
 # 参数校验规则表(声明式,由 FileRenameService._validate_params 复用)。
 # 简单类型由通用规则覆盖;add_number 的复合校验通过 extra 委托。
 RENAME_PARAM_RULES: dict[str, ParamRule] = {
     OperationType.ADD_PREFIX.value: ParamRule(
-        required=("text",), empty_messages={"text": "前缀不能为空"}
+        required=("text",), empty_messages={"text": "前缀不能为空"}, string_keys=("text",)
     ),
     OperationType.ADD_SUFFIX.value: ParamRule(
-        required=("text",), empty_messages={"text": "后缀不能为空"}
+        required=("text",), empty_messages={"text": "后缀不能为空"}, string_keys=("text",)
     ),
     OperationType.REPLACE_TEXT.value: ParamRule(
-        required=("find",), empty_messages={"find": "查找文本不能为空"}
+        required=("find",),
+        empty_messages={"find": "查找文本不能为空"},
+        string_keys=("find", "replace"),
+        bool_keys=("case_sensitive",),
     ),
     OperationType.REGEX_REPLACE.value: ParamRule(
         required=("pattern",),
         empty_messages={"pattern": "正则表达式不能为空"},
         regex_key="pattern",
+        string_keys=("pattern", "replace"),
+        bool_keys=("ignore_case",),
     ),
-    OperationType.ADD_NUMBER.value: ParamRule(extra=_validate_add_number),
+    OperationType.ADD_NUMBER.value: ParamRule(
+        string_keys=("format", "custom_template", "position"), extra=_validate_add_number
+    ),
     OperationType.DELETE_CHARS.value: ParamRule(
-        required=("value",), empty_messages={"value": "删除值不能为空"}
+        required=("value",),
+        empty_messages={"value": "删除值不能为空"},
+        extra=_validate_delete_chars,
     ),
-    # ADD_DATE 无强制必填字段(格式有默认值)
+    OperationType.ADD_DATE.value: ParamRule(string_keys=("format", "position", "source")),
 }
 
 

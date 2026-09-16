@@ -75,10 +75,10 @@ def test_parse_op_empty_key_raises():
 
 
 def test_coerce_leading_zero_int_destroys_zeros():
-    """'007' → int 7(前导零丢失)。锁死:若值是发票号式 '007' 应声明 string_keys 保留。
+    """裸值 '007' 仍归一化为整数 7;保留前导零须使用引号。
 
-    op_schema.string_keys 对 find/replace 等文本键会强转回 str,但任意未声明键仍走
-    int() 截断前导零。这是已知行为,锁定以便未来 float 支持等改动有据可查。
+    string_keys 只能把已经转换的数字转回文本,不能恢复丢失的前导零。
+    引号文本保真由 parse_op 的独立分支与回归测试保证。
     """
     from file_toolbox.cli.op_parser import _coerce
 

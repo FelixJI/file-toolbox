@@ -39,8 +39,8 @@ def parse_op(op_str: str) -> dict[str, object]:
     params: dict[str, int | bool | str] = {}
     for m in _KV_PATTERN.finditer(params_part):
         key, quoted, raw = m.group(1), m.group(2), m.group(3)
-        value = quoted if quoted is not None else raw
-        params[key] = _coerce(value)
+        # 引号显式声明字面文本;只对裸值保留既有数字/布尔转换。
+        params[key] = quoted if quoted is not None else _coerce(raw)
     return {"type": type_part, "params": params}
 
 
