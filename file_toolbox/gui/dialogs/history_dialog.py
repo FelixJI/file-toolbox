@@ -68,6 +68,12 @@ def _summary_label(tool: str, data: dict[str, Any]) -> str:
         outputs = data.get("outputs", [])
         order = data.get("order", "?")
         return f"{pages} 页 / {files} 文件 [{order}] → {len(outputs)} 个输出"
+    if tool == "plan_schedule":
+        items = data.get("item_count", 0)
+        months = data.get("month_count", 0)
+        invalid = data.get("invalid_count", 0)
+        output = Path(str(data.get("output", ""))).name
+        return f"{items} 项点 / {months} 月(无效 {invalid}) → {output}"
     return str(data)[:40]
 
 
