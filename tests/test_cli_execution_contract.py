@@ -423,3 +423,47 @@ def test_pdf_image_intermediate_cleanup_on_conversion_failure(tmp_path, monkeypa
     assert paths and not paths[0].exists() and not paths[0].parent.exists()
     assert not service.temp_files
     service.close(strict=True)
+
+
+@pytest.mark.parametrize("failed_format", ["excel", "json"])
+def test_invoice_export_failure_retains_completed_paths(failed_format, ofd_sample, tmp_path):
+    output = tmp_path / "export.xlsx"
+    blocked = output if failed_format == "excel" else output.with_suffix(".json")
+    blocked.mkdir()
+    result = CliRunner().invoke(
+        app, ["invoice", str(ofd_sample), "--format", "both", "--output", str(output), "--yes"]
+    )
+    assert result.exit_code == 1
+    assert "导出失败" in result.output and str(blocked) in result.output
+    assert blocked.is_dir()
+    if failed_format == "json":
+        assert output.is_file() and str(output) in result.output
+        assert "已导出 1 个文件" in result.output
+    else:
+        assert not output.with_suffix(".json").exists()
+        assert "已导出 0 个文件" in result.output
+
+
+@pytest.mark.parametrize("partial_failure", [False, True])
+def test_mkdir_history_failure_preserves_counts_once(partial_failure, tmp_path, monkeypatch):
+    from file_toolbox.common.history import JsonHistoryStore
+
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append(True)
+        raise OSError("history disk full")
+
+    monkeypatch.setattr(JsonHistoryStore, "add_record", fail)
+    args = ["mkdir", "--root", str(tmp_path), "--levels", "a/b", "--yes"]
+    if partial_failure:
+        (tmp_path / "blocked").write_text("occupied")
+        args += ["--levels", "blocked/child"]
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 1 and calls == [True]
+    assert (tmp_path / "a/b").is_dir()
+    assert "history disk full" in result.output and "完成: 新建 1" in result.output
+    assert str(tmp_path / "a/b") in result.output
+    if partial_failure:
+        assert "创建文件夹失败" in result.output and "blocked" in result.output
+        assert (tmp_path / "blocked").read_text() == "occupied"

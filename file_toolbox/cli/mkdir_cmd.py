@@ -4,6 +4,7 @@ from pathlib import Path
 
 import typer
 
+from file_toolbox.cli.resources import run_reported
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_mkdir import ConflictStrategy, FolderCreatorService
 
@@ -51,11 +52,14 @@ def mkdir(
         typer.echo("(预览模式,加 --yes 创建目录)")
         return
 
-    result = svc.create_folders(items, strategy, root=str(root), structure_count=len(structures))
+    result, history_failed = run_reported(
+        lambda: svc.create_folders(items, strategy, root=str(root), structure_count=len(structures))
+    )
     typer.secho(
         f"\n完成: 新建 {result.created_count}, 跳过 {result.skipped_count}, 共 {result.total_count}",
         fg=typer.colors.GREEN if result.success else typer.colors.RED,
     )
     if not result.success:
         typer.secho(result.error_message, fg=typer.colors.RED, err=True)
+    if not result.success or history_failed:
         raise typer.Exit(1)

@@ -83,7 +83,7 @@ def invoice(
     elif fmt == "excel" and output.suffix.lower() == ".json":
         output = output.with_suffix(".xlsx")
 
-    written, history_failed = run_reported(
+    written, export_failed = run_reported(
         lambda: svc.export(
             result,
             output,
@@ -98,5 +98,5 @@ def invoice(
     for w in written:
         typer.echo(f"  {w}")
 
-    if result.failed or history_failed:
+    if result.failed or export_failed:
         raise typer.Exit(1)

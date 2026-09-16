@@ -1,13 +1,18 @@
-"""历史保存失败仍携带已经完成的业务结果,由调用方决定如何呈现。"""
+"""操作失败仍携带已经完成的业务结果,由调用方决定如何呈现。"""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 
-class HistorySaveError[T](RuntimeError):
-    def __init__(self, result: T, error: Exception) -> None:
-        super().__init__(f"历史保存失败:{error}")
+class OperationResultError[T](RuntimeError):
+    def __init__(self, result: T, message: str) -> None:
+        super().__init__(message)
         self.result = result
+
+
+class HistorySaveError[T](OperationResultError[T]):
+    def __init__(self, result: T, error: Exception) -> None:
+        super().__init__(result, f"历史保存失败:{error}")
 
 
 @contextmanager

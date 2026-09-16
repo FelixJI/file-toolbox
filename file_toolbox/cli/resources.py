@@ -6,7 +6,7 @@ from typing import cast
 
 import typer
 
-from file_toolbox.common.operation_errors import HistorySaveError
+from file_toolbox.common.operation_errors import OperationResultError
 
 
 @contextmanager
@@ -29,9 +29,9 @@ def close_on_exit(close: Callable[[], None]) -> Iterator[None]:
 
 
 def run_reported[T](operation: Callable[[], T]) -> tuple[T, bool]:
-    """历史异常携带的结果与原调用返回类型相同;报告失败后仍供 CLI 汇总。"""
+    """业务异常携带的结果与原调用返回类型相同;报告失败后仍供 CLI 汇总。"""
     try:
         return operation(), False
-    except HistorySaveError as error:
+    except OperationResultError as error:
         typer.secho(str(error), fg=typer.colors.RED, err=True)
         return cast(T, error.result), True
