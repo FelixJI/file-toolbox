@@ -338,3 +338,88 @@ def test_converter_strict_close_reports_locked_temp(tmp_path, monkeypatch):
     with pytest.raises(ExceptionGroup, match="locked temporary file"):
         converter.close(strict=True)
     assert source in converter.temp_files
+
+
+@pytest.mark.parametrize("merge_failure", [False, True])
+def test_pdf_merge_reports_final_output_only(merge_failure, make_text_pdf, tmp_path, monkeypatch):
+    from file_toolbox.core.batch_pdf.service import PDFGeneratorService
+
+    source = make_text_pdf("source.pdf", ["page"])
+    if merge_failure:
+        monkeypatch.setattr(
+            PDFGeneratorService, "merge_pdfs", lambda *args: (False, "merge failed")
+        )
+    result = CliRunner().invoke(app, ["pdf", str(source), "--output-mode", "merge", "--yes"])
+    output = tmp_path / "合并文档.pdf"
+    assert result.exit_code == int(merge_failure)
+    assert output.exists() != merge_failure
+    assert ("成功 0, 失败 1" if merge_failure else "成功 1, 失败 0") in result.output
+    assert "source_0.pdf" not in result.output
+    assert output.name in result.output
+
+
+@pytest.mark.parametrize("merge_raises", [False, True])
+def test_pdf_temp_cleanup_failure_preserves_output_or_primary(
+    merge_raises, make_text_pdf, tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.core.batch_pdf.service import PDFGeneratorService
+
+    source = make_text_pdf("source.pdf", ["page"])
+    real_unlink = Path.unlink
+    locked = []
+    closed = []
+    primary = RuntimeError("merge raised")
+
+    def unlink(path, *args, **kwargs):
+        if path.parent.name.startswith("file-toolbox-pdf-"):
+            locked.append(path)
+            raise PermissionError("locked merge temp")
+        return real_unlink(path, *args, **kwargs)
+
+    def merge(*args):
+        raise primary
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(EngineManager, "close", lambda *args, **kwargs: closed.append(True))
+    if merge_raises:
+        monkeypatch.setattr(PDFGeneratorService, "merge_pdfs", merge)
+    try:
+        result = CliRunner().invoke(app, ["pdf", str(source), "--output-mode", "merge", "--yes"])
+        assert result.exit_code == 1 and closed
+        assert "locked merge temp" in result.output
+        assert locked and all(path.exists() for path in locked)
+        if merge_raises:
+            assert result.exception is primary
+        else:
+            assert (tmp_path / "合并文档.pdf").is_file()
+            assert "成功 1, 失败 0" in result.output and "合并文档.pdf" in result.output
+    finally:
+        for path in set(locked):
+            real_unlink(path)
+            path.parent.rmdir()
+
+
+def test_pdf_image_intermediate_cleanup_on_conversion_failure(tmp_path, monkeypatch):
+    from file_toolbox.core.batch_pdf.service import PDFGeneratorService
+
+    service = PDFGeneratorService()
+    paths = []
+
+    def fail(source, output, config):
+        output.write_bytes(b"partial editable PDF")
+        paths.append(output)
+        return False, "conversion failed"
+
+    monkeypatch.setattr(service, "_generate_editable_pdf", fail)
+    source = tmp_path / "input.docx"
+    source.touch()
+    assert service.generate_pdf(source, tmp_path / "out.pdf", {"pdf_type": "image"}) == (
+        False,
+        "conversion failed",
+    )
+    assert paths and not paths[0].exists() and not paths[0].parent.exists()
+    assert not service.temp_files
+    service.close(strict=True)
