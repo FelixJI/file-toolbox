@@ -173,7 +173,7 @@ class TestUpdateWorker:
 class TestMainWindowIntegration:
     def test_available_check_updates_about_and_banner(self, app):
         win = MainWindow(FakeCoordinator(_available("8.0.0")))
-        win._tabs.setCurrentIndex(8)  # 手动检查发起自关于页(懒构造 Tab)
+        win._tabs.setCurrentIndex(9)  # 手动检查发起自关于页(懒构造 Tab)
         win._manual_check_pending = True
         win._update_worker.do_check()
         app.processEvents()
@@ -184,7 +184,7 @@ class TestMainWindowIntegration:
 
     def test_latest_check_updates_about_without_banner(self, app):
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
-        win._tabs.setCurrentIndex(8)  # 手动检查发起自关于页(懒构造 Tab)
+        win._tabs.setCurrentIndex(9)  # 手动检查发起自关于页(懒构造 Tab)
         win._manual_check_pending = True
         win._update_worker.do_check()
         app.processEvents()
