@@ -461,3 +461,54 @@ def test_on_sort_ok_failure_shows_warning_without_outputs(tab, monkeypatch, make
     tab._on_sort_ok(result)
 
     assert warned and "源文件均未被修改" in warned[0]
+
+
+def test_cancelled_partial_result_shows_outputs_and_warning(tab, monkeypatch, tmp_path):
+    from file_toolbox.common import settings
+
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda _p, title, msg: warnings.append((title, msg))
+    )
+    result = SortResult(
+        sorted_files=[SortedFile("a.pdf", tmp_path / "a_排序.pdf", [PagePlan(0, "1", True, 1)])],
+        failed=[FailedFile("b.pdf", "broken")],
+        cancelled=True,
+    )
+    tab._on_sort_ok(result)
+    assert tab.ui.table.rowCount() == 2
+    assert "已取消" in tab.ui.lbl_status.text() and "已写出 1" in tab.ui.lbl_status.text()
+    assert warnings[0][0] == "排序已取消"
+    assert "未生成输出" not in str(warnings)
+    assert settings.get("pdf_sort/last_output_dir") == str(tmp_path)
+
+
+def test_sort_worker_history_warning_reaches_view_without_losing_result(
+    tab, monkeypatch, make_text_pdf, tmp_path
+):
+    from file_toolbox.common.operation_errors import HistorySaveError
+    from file_toolbox.gui.workers.pdf_sort_worker import PdfSortWorker
+
+    source = make_text_pdf("partial.pdf", ["Date: 2", "Date: 1"])
+    result = SortResult(
+        sorted_files=[
+            SortedFile(source.name, tmp_path / "partial_排序.pdf", [PagePlan(0, "2", True, 1)])
+        ],
+        cancelled=True,
+    )
+    service = MagicMock()
+    service.sort.side_effect = HistorySaveError(result, OSError("history denied"))
+    tab._svc = service
+    tab._add_paths([source])
+    tab.ui.edit_pattern.setText("Date")
+    warnings = []
+    monkeypatch.setattr(
+        QMessageBox, "warning", lambda _p, title, msg: warnings.append((title, msg))
+    )
+    monkeypatch.setattr(PdfSortWorker, "start", lambda self: self.run())
+    tab._sort()
+    assert [title for title, _msg in warnings] == ["排序已取消", "历史保存失败"]
+    assert "history denied" in warnings[1][1]
+    assert "已取消" in tab.ui.lbl_status.text() and "已写出 1" in tab.ui.lbl_status.text()
+    assert tab.ui.table.rowCount() == 1 and tab.ui.btn_sort.isEnabled()
+    service.sort.assert_called_once()

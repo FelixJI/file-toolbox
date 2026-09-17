@@ -62,7 +62,16 @@ def test_rename_execute(tmp_path):
 def test_mkdir_from_levels(tmp_path):
     r = runner.invoke(
         app,
-        ["mkdir", "--root", str(tmp_path), "--levels", "部门A/项目1", "--levels", "部门A/项目2"],
+        [
+            "mkdir",
+            "--yes",
+            "--root",
+            str(tmp_path),
+            "--levels",
+            "部门A/项目1",
+            "--levels",
+            "部门A/项目2",
+        ],
     )
     assert r.exit_code == 0
     assert (tmp_path / "部门A" / "项目1").is_dir()
@@ -70,7 +79,7 @@ def test_mkdir_from_levels(tmp_path):
 
 
 def test_mkdir_replaces_special_chars(tmp_path):
-    r = runner.invoke(app, ["mkdir", "--root", str(tmp_path), "--levels", "a*b"])
+    r = runner.invoke(app, ["mkdir", "--yes", "--root", str(tmp_path), "--levels", "a*b"])
     assert r.exit_code == 0
     assert (tmp_path / "a_b").is_dir()
 
@@ -89,7 +98,9 @@ def test_mkdir_from_table(tmp_path):
     table = tmp_path / "structure.txt"
     # 每行 Tab 分列,列即层级;含特殊字符 * 会替换为 _
     table.write_text("部门A*\t项目1\n部门B\t项目2\n", encoding="utf-8")
-    r = runner.invoke(app, ["mkdir", "--root", str(tmp_path / "out"), "--from-table", str(table)])
+    r = runner.invoke(
+        app, ["mkdir", "--yes", "--root", str(tmp_path / "out"), "--from-table", str(table)]
+    )
     assert r.exit_code == 0
     # * 被替换为 _ → 部门A_/项目1
     assert (tmp_path / "out" / "部门A_" / "项目1").is_dir()
@@ -100,7 +111,7 @@ def test_mkdir_from_table(tmp_path):
 
 def test_mkdir_no_levels_errors(tmp_path):
     """无 --levels 也无 --from-table → 退出码 1。"""
-    r = runner.invoke(app, ["mkdir", "--root", str(tmp_path)])
+    r = runner.invoke(app, ["mkdir", "--yes", "--root", str(tmp_path)])
     assert r.exit_code == 1
     assert "层级" in r.output or "levels" in r.output.lower()
 
@@ -113,6 +124,7 @@ def test_mkdir_on_conflict_skip(tmp_path):
         app,
         [
             "mkdir",
+            "--yes",
             "--root",
             str(tmp_path),
             "--levels",
@@ -141,7 +153,7 @@ def test_mkdir_from_table_parse_invalid_errors(tmp_path):
     table = tmp_path / "bad_structure.txt"
     # 整段无 Tab 分隔 → parse_excel_table_data 返回 valid=False
     table.write_text("部门A\n部门B\n", encoding="utf-8")
-    r = runner.invoke(app, ["mkdir", "--root", str(tmp_path), "--from-table", str(table)])
+    r = runner.invoke(app, ["mkdir", "--yes", "--root", str(tmp_path), "--from-table", str(table)])
     assert r.exit_code == 1
     assert "错误" in r.output
     assert "Tab" in r.output
@@ -167,7 +179,7 @@ def test_mkdir_create_folders_failure_errors(tmp_path, monkeypatch):
 
     monkeypatch.setattr(FolderCreatorService, "create_folders", fake_create)
 
-    r = runner.invoke(app, ["mkdir", "--root", str(tmp_path), "--levels", "部门A/项目1"])
+    r = runner.invoke(app, ["mkdir", "--yes", "--root", str(tmp_path), "--levels", "部门A/项目1"])
     assert r.exit_code == 1
     assert "模拟创建失败:权限不足" in r.output
 
@@ -202,7 +214,7 @@ def test_replace_execute_echoes_failures(tmp_path, monkeypatch):
         app,
         ["replace", str(f), "--op", "simple_replace:find=hello,replace=world", "--yes"],
     )
-    assert r.exit_code == 0, r.output
+    assert r.exit_code == 1, r.output
     # 失败行被 echo(行 46)
     assert "失败" in r.output
     assert "文件被占用: a.txt" in r.output
@@ -233,20 +245,15 @@ def test_pdf_batch_generate_failure_echoes_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(PDFGeneratorService, "batch_generate", fake_batch)
 
-    r = runner.invoke(app, ["pdf", str(src)])
-    assert r.exit_code == 0, r.output
+    r = runner.invoke(app, ["pdf", "--yes", str(src)])
+    assert r.exit_code == 1, r.output
     # 失败结果被标记 FAIL + error 被 echo(行 54)
     assert "FAIL" in r.output
     assert "模拟转换失败:引擎不可用" in r.output
 
 
-def test_pdf_all_failure_exit_code_zero_currently(tmp_path, monkeypatch):
-    """**全部**转换失败时,当前 pdf_cmd 仍 exit 0(锁定已知风险行为)。
-
-    pdf_cmd 在 fail!=0 时仅用黄色打印汇总,不 raise typer.Exit(1)。这意味着 CI 脚本
-    无法凭 exit code 判定失败。锁定当前行为:未来若改为「有失败即 exit 1」,
-    该测试应变红提醒有意更新。
-    """
+def test_pdf_all_failure_exits_nonzero(tmp_path, monkeypatch):
+    """#81 修复旧风险契约:全部失败须非零退出,保留失败汇总断言。"""
     from file_toolbox.core.batch_pdf.service import PDFGeneratorService
 
     src = tmp_path / "a.png"
@@ -263,6 +270,6 @@ def test_pdf_all_failure_exit_code_zero_currently(tmp_path, monkeypatch):
         ]
 
     monkeypatch.setattr(PDFGeneratorService, "batch_generate", fake_batch)
-    r = runner.invoke(app, ["pdf", str(src)])
-    assert r.exit_code == 0  # 当前:全失败也 exit 0
+    r = runner.invoke(app, ["pdf", "--yes", str(src)])
+    assert r.exit_code == 1  # #81: 全失败不得成功退出
     assert "成功 0, 失败 1" in r.output  # 汇总行精确文本

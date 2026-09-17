@@ -70,8 +70,8 @@ class FailedFile:
 class SortResult:
     """排序执行结果。
 
-    至少一个文件被处理(含顺序未变)即视为 success;
-    全部失败/取消时 sorted_files 为空。
+    未取消且至少一个文件被处理(含顺序未变)即视为 success;
+    取消时保留已完成的 sorted_files 与 failed,success 仍为 False。
     """
 
     sorted_files: list[SortedFile] = field(default_factory=list)

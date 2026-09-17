@@ -29,7 +29,7 @@ def rename(
         typer.secho("错误:未选择任何文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    svc = FileRenameService(history_store=JsonHistoryStore())
+    svc = FileRenameService(history_store=JsonHistoryStore() if yes else None)
     valid, msg = svc.validate_operations(operations)
     if not valid:
         typer.secho(f"错误:{msg}", fg=typer.colors.RED, err=True)
@@ -57,3 +57,6 @@ def rename(
     typer.secho(f"\n已重命名 {count} 个文件", fg=typer.colors.GREEN)
     for e in errors:
         typer.secho(f"  失败: {e}", fg=typer.colors.YELLOW)
+
+    if errors or conflict or error:
+        raise typer.Exit(1)

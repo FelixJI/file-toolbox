@@ -15,6 +15,7 @@ from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import format_file_size
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.operation_errors import preserve_history_result
 from file_toolbox.common.paths import get_backup_dir
 from file_toolbox.core.batch_replace.file_converter import FileConverterService
 from file_toolbox.core.batch_replace.handlers.excel_handler import ExcelHandler
@@ -75,23 +76,27 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 continue
         return pids
 
-    def _kill_new_office_processes(self, process_name: str, pids_before: list[int]) -> None:
+    def _kill_new_office_processes(
+        self, process_name: str, pids_before: list[int], *, strict: bool = False
+    ) -> None:
         """强制结束新启动的 Office 进程"""
         current_pids = self._get_office_pids(process_name)
         new_pids = set(current_pids) - set(pids_before)
 
+        errors: list[Exception] = []
         for pid in new_pids:
-            with contextlib.suppress(
-                psutil.AccessDenied,
-                psutil.NoSuchProcess,
-                psutil.TimeoutExpired,
-                psutil.ZombieProcess,
-            ):
+            try:
                 process = psutil.Process(pid)
                 if process.name().casefold() != process_name.casefold():
                     continue
                 process.kill()
                 process.wait(timeout=5)
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                pass  # 已消失的进程不再持有需要释放的资源。
+            except (psutil.AccessDenied, psutil.TimeoutExpired) as error:
+                errors.append(error)
+        if strict and errors:
+            raise ExceptionGroup("进程释放失败: " + "; ".join(map(str, errors)), errors)
 
     def is_supported_file(self, file_path: Path) -> bool:
         """检查文件是否为支持的格式"""
@@ -343,85 +348,100 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
                 if progress_callback:
                     progress_callback(processed, total_files)
 
-        # 2. 处理 Word 文档(先创建备份)
+        # 2. 处理 Word 文档:只有备份成功或明确禁用备份的文件才进入写入批次。
         if docx_files and not is_cancelled():
-            # 为所有Word文档创建备份(可由 CLI --no-backup 关闭)
-            backup_paths = []
+            word_start = processed
+            word_skipped = 0
+            ready_word: list[Path] = []
             for file_path in docx_files:
-                if not keep_backup:
-                    continue
+                if is_cancelled():
+                    break
                 try:
-                    backup_path = self._create_backup(file_path)
-                    backup_paths.append((file_path, backup_path))
+                    if keep_backup:
+                        self._create_backup(file_path)
+                    ready_word.append(file_path)
                 except Exception as e:
                     errors.append(f"{file_path.name}: 备份失败 - {e!s}")
+                    word_skipped += 1
+                    processed += 1
+                    if progress_callback:
+                        progress_callback(processed, total_files)
 
             def word_file_callback(file_idx: int) -> None:
                 nonlocal processed
-                processed = len(text_files) + file_idx
+                processed = word_start + word_skipped + file_idx
                 if progress_callback:
                     progress_callback(processed, total_files)
 
-            result = self._word_handler.batch_replace(
-                docx_files,
-                operations,
-                keep_new_format,
-                cancel_check,
-                word_file_callback,
-            )
+            if ready_word and not is_cancelled():
+                result = self._word_handler.batch_replace(
+                    ready_word,
+                    operations,
+                    keep_new_format,
+                    cancel_check,
+                    word_file_callback,
+                )
+                success_count += result["success_count"]
+                total_replacements += result["total_replacements"]
+                errors.extend(result["errors"])
 
-            success_count += result["success_count"]
-            total_replacements += result["total_replacements"]
-            errors.extend(result["errors"])
+            if not is_cancelled():
+                processed = word_start + len(docx_files)
+                if progress_callback:
+                    progress_callback(processed, total_files)
 
-            processed = len(text_files) + len(docx_files)
-
-            if progress_callback:
-                progress_callback(processed, total_files)
-
-        # 3. 处理 Excel 文档(先创建备份)
+        # 3. 处理 Excel 文档:只有备份成功或明确禁用备份的文件才进入写入批次。
         if xlsx_files and not is_cancelled():
-            # 为所有Excel文档创建备份(可由 CLI --no-backup 关闭)
+            excel_start = processed
+            excel_skipped = 0
+            ready_excel: list[Path] = []
             for file_path in xlsx_files:
-                if not keep_backup:
-                    continue
+                if is_cancelled():
+                    break
                 try:
-                    backup_path = self._create_backup(file_path)
+                    if keep_backup:
+                        self._create_backup(file_path)
+                    ready_excel.append(file_path)
                 except Exception as e:
                     errors.append(f"{file_path.name}: 备份失败 - {e!s}")
+                    excel_skipped += 1
+                    processed += 1
+                    if progress_callback:
+                        progress_callback(processed, total_files)
 
             def excel_file_callback(file_idx: int) -> None:
                 nonlocal processed
-                processed = len(text_files) + len(docx_files) + file_idx
+                processed = excel_start + excel_skipped + file_idx
                 if progress_callback:
                     progress_callback(processed, total_files)
 
-            result = self._excel_handler.batch_replace(
-                xlsx_files,
-                operations,
-                keep_new_format,
-                cancel_check,
-                excel_file_callback,
-            )
+            if ready_excel and not is_cancelled():
+                result = self._excel_handler.batch_replace(
+                    ready_excel,
+                    operations,
+                    keep_new_format,
+                    cancel_check,
+                    excel_file_callback,
+                )
+                success_count += result["success_count"]
+                total_replacements += result["total_replacements"]
+                errors.extend(result["errors"])
 
-            success_count += result["success_count"]
-            total_replacements += result["total_replacements"]
-            errors.extend(result["errors"])
-
-            processed = len(text_files) + len(docx_files) + len(xlsx_files)
-
-            if progress_callback:
-                progress_callback(processed, total_files)
+            if not is_cancelled():
+                processed = excel_start + len(xlsx_files)
+                if progress_callback:
+                    progress_callback(processed, total_files)
 
         self.converter.cleanup_temp_files()
 
         # 记录历史(执行后):无论是否有 errors 都记录,与原 GUI replace_tab 内联
         # 写入一致。形状 {"files": [str], "operations": operations}。
         if self._history_store is not None:
-            self._history_store.add_record(
-                "replace",
-                {"files": [str(f) for f in files], "operations": operations},
-            )
+            with preserve_history_result((success_count, total_replacements, errors)):
+                self._history_store.add_record(
+                    "replace",
+                    {"files": [str(f) for f in files], "operations": operations},
+                )
         return success_count, total_replacements, errors
 
     def _count_matches(self, file_path: Path, operations: list[dict[str, Any]]) -> int:
@@ -458,25 +478,38 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
             return None
 
-    def close(self, _from_del: bool = False) -> None:
-        """关闭服务,释放资源。
-
-        _from_del:由 __del__ 调用时为 True,此时跳过末尾的进程清理与潜在
-        gc 交互——在解释器关闭链中调用进程清理 API 不安全。
-        """
-        with contextlib.suppress(Exception):
-            self.converter.close()
+    def close(self, _from_del: bool = False, *, strict: bool = False) -> None:
+        """显式严格关闭汇总失败;析构仍跳过进程清理,保持原安全行为。"""
+        errors: list[Exception] = []
+        try:
+            if strict and not _from_del:
+                self.converter.close(strict=True)
+            else:
+                self.converter.close()
+        except Exception as error:
+            errors.append(error)
         if _from_del:
             return
-        try:
-            if self._lock.acquire(blocking=False):
-                try:
-                    self._kill_new_office_processes("WINWORD.EXE", self._initial_word_pids)
-                    self._kill_new_office_processes("EXCEL.EXE", self._initial_excel_pids)
-                finally:
-                    self._lock.release()
-        except Exception:
-            pass
+        acquired = self._lock.acquire(blocking=False)
+        if acquired:
+            try:
+                for name, pids in (
+                    ("WINWORD.EXE", self._initial_word_pids),
+                    ("EXCEL.EXE", self._initial_excel_pids),
+                ):
+                    try:
+                        if strict:
+                            self._kill_new_office_processes(name, pids, strict=True)
+                        else:
+                            self._kill_new_office_processes(name, pids)
+                    except Exception as error:
+                        errors.append(error)
+            finally:
+                self._lock.release()
+        elif strict:
+            errors.append(RuntimeError("服务仍在运行,无法释放资源"))
+        if strict and errors:
+            raise ExceptionGroup("资源释放失败: " + "; ".join(map(str, errors)), errors)
 
     def _create_backup(self, file_path: Path) -> Path:
         """创建文件备份

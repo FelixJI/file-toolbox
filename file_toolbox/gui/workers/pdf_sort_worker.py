@@ -18,6 +18,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.operation_errors import HistorySaveError
 from file_toolbox.core.pdf_sort import SortOptions
 
 
@@ -35,6 +36,7 @@ class PdfSortWorker(QThread, LoggableMixin):
     progress = Signal(int, int, str)
     finished_ok = Signal(object)
     failed = Signal(str)
+    warning = Signal(str)
 
     def __init__(
         self,
@@ -75,6 +77,10 @@ class PdfSortWorker(QThread, LoggableMixin):
                 result.cancelled,
             )
             self.finished_ok.emit(result)
+        except HistorySaveError as error:
+            self.logger.warning("PDF 排序历史保存失败: %s", error)
+            self.finished_ok.emit(error.result)
+            self.warning.emit(str(error))
         except Exception as e:  # noqa: BLE001 - 任意异常转 failed 信号
             self.logger.exception("PDF 排序 worker 异常 files=%d", len(self._files))
             self.failed.emit(str(e))

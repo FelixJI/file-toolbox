@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.operation_errors import preserve_history_result
 from file_toolbox.core.excel_merge.constants import (
     MODE_VALUES,
     SUPPORTED_SUFFIXES,
@@ -162,7 +163,8 @@ class ExcelMergeService(LoggableMixin):
             "Excel 合并完成: %d 个文件 -> %d 个工作表 -> %s", total, len(merged), output_path
         )
         result = MergeResult(output=output_path, sheets=merged, failed=failed)
-        self._record_history(result, total, options)
+        with preserve_history_result(result):
+            self._record_history(result, total, options)
         return result
 
     # ==================== 内部实现 ====================

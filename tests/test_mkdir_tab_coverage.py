@@ -310,3 +310,32 @@ def test_close_event(dlg):
     from PySide6.QtGui import QCloseEvent
 
     dlg.closeEvent(QCloseEvent())  # 不抛即通过
+
+
+@pytest.mark.parametrize("partial_failure", [False, True])
+def test_create_folders_history_failure_keeps_result_and_refresh(
+    dlg, monkeypatch, tmp_path, partial_failure
+):
+    dlg.ui.line_edit_root_path.setText(str(tmp_path))
+    _fill_row(dlg, 0, "created", "child")
+    if partial_failure:
+        (tmp_path / "blocked").write_text("occupied")
+        _fill_row(dlg, 1, "blocked", "child")
+    calls, messages, refreshed = [], [], []
+
+    def fail(*args, **kwargs):
+        calls.append(True)
+        raise OSError("history unavailable")
+
+    monkeypatch.setattr(JsonHistoryStore, "add_record", fail)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a: messages.append(a[1:]))
+    monkeypatch.setattr(dlg, "_refresh_ui_state", lambda: refreshed.append(True))
+    dlg._create_folders()
+    assert calls == [True] and refreshed == [True]
+    assert (tmp_path / "created/child").is_dir()
+    assert len(messages) == 1 and messages[0][0] == "出错"
+    assert "新建 1" in messages[0][1] and "history unavailable" in messages[0][1]
+    if partial_failure:
+        assert "创建文件夹失败" in messages[0][1] and "blocked" in messages[0][1]
+        assert (tmp_path / "blocked").read_text() == "occupied"

@@ -173,7 +173,7 @@ class FileConverterService:
             # 不需要转换
             return True, file_path, ""
 
-    def cleanup_temp_files(self) -> None:
+    def cleanup_temp_files(self, *, strict: bool = False) -> None:
         """清理临时转换文件"""
         # 检查Python是否正在关闭
         import sys
@@ -185,26 +185,31 @@ class FileConverterService:
         except Exception:
             return
 
+        errors: list[Exception] = []
+        remaining: list[Path] = []
         for temp_file in self.temp_files:
-            max_attempts = 2
-            for attempt in range(max_attempts):
+            for attempt in range(2):
                 try:
                     if temp_file.exists():
                         temp_file.unlink()
                     break
-                except PermissionError:
-                    # 文件可能被锁定，不等待，直接跳过
-                    if attempt < max_attempts - 1:
+                except PermissionError as error:
+                    if attempt == 0:
                         continue
+                    errors.append(error)
+                    remaining.append(temp_file)
+                except Exception as error:
+                    errors.append(error)
+                    remaining.append(temp_file)
                     break
-                except Exception:
-                    # 静默处理错误，避免在关闭时抛出异常
-                    break
-        self.temp_files.clear()
+        # 保留未清理项供显式 close 重试,不能丢失失败证据。
+        self.temp_files[:] = remaining
+        if strict and errors:
+            raise ExceptionGroup("临时文件释放失败: " + "; ".join(map(str, errors)), errors)
 
-    def close(self) -> None:
-        """关闭服务，清理临时文件"""
-        self.cleanup_temp_files()
+    def close(self, *, strict: bool = False) -> None:
+        """关闭服务;CLI 的严格关闭会报告未能清理的临时文件。"""
+        self.cleanup_temp_files(strict=strict)
 
     def __del__(self) -> None:
         """析构函数"""

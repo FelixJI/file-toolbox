@@ -16,6 +16,7 @@ from pypdf import PdfReader, PdfWriter
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
+from file_toolbox.common.operation_errors import preserve_history_result
 from file_toolbox.core.pdf_sort.constants import (
     SORTED_MARKER,
     SUPPORTED_SUFFIXES,
@@ -100,10 +101,10 @@ class PdfSortService(LoggableMixin):
             output: 单文件时为输出文件路径(后缀强制 .pdf);
                 多文件时为输出目录(在各自名称后加"排序"标记);None 写在源文件同目录。
             progress_callback: (current, total, message) 进度回调(按文件粒度)。
-            cancel_check: 返回 True 时在下一个文件前取消(不写输出)。
+            cancel_check: 返回 True 时停止后续文件,保留已写出的输出。
 
         Returns:
-            SortResult:success = 至少一个文件被处理(允许部分文件失败)。
+            SortResult:取消保留部分结果但 success 为 False。
         """
         regex = compile_pattern(options.pattern)
         if output is not None and len(files) > 1 and output.suffix.lower() == ".pdf":
@@ -145,9 +146,7 @@ class PdfSortService(LoggableMixin):
                 continue
             sorted_files.append(SortedFile(path.name, out_path, pages))
 
-        if cancelled:
-            return SortResult(cancelled=True, failed=failed)
-        if not sorted_files:
+        if not sorted_files and not cancelled:
             reason = "全部源文件失败" if failed else "没有可排序的 PDF"
             return SortResult(failed=failed, error_message=reason)
 
@@ -156,8 +155,9 @@ class PdfSortService(LoggableMixin):
             total,
             sum(1 for f in sorted_files if f.output is not None),
         )
-        result = SortResult(sorted_files=sorted_files, failed=failed)
-        self._record_history(result, total, options)
+        result = SortResult(sorted_files=sorted_files, failed=failed, cancelled=cancelled)
+        with preserve_history_result(result):
+            self._record_history(result, total, options)
         return result
 
     # ==================== 内部实现 ====================
@@ -251,6 +251,7 @@ class PdfSortService(LoggableMixin):
                 "order": options.order,
                 "pattern": options.pattern,
                 "outputs": [str(f.output) for f in result.sorted_files if f.output],
-                "success": True,
+                "success": result.success,
+                "cancelled": result.cancelled,
             },
         )

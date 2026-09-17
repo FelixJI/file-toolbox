@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtGui import QCloseEvent, QKeyEvent, QKeySequence
@@ -21,8 +22,10 @@ from PySide6.QtWidgets import (
 )
 
 from file_toolbox.common.history import JsonHistoryStore
+from file_toolbox.common.operation_errors import HistorySaveError
 from file_toolbox.core.batch_mkdir import (
     ConflictStrategy,
+    CreateResult,
     FolderCreatorService,
     FolderStructureItem,
 )
@@ -355,19 +358,25 @@ class BatchFolderCreatorDialog(QDialog):
             return
         # CONFIRM 策略:对每个已存在文件夹弹窗询问是否跳过
         skip_callback = self._make_skip_callback() if strategy == ConflictStrategy.CONFIRM else None
-        result = self._svc.create_folders(
-            items,
-            strategy,
-            skip_callback=skip_callback,
-            root=str(root),
-            structure_count=len(structures),
-        )
+        history_error = ""
+        try:
+            result = self._svc.create_folders(
+                items,
+                strategy,
+                skip_callback=skip_callback,
+                root=str(root),
+                structure_count=len(structures),
+            )
+        except HistorySaveError as error:
+            result = cast(CreateResult, error.result)
+            history_error = str(error)
         # 历史记录已下沉 FolderCreatorService.create_folders(注入了 history_store)
         QMessageBox.information(
             self,
-            "完成" if result.success else "出错",
+            "完成" if result.success and not history_error else "出错",
             f"新建 {result.created_count}, 跳过 {result.skipped_count}, 共 {result.total_count}"
-            + (f"\n{result.error_message}" if result.error_message else ""),
+            + (f"\n{result.error_message}" if result.error_message else "")
+            + (f"\n{history_error}" if history_error else ""),
         )
         self._refresh_ui_state()
 

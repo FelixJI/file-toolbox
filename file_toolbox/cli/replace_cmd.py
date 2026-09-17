@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from file_toolbox.cli.op_parser import parse_ops
+from file_toolbox.cli.resources import close_on_exit, run_reported
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_replace import ContentReplaceService
 
@@ -24,25 +25,28 @@ def replace(
         typer.secho("错误:未提供文件", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
 
-    svc = ContentReplaceService(history_store=JsonHistoryStore())
-    valid, msg = svc.validate_operations(operations)
-    if not valid:
-        typer.secho(f"错误:{msg}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
+    svc = ContentReplaceService(history_store=JsonHistoryStore() if yes else None)
+    with close_on_exit(lambda: svc.close(strict=True)):
+        valid, msg = svc.validate_operations(operations)
+        if not valid:
+            typer.secho(f"错误:{msg}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
 
-    if not yes:
-        typer.echo("预览匹配数:")
-        result = svc.preview_replace(files, operations)
-        matched = 0
-        for f, info in result.items():
-            typer.echo(f"  {f.name}: {info['match_count']} 处匹配  [{info['status']}]")
-            matched += info["match_count"]
-        typer.echo(f"\n总匹配 {matched} 处。(加 --yes 执行,执行前自动备份)")
-        svc.close()
-        return
+        if not yes:
+            typer.echo("预览匹配数:")
+            result = svc.preview_replace(files, operations)
+            matched = 0
+            for f, info in result.items():
+                typer.echo(f"  {f.name}: {info['match_count']} 处匹配  [{info['status']}]")
+                matched += info["match_count"]
+            typer.echo(f"\n总匹配 {matched} 处。(加 --yes 执行,执行前自动备份)")
+            return
 
-    success, total, errors = svc.execute_replace(files, operations, keep_backup=keep_backup)
-    typer.secho(f"\n完成: 处理 {success} 个文件, 替换 {total} 处", fg=typer.colors.GREEN)
-    for e in errors:
-        typer.secho(f"  失败: {e}", fg=typer.colors.YELLOW)
-    svc.close()
+        (success, total, errors), history_failed = run_reported(
+            lambda: svc.execute_replace(files, operations, keep_backup=keep_backup)
+        )
+        typer.secho(f"\n完成: 处理 {success} 个文件, 替换 {total} 处", fg=typer.colors.GREEN)
+        for e in errors:
+            typer.secho(f"  失败: {e}", fg=typer.colors.YELLOW)
+        if errors or history_failed:
+            raise typer.Exit(1)

@@ -177,3 +177,24 @@ def test_worker_start_delivers_failed_across_threads(app):
 
     assert "cross-thread boom" in captured.get("fail", "")
     assert ok == []
+
+
+def test_worker_history_failure_keeps_cancelled_result_and_warns(app):
+    from file_toolbox.common.operation_errors import HistorySaveError
+
+    result = _result_with_failed()
+    result.cancelled = True
+    worker = PdfSortWorker(
+        _FakeService(error=HistorySaveError(result, OSError("history denied"))),
+        [Path("a.pdf")],
+        None,
+        SortOptions(pattern="Date"),
+    )
+    events = []
+    worker.finished_ok.connect(lambda value: events.append(("result", value)))
+    worker.warning.connect(lambda value: events.append(("warning", value)))
+    worker.failed.connect(lambda value: events.append(("failed", value)))
+    worker.run()
+    assert events[0] == ("result", result)
+    assert events[1][0] == "warning" and "history denied" in events[1][1]
+    assert len(events) == 2

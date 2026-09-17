@@ -40,7 +40,7 @@ def test_pdf_no_files_errors(tmp_path):
 def test_pdf_separate_single_png(tmp_path):
     """separate 模式(默认):1 张 PNG → 同目录生成同名 PDF。"""
     src = _png(tmp_path / "photo.png")
-    r = runner.invoke(app, ["pdf", str(src)])
+    r = runner.invoke(app, ["pdf", "--yes", str(src)])
     assert r.exit_code == 0, r.output
     out = tmp_path / "photo.pdf"
     assert out.exists()
@@ -59,6 +59,7 @@ def test_pdf_merge_two_pngs(tmp_path):
         app,
         [
             "pdf",
+            "--yes",
             str(a),
             str(b),
             "--output-mode",
@@ -78,7 +79,7 @@ def test_pdf_image_type_dpi(tmp_path):
     src = _png(tmp_path / "scan.png")
     r = runner.invoke(
         app,
-        ["pdf", str(src), "--pdf-type", "image", "--dpi", "150"],
+        ["pdf", "--yes", str(src), "--pdf-type", "image", "--dpi", "150"],
     )
     assert r.exit_code == 0, r.output
     assert (tmp_path / "scan.pdf").exists()
