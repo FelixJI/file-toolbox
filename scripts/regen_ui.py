@@ -67,6 +67,10 @@ UI_SOURCES: list[UiMapping] = [
         ui_file="batch_folder_creator_dialog.ui",
     ),
     UiMapping(
+        ui_module="ui_plan_schedule_dialog.py",
+        ui_file="plan_schedule_dialog.ui",
+    ),
+    UiMapping(
         ui_module="ui_pdf_dialog.py",
         ui_file="ui_pdf_generator_dialog.ui",
     ),

@@ -20,7 +20,17 @@ def test_version():
 def test_help_lists_commands():
     r = runner.invoke(app, ["--help"])
     assert r.exit_code == 0
-    for cmd in ["rename", "mkdir", "pdf", "pdf-sort", "replace", "gui", "invoice", "excel-merge"]:
+    for cmd in [
+        "rename",
+        "mkdir",
+        "pdf",
+        "pdf-sort",
+        "replace",
+        "gui",
+        "invoice",
+        "excel-merge",
+        "plan-schedule",
+    ]:
         assert cmd in r.output
 
 

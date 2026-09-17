@@ -66,14 +66,14 @@ def test_history_button_opens_current_tab_history(win, monkeypatch):
 
 
 def test_history_button_disabled_on_about_tab(win):
-    win._tabs.setCurrentIndex(8)
+    win._tabs.setCurrentIndex(9)
     assert win.btn_history.isEnabled() is False
 
 
 def test_history_button_noop_on_tab_without_history(win, monkeypatch):
     dialog = MagicMock()
     monkeypatch.setattr("file_toolbox.gui.dialogs.history_dialog.HistoryDialog", dialog)
-    win._tabs.setCurrentIndex(8)
+    win._tabs.setCurrentIndex(9)
     win._open_history_for_current_tab()
     dialog.assert_not_called()
 
@@ -88,6 +88,7 @@ def test_tab_tools_mapping(win):
         "invoice",
         "excel_merge",
         "pdf_sort",
+        "plan_schedule",
         None,
     ]
 
@@ -98,8 +99,8 @@ def test_only_first_tab_constructed_initially(win):
     assert isinstance(win._rename_tab, FileRenamerDialog)
     assert win._replace_tab is None
     assert win._about_tab is None
-    assert win._tabs.count() == 9
-    assert [win._tabs.tabText(i) for i in range(9)] == [
+    assert win._tabs.count() == 10
+    assert [win._tabs.tabText(i) for i in range(10)] == [
         "重命名",
         "建文件夹",
         "生成PDF",
@@ -108,6 +109,7 @@ def test_only_first_tab_constructed_initially(win):
         "发票识别",
         "Excel合并",
         "PDF排序",
+        "计划排布",
         "关于",
     ]
 
@@ -117,7 +119,7 @@ def test_lazy_tab_materialized_on_switch(win):
 
     win._tabs.setCurrentIndex(3)
     assert isinstance(win._replace_tab, ContentReplaceDialog)
-    assert win._tabs.count() == 9
+    assert win._tabs.count() == 10
     assert win._tabs.tabText(3) == "内容替换"
     assert win._tabs.widget(3) is win._replace_tab
     assert win._tabs.currentIndex() == 3
@@ -142,7 +144,7 @@ def test_about_tab_check_signal_wired_after_lazy_construction(win, monkeypatch):
     starts: list[int] = []
     monkeypatch.setattr(win._update_worker, "start", lambda: starts.append(1))
     monkeypatch.setattr(win, "_trigger_check", lambda: None)
-    win._tabs.setCurrentIndex(8)
+    win._tabs.setCurrentIndex(9)
     assert win._about_tab is not None
     win._about_tab.check_requested.emit()
     assert starts == [1]
@@ -246,6 +248,7 @@ def test_close_event_stops_update_worker(win, monkeypatch):
         win._invoice_tab,
         win._excel_merge_tab,
         win._pdf_sort_tab,
+        win._plan_schedule_tab,
         win._about_tab,
     ):
         monkeypatch.setattr(type(tab), "closeEvent", lambda self, event: None, raising=False)
@@ -263,6 +266,7 @@ def test_close_event_respects_attendance_pending_state(win, monkeypatch):
         win._replace_tab,
         win._excel_merge_tab,
         win._pdf_sort_tab,
+        win._plan_schedule_tab,
         win._invoice_tab,
         win._about_tab,
     ):
@@ -531,7 +535,7 @@ def test_about_tab_lazy_construction_receives_pending_update(win):
     win._pending_update = UpdateCheckResult(
         UpdateCheckStatus.AVAILABLE, version="9.9.9", release_notes="- 新功能"
     )
-    win._tabs.setCurrentIndex(8)
+    win._tabs.setCurrentIndex(9)
     about = win._about_tab
     assert about is not None
     assert about.btn_download_update.isHidden() is False
@@ -623,6 +627,25 @@ def test_close_event_survives_update_worker_quit_failure(win):
 
     worker.quit.assert_called_once()
     assert event.isAccepted() is True
+
+
+def test_main_window_preserves_pending_schedule_worker(win, monkeypatch):
+    from PySide6.QtWidgets import QWidget
+
+    class PendingSchedule(QWidget):
+        close_pending = False
+
+        def closeEvent(self, event):
+            self.close_pending = True
+            event.ignore()
+
+    tab = PendingSchedule(win)
+    win._plan_schedule_tab = tab
+    monkeypatch.setattr(win, "_persist_window_geometry", lambda: None)
+    event = QCloseEvent()
+    win.closeEvent(event)
+    assert not event.isAccepted()
+    assert tab.close_pending
 
 
 @pytest.mark.parametrize("failures", [1, 2])
