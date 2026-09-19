@@ -7,18 +7,19 @@
   progress(int, int, str)  — (current, total, message)
   finished_ok(object)      — MergeResult(含 cancelled/success 语义)
   failed(str)              — 错误信息(中文友好)
+  warning(str)             — 历史等附属保存告警,不丢弃已完成结果
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
-from file_toolbox.core.excel_merge import MergeOptions
+from file_toolbox.common.operation_errors import HistorySaveError
+from file_toolbox.core.excel_merge import ExcelMergeService, MergeOptions
 
 
 class ExcelMergeWorker(QThread, LoggableMixin):
@@ -35,10 +36,11 @@ class ExcelMergeWorker(QThread, LoggableMixin):
     progress = Signal(int, int, str)
     finished_ok = Signal(object)
     failed = Signal(str)
+    warning = Signal(str)
 
     def __init__(
         self,
-        svc: Any,
+        svc: ExcelMergeService,
         files: list[Path],
         output: Path,
         options: MergeOptions,
@@ -75,6 +77,10 @@ class ExcelMergeWorker(QThread, LoggableMixin):
                 result.cancelled,
             )
             self.finished_ok.emit(result)
+        except HistorySaveError as error:
+            self.logger.warning("Excel 合并历史保存失败: %s", error)
+            self.finished_ok.emit(error.result)
+            self.warning.emit(str(error))
         except Exception as e:  # noqa: BLE001 - 任意异常转 failed 信号
             self.logger.exception("Excel 合并 worker 异常 files=%d", len(self._files))
             self.failed.emit(str(e))
