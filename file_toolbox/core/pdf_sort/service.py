@@ -17,6 +17,7 @@ from pypdf import PdfReader, PdfWriter
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.operation_errors import preserve_history_result
+from file_toolbox.core.output_file import write_numbered_output
 from file_toolbox.core.pdf_sort.constants import (
     SORTED_MARKER,
     SUPPORTED_SUFFIXES,
@@ -137,9 +138,9 @@ class PdfSortService(LoggableMixin):
             if order == list(range(len(order))):
                 sorted_files.append(SortedFile(path.name, None, pages, "顺序未变,未写出输出"))
                 continue
-            out_path = self._resolve_output_path(self._target_output(path, output, len(files)))
+            out_path = self._target_output(path, output, len(files))
             try:
-                self._write_sorted(path, order, out_path)
+                out_path = self._write_sorted(path, order, out_path)
             except Exception as e:
                 self.logger.error("输出 PDF 写出失败: %s (%s)", out_path, e)
                 failed.append(FailedFile(path.name, f"写出失败: {e}"))
@@ -211,18 +212,7 @@ class PdfSortService(LoggableMixin):
         out_dir = output if output is not None else path.parent
         return out_dir / f"{path.stem}{SORTED_MARKER}.pdf"
 
-    def _resolve_output_path(self, output: Path) -> Path:
-        """输出已存在时自动加序号,绝不覆盖已有文件(与 pdf/excel-merge 输出策略一致)。"""
-        if not output.exists():
-            return output
-        counter = 1
-        while True:
-            candidate = output.with_name(f"{output.stem}_{counter}{output.suffix}")
-            if not candidate.exists():
-                return candidate
-            counter += 1
-
-    def _write_sorted(self, path: Path, order: list[int], output: Path) -> None:
+    def _write_sorted(self, path: Path, order: list[int], output: Path) -> Path:
         """按新页序把源 PDF 的页面复制进新文件(不保留原书签/目录)。"""
         writer = PdfWriter()
         try:
@@ -231,8 +221,7 @@ class PdfSortService(LoggableMixin):
                 if reader.is_encrypted:
                     raise ValueError("加密 PDF 暂不支持,请先解除密码后重试")
                 writer.append(reader, pages=list(order), import_outline=False)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            writer.write(output)
+            return write_numbered_output(output, writer.write)
         finally:
             writer.close()
 

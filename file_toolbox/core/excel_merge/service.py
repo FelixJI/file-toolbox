@@ -28,6 +28,7 @@ from file_toolbox.core.excel_merge.types import (
     MergeResult,
     SheetPlan,
 )
+from file_toolbox.core.output_file import write_numbered_output
 
 if TYPE_CHECKING:
     from openpyxl.workbook import Workbook
@@ -150,10 +151,9 @@ class ExcelMergeService(LoggableMixin):
             )
             return MergeResult(output=None, sheets=[], failed=failed, error_message=reason)
 
-        output_path = self._resolve_output_path(self._normalize_output(output))
+        output_path = self._normalize_output(output)
         try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            dest.save(output_path)
+            output_path = write_numbered_output(output_path, dest.save)
         except Exception as e:
             self.logger.error("输出工作簿写出失败: %s (%s)", output_path, e)
             return MergeResult(
@@ -220,17 +220,6 @@ class ExcelMergeService(LoggableMixin):
         if output.suffix.lower() != ".xlsx":
             return output.with_suffix(".xlsx")
         return output
-
-    def _resolve_output_path(self, output: Path) -> Path:
-        """输出已存在时自动加序号,绝不覆盖已有文件(与 pdf 输出策略一致)。"""
-        if not output.exists():
-            return output
-        counter = 1
-        while True:
-            candidate = output.with_name(f"{output.stem}_{counter}{output.suffix}")
-            if not candidate.exists():
-                return candidate
-            counter += 1
 
     def _record_history(self, result: MergeResult, file_count: int, options: MergeOptions) -> None:
         """记录 excel_merge 历史(若注入了 history_store 且合并成功)。"""
