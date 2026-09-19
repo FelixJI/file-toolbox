@@ -7,7 +7,6 @@ UI 布局由 generated/ui_pdf_sort_dialog.py 的 Ui_PdfSortDialog(setupUi)构建
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
@@ -18,6 +17,8 @@ from file_toolbox.core.pdf_sort import (
     SORTED_MARKER,
     SUPPORTED_SUFFIXES,
     PdfSortService,
+    SortOptions,
+    SortResult,
     compile_pattern,
 )
 from file_toolbox.gui.controllers.pdf_sort_controller import PdfSortController
@@ -106,7 +107,7 @@ class PdfSortTab(QWidget):
         if d:
             self.ui.edit_outdir.setText(d)
 
-    def _options(self) -> Any:
+    def _options(self) -> SortOptions:
         return self._controller.build_options(
             self.ui.edit_pattern.text().strip(),
             self.ui.cmb_order.currentIndex(),
@@ -162,15 +163,20 @@ class PdfSortTab(QWidget):
     def _on_progress(self, current: int, total: int, msg: str) -> None:
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
-    def _on_sort_ok(self, result: Any) -> None:
+    def _on_sort_ok(self, result: SortResult) -> None:
         self._worker = None
         self.ui.btn_sort.setEnabled(True)
         self._populate_table(result)
         summary = self._controller.summarize(result)
         self.ui.lbl_status.setText(summary)
         outputs = [Path(f.output) for f in result.sorted_files if f.output is not None]
+        preference_warning = ""
         if outputs:
-            settings.set(_LAST_OUTDIR_KEY, str(outputs[0].parent))
+            try:
+                settings.set(_LAST_OUTDIR_KEY, str(outputs[0].parent))
+            except Exception as error:
+                _logger.warning("PDF 排序输出目录偏好保存失败: %s", error)
+                preference_warning = f"输出文件已保留,但未能记住上次输出目录: {error}"
         if result.cancelled:
             details = "\n".join(str(path) for path in outputs)
             QMessageBox.warning(
@@ -181,6 +187,9 @@ class PdfSortTab(QWidget):
         else:
             QMessageBox.warning(self, "未生成输出", summary + "\n\n源文件均未被修改。")
 
+        if preference_warning:
+            QMessageBox.warning(self, "偏好保存失败", preference_warning)
+
     def _on_history_warning(self, msg: str) -> None:
         QMessageBox.warning(self, "历史保存失败", msg)
 
@@ -190,7 +199,7 @@ class PdfSortTab(QWidget):
         self.ui.lbl_status.setText("排序失败")
         QMessageBox.critical(self, "排序失败", msg)
 
-    def _populate_table(self, result: Any) -> None:
+    def _populate_table(self, result: SortResult) -> None:
         """结果表格:每个已处理文件每页一行(原页->新页+排序文字),失败文件浅黄行。"""
         rows: list[tuple[list[str], bool]] = []
         for f in result.sorted_files:
