@@ -12,14 +12,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.operation_errors import HistorySaveError
-from file_toolbox.core.pdf_sort import SortOptions
+from file_toolbox.core.pdf_sort import PdfSortService, SortOptions
 
 
 class PdfSortWorker(QThread, LoggableMixin):
@@ -40,7 +39,7 @@ class PdfSortWorker(QThread, LoggableMixin):
 
     def __init__(
         self,
-        svc: Any,
+        svc: PdfSortService,
         files: list[Path],
         output: Path | None,
         options: SortOptions,

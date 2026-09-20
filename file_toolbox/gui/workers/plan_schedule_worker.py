@@ -12,13 +12,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
-from file_toolbox.core.plan_schedule import ScheduleOptions
+from file_toolbox.core.plan_schedule import PlanScheduleService, ScheduleOptions
 
 
 class PlanScheduleWorker(QThread, LoggableMixin):
@@ -30,7 +29,7 @@ class PlanScheduleWorker(QThread, LoggableMixin):
 
     def __init__(
         self,
-        svc: Any,
+        svc: PlanScheduleService,
         input_path: Path,
         output: Path,
         options: ScheduleOptions,
