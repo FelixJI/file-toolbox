@@ -187,7 +187,8 @@ class ExcelMergeTab(QWidget):
         if self.sender() is not None and self.sender() is not self._worker:
             return
         if not self._close_pending:
-            QMessageBox.warning(self, "历史保存失败", msg)
+            title = "历史保存失败" if msg.startswith("历史保存失败:") else "合并收尾告警"
+            QMessageBox.warning(self, title, msg)
 
     def _on_merge_failed(self, msg: str) -> None:
         if self.sender() is not None and self.sender() is not self._worker:

@@ -18,7 +18,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
-from file_toolbox.common.operation_errors import HistorySaveError
+from file_toolbox.common.operation_errors import OperationResultError
 from file_toolbox.core.excel_merge import ExcelMergeService, MergeOptions
 
 
@@ -77,8 +77,8 @@ class ExcelMergeWorker(QThread, LoggableMixin):
                 result.cancelled,
             )
             self.finished_ok.emit(result)
-        except HistorySaveError as error:
-            self.logger.warning("Excel 合并历史保存失败: %s", error)
+        except OperationResultError as error:
+            self.logger.warning("Excel 合并附属操作失败: %s", error)
             self.finished_ok.emit(error.result)
             self.warning.emit(str(error))
         except Exception as e:  # noqa: BLE001 - 任意异常转 failed 信号

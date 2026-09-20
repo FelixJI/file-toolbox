@@ -41,7 +41,7 @@ class MergedSheet:
 
 @dataclass(frozen=True)
 class FailedSource:
-    """读取失败的源文件(损坏/加密/不支持的格式),不中断其余文件。"""
+    """读取、复制或收尾失败并撤回的源文件,不中断其余有效文件。"""
 
     file: str
     error: str

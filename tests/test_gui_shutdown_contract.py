@@ -249,6 +249,11 @@ def exercise(scenario):
                 assert not event.isAccepted(), "线程仍运行时错误接受关闭"
                 assert monotonic() - before < 0.5, "关闭阻塞了 GUI 线程"
                 window.closeEvent(QCloseEvent())
+                if not is_pdf:
+                    previous_messages = list(messages)
+                    worker.warning.emit("输出工作簿关闭失败: injected cleanup failure")
+                    app.processEvents()
+                    assert messages == previous_messages, "关闭等待期间不应弹出收尾告警"
                 elapsed = []
                 QTimer.singleShot(3100, lambda: elapsed.append(True))
                 pump_until(lambda: bool(elapsed))

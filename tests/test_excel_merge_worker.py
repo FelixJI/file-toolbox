@@ -132,3 +132,26 @@ def test_worker_start_merges_real_files_across_threads(app, make_xlsx, tmp_path)
     assert failed == []
     assert len(results) == 1 and results[0].success
     assert load_workbook(out).sheetnames == ["a-S1", "b-S2"]
+
+
+def test_worker_preserves_output_when_destination_close_fails(
+    app, make_xlsx, tmp_path, monkeypatch
+):
+    source = make_xlsx("source.xlsx", {"Data": [["kept"]]})
+    service = ExcelMergeService()
+    dest = service._new_workbook()
+
+    def close():
+        raise OSError("destination close fault")
+
+    monkeypatch.setattr(dest, "close", close)
+    monkeypatch.setattr(service, "_new_workbook", lambda: dest)
+    worker = ExcelMergeWorker(service, [source], tmp_path / "out.xlsx", MergeOptions())
+    results, warnings, failed = [], [], []
+    worker.finished_ok.connect(results.append)
+    worker.warning.connect(warnings.append)
+    worker.failed.connect(failed.append)
+    worker.run()
+    assert len(results) == len(warnings) == 1 and failed == []
+    assert results[0].success and results[0].output.is_file()
+    assert "destination close fault" in warnings[0]
