@@ -213,17 +213,20 @@ def test_resolve_outdir_chain(tab, make_xlsx, monkeypatch, tmp_path):
 
 
 def test_close_event_cancels_running_worker(tab, monkeypatch):
-    """关闭时若 worker 仍在跑:cancel+quit+wait,引用置空。"""
+    """关闭时协作取消,保留引用并等待真实 finished。"""
     worker = MagicMock()
     worker.isRunning.return_value = True
     tab._worker = worker
 
-    tab.closeEvent(QCloseEvent())
+    event = QCloseEvent()
+    tab.closeEvent(event)
 
     worker.cancel.assert_called_once()
-    worker.quit.assert_called_once()
-    worker.wait.assert_called_once_with(3000)
-    assert tab._worker is None
+    worker.quit.assert_not_called()
+    worker.wait.assert_not_called()
+    assert tab._worker is worker
+    assert not event.isAccepted()
+    tab._worker = None  # 这里只是 slot mock;真实线程结束由隔离回归验证。
 
 
 def test_close_event_without_worker_is_noop(tab):
@@ -236,15 +239,13 @@ def test_close_event_without_worker_is_noop(tab):
 
 
 def _wait_worker_done(tab, app, timeout_ms: int = 10000) -> None:
-    """轮询事件循环直到 worker 结束(_on_merge_ok/_on_merge_failed 置空引用)。"""
-    import time
-
-    deadline = time.monotonic() + timeout_ms / 1000
-    while tab._worker is not None:
-        app.processEvents()
-        if time.monotonic() > deadline:
-            raise AssertionError("worker 未在超时内结束")
-        time.sleep(0.01)
+    """保留真实线程引用并等待退出,再投递 GUI 结果与 finished。"""
+    worker = tab._worker
+    assert worker is not None
+    assert worker.wait(timeout_ms)
+    app.processEvents()
+    app.processEvents()
+    assert tab._worker is None
 
 
 def test_add_files_via_dialog_and_browse(tab, monkeypatch, make_xlsx):
@@ -330,17 +331,20 @@ def test_merge_reentry_guard_while_running(tab, monkeypatch, make_xlsx):
 
 
 def test_on_merge_failed_shows_critical(tab, monkeypatch):
-    """worker 异常信号 → 严重错误框 + 状态合并失败,按钮恢复。"""
+    """worker 异常信号 → 严重错误框 + 状态合并失败,线程仍需等待 finished。"""
     criticals: list[str] = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: criticals.append("crit"))
-    tab._worker = MagicMock()  # 非 None,模拟运行中
+    worker = MagicMock()
+    tab._worker = worker
+    tab.ui.btn_merge.setEnabled(False)
 
     tab._on_merge_failed("boom")
 
     assert criticals == ["crit"]
     assert tab.ui.lbl_status.text() == "合并失败"
-    assert tab.ui.btn_merge.isEnabled() is True
-    assert tab._worker is None
+    assert tab.ui.btn_merge.isEnabled() is False
+    assert tab._worker is worker
+    tab._worker = None
 
 
 def _result_with_failure() -> MergeResult:

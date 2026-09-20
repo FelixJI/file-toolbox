@@ -185,37 +185,31 @@ def test_cancel_requests_worker_stop(win):
     win._update_worker.cancel_download.assert_called_once_with(win._download_request)
 
 
-def test_apply_started_quits_after_sdk_schedules_update(win, monkeypatch):
-    """APPLY_STARTED 收尾契约:存几何、停 worker、退出——裸 quit 会让进程
-    拖住 60s 后才被更新器强杀(0.2.9-0.2.11 的实际故障)。"""
+def test_apply_started_quits_after_sdk_schedules_update(win, app, monkeypatch):
+    """APPLY_STARTED 经真实 QThread.finished 后保存几何并退出。"""
+    from PySide6.QtCore import QThread
 
-    quit_calls: list[int] = []
-    settings_calls: list[tuple[str, str]] = []
-    worker_calls: list[object] = []
-
-    class RunningWorkerStub:
-        def isRunning(self) -> bool:
-            return True
-
-        def quit(self) -> None:
-            worker_calls.append("quit")
-
-        def wait(self, ms: int) -> None:
-            worker_calls.append(("wait", ms))
-
-    monkeypatch.setattr(QApplication, "quit", lambda: quit_calls.append(1))
-    monkeypatch.setattr(
-        "file_toolbox.common.settings.set",
-        lambda key, value: settings_calls.append((key, value)),
-    )
-    win._update_worker = RunningWorkerStub()  # type: ignore[assignment]
-    win._download_request = UpdateRequest()
-    win._on_update_applied(
-        win._download_request, UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
-    )
-    assert quit_calls == [1]
-    assert worker_calls == ["quit", ("wait", 2000)]
-    assert [key for key, _value in settings_calls] == ["window/geometry"]
+    quits, settings_calls = [], []
+    worker = QThread()
+    win._update_worker = worker
+    monkeypatch.setattr(QApplication, "quit", lambda: quits.append(1))
+    monkeypatch.setattr("file_toolbox.common.settings.set", lambda k, v: settings_calls.append(k))
+    worker.start()
+    try:
+        win._download_request = UpdateRequest()
+        win._on_update_applied(
+            win._download_request, UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
+        )
+        assert quits == []
+        assert worker.wait(2000)
+        app.processEvents()
+        app.processEvents()
+        assert worker.isFinished()
+        assert quits == [1]
+        assert settings_calls == ["window/geometry"]
+    finally:
+        worker.quit()
+        assert worker.wait(2000)
 
 
 def test_apply_failure_warns_without_quitting(win, monkeypatch):
@@ -254,7 +248,8 @@ def test_close_event_stops_update_worker(win, monkeypatch):
         monkeypatch.setattr(type(tab), "closeEvent", lambda self, event: None, raising=False)
     win.closeEvent(QCloseEvent())
     worker.quit.assert_called_once()
-    worker.wait.assert_called_once_with(2000)
+    worker.wait.assert_not_called()
+    assert worker in win._closing_workers
 
 
 def test_close_event_respects_attendance_pending_state(win, monkeypatch):
@@ -594,7 +589,7 @@ def test_shutdown_survives_update_worker_close_failure(win, monkeypatch):
         win._download_request, UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
     )
 
-    assert quits == [1]
+    assert quits == []  # 未能确认线程状态时不能直接退出
 
 
 def test_update_progress_without_dialog_is_noop(win):
@@ -626,7 +621,7 @@ def test_close_event_survives_update_worker_quit_failure(win):
     win.closeEvent(event)
 
     worker.quit.assert_called_once()
-    assert event.isAccepted() is True
+    assert event.isAccepted() is False
 
 
 def test_main_window_preserves_pending_schedule_worker(win, monkeypatch):
