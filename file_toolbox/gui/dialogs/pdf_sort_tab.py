@@ -8,6 +8,7 @@ UI 布局由 generated/ui_pdf_sort_dialog.py 的 Ui_PdfSortDialog(setupUi)构建
 import logging
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
 
@@ -44,7 +45,12 @@ class PdfSortTab(QWidget):
         self._controller = PdfSortController()
         self._files: list[Path] = []
         self._worker: PdfSortWorker | None = None
+        self._close_pending = False
         self._connect()
+
+    @property
+    def close_pending(self) -> bool:
+        return self._close_pending
 
     def _connect(self) -> None:
         self.ui.btn_add_files.clicked.connect(self._add_files)
@@ -142,7 +148,7 @@ class PdfSortTab(QWidget):
             QMessageBox.warning(self, "匹配格式无效", str(e))
             return
         # 避免重复启动(重复点击不泄漏多个 worker)
-        if self._worker is not None and self._worker.isRunning():
+        if self._worker is not None or self._close_pending:
             return
         outdir = self._resolve_outdir()
         # 单文件:输出文件;多文件:输出目录(命名策略由 service 决定)
@@ -155,17 +161,20 @@ class PdfSortTab(QWidget):
         worker.finished_ok.connect(self._on_sort_ok)
         worker.failed.connect(self._on_sort_failed)
         worker.warning.connect(self._on_history_warning)
+        worker.finished.connect(self._on_worker_finished)
         self._worker = worker  # 持有引用防 GC
         self.ui.btn_sort.setEnabled(False)
         self.ui.lbl_status.setText("排序中…")
         worker.start()
 
     def _on_progress(self, current: int, total: int, msg: str) -> None:
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
     def _on_sort_ok(self, result: SortResult) -> None:
-        self._worker = None
-        self.ui.btn_sort.setEnabled(True)
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
         self._populate_table(result)
         summary = self._controller.summarize(result)
         self.ui.lbl_status.setText(summary)
@@ -177,6 +186,8 @@ class PdfSortTab(QWidget):
             except Exception as error:
                 _logger.warning("PDF 排序输出目录偏好保存失败: %s", error)
                 preference_warning = f"输出文件已保留,但未能记住上次输出目录: {error}"
+        if self._close_pending:
+            return
         if result.cancelled:
             details = "\n".join(str(path) for path in outputs)
             QMessageBox.warning(
@@ -187,17 +198,21 @@ class PdfSortTab(QWidget):
         else:
             QMessageBox.warning(self, "未生成输出", summary + "\n\n源文件均未被修改。")
 
-        if preference_warning:
+        if preference_warning and not self._close_pending:
             QMessageBox.warning(self, "偏好保存失败", preference_warning)
 
     def _on_history_warning(self, msg: str) -> None:
-        QMessageBox.warning(self, "历史保存失败", msg)
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
+        if not self._close_pending:
+            QMessageBox.warning(self, "历史保存失败", msg)
 
     def _on_sort_failed(self, msg: str) -> None:
-        self._worker = None
-        self.ui.btn_sort.setEnabled(True)
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
         self.ui.lbl_status.setText("排序失败")
-        QMessageBox.critical(self, "排序失败", msg)
+        if not self._close_pending:
+            QMessageBox.critical(self, "排序失败", msg)
 
     def _populate_table(self, result: SortResult) -> None:
         """结果表格:每个已处理文件每页一行(原页->新页+排序文字),失败文件浅黄行。"""
@@ -219,12 +234,25 @@ class PdfSortTab(QWidget):
                     item.setBackground(QBrush(_FAIL_COLOR))
                 self.ui.table.setItem(r, c, item)
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        """关闭窗口时停止仍在运行的排序 worker,防泄漏(与 InvoiceTab 同款)。"""
+    def _on_worker_finished(self) -> None:
+        """结果不释放线程;只消费当前 worker 的真实 finished。"""
         worker = self._worker
-        if worker is not None and worker.isRunning():
-            worker.cancel()
-            worker.quit()
-            worker.wait(3000)
+        if worker is None or self.sender() is not worker:
+            return
         self._worker = None
+        worker.deleteLater()
+        self.ui.btn_sort.setEnabled(True)
+        if self._close_pending:
+            self._close_pending = False
+            QTimer.singleShot(0, self.window().close)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """协作取消后异步等待 finished,保留窗口及正在写入的线程。"""
+        if self._worker is not None:
+            if not self._close_pending:
+                self._worker.cancel()
+            self._close_pending = True
+            self.ui.lbl_status.setText("正在等待排序安全结束,完成后自动关闭…")
+            event.ignore()
+            return
         super().closeEvent(event)

@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
-from PySide6.QtCore import QByteArray, QMetaObject, QRect, Qt, QTimer
+from PySide6.QtCore import QByteArray, QMetaObject, QRect, Qt, QThread, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -187,6 +187,9 @@ class MainWindow(QMainWindow):
                 ]
             )
         }
+        self._tab_attrs = tuple(spec[2] for spec in self._lazy_specs.values())
+        self._closing_workers: set[QThread] = set()
+        self._restart_pending = False
         for label, _factory, _attr in self._lazy_specs.values():
             tabs.addTab(QWidget(), label)
         # 各 Tab 对应的历史工具名;"关于"页无历史 → None(按钮禁用)
@@ -467,22 +470,9 @@ class MainWindow(QMainWindow):
         self._shutdown_for_restart()
 
     def _shutdown_for_restart(self) -> None:
-        """更新已由 Velopack 接管:收尾并真正退出进程,让更新器立即替换重启。
-
-        裸 ``QApplication.quit()`` 不经过 ``closeEvent``,UpdateWorker 的事件
-        循环会让进程再活 60s,更新器只能等超时后强杀(0.2.9-0.2.11 的实际
-        故障:确认更新到新版本启动约 95s,其中 60s 在等旧进程退出)。
-        """
-        from PySide6.QtWidgets import QApplication
-
-        self._persist_window_geometry()
-        try:
-            if self._update_worker.isRunning():
-                self._update_worker.quit()
-                self._update_worker.wait(2000)
-        except Exception:
-            _logger.exception("关闭更新 worker 失败")
-        QApplication.quit()
+        """更新已交给 Velopack;仍须经过与普通关闭相同的业务收尾。"""
+        self._restart_pending = True
+        self.close()
 
     # --- 窗口几何 ---
 
@@ -523,43 +513,72 @@ class MainWindow(QMainWindow):
 
         settings.set(_GEOMETRY_KEY, bytes(self.saveGeometry().toBase64().data()).decode("ascii"))
 
+    def _on_closing_worker_finished(self) -> None:
+        worker = self.sender()
+        if isinstance(worker, QThread):
+            self._closing_workers.discard(worker)
+        if not self._closing_workers:
+            QTimer.singleShot(0, self.close)
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        # 记住窗口几何(含最大化状态),下次启动恢复
-        self._persist_window_geometry()
-        # 退出自更新 worker 线程(若有)
+        from PySide6.QtWidgets import QApplication
+
+        # 登记表来自同一 Tab 注册源;getattr 不会构造尚未打开的页。
+        tabs = [getattr(self, attr) for attr in self._tab_attrs]
+        self._tabs.setEnabled(False)  # 关闭期间不再启动新的业务写入。
         try:
-            if self._update_worker.isRunning():
-                self._update_worker.quit()
-                self._update_worker.wait(2000)
+            workers = [
+                worker for tab in tabs if tab is not None for worker in tab.findChildren(QThread)
+            ]
+            workers.append(self._update_worker)
+            for worker in workers:
+                if not worker.isRunning():
+                    continue
+                if worker not in self._closing_workers:
+                    worker.finished.connect(self._on_closing_worker_finished)
+                    # 订阅前后都可能恰好退出:复查避免错过 finished 后永久等待。
+                    if not worker.isRunning():
+                        continue
+                    self._closing_workers.add(worker)
+                cancel = getattr(worker, "cancel", None)
+                if callable(cancel):
+                    cancel()
+                # 只请求更新线程的事件循环退出;业务线程由其取消契约结束。
+                if worker is self._update_worker:
+                    worker.quit()
         except Exception:
-            _logger.exception("关闭更新 worker 失败")
-        for tab in (
-            self._rename_tab,
-            self._mkdir_tab,
-            self._pdf_tab,
-            self._replace_tab,
-            self._attendance_tab,
-            self._invoice_tab,
-            self._excel_merge_tab,
-            self._plan_schedule_tab,
-            self._about_tab,
-        ):
-            # 懒构造 Tab 可能尚未实例化(用户未切换过),无实例即无清理
-            if tab is None or not hasattr(tab, "closeEvent"):
+            _logger.exception("请求线程安全退出失败")
+            event.ignore()
+            return
+        if self._closing_workers:
+            self.statusBar().showMessage("正在等待后台任务安全结束,完成后自动关闭…")
+            event.ignore()
+            return
+
+        try:
+            self._persist_window_geometry()
+        except Exception:
+            _logger.exception("保存窗口几何失败,继续安全关闭")
+        pending = False
+        for tab in tabs:
+            if tab is None:
                 continue
-            # 触发各 tab 的清理(吞掉异常避免一个 tab 清理失败影响其余)
+            tab_event = QCloseEvent()
             try:
-                tab.closeEvent(event)
+                tab.closeEvent(tab_event)
             except Exception:
                 _logger.exception("关闭 Tab 失败 tab=%s", type(tab).__name__)
-        attendance = self._attendance_tab
-        schedule = self._plan_schedule_tab
-        if (attendance is not None and attendance.close_pending) or (
-            schedule is not None and schedule.close_pending
-        ):
+                tab_event.ignore()
+            pending = (
+                pending or not tab_event.isAccepted() or bool(getattr(tab, "close_pending", False))
+            )
+        if pending:
             event.ignore()
             return
         super().closeEvent(event)
+        if self._restart_pending:
+            self._restart_pending = False
+            QApplication.quit()
 
 
 def _activate_window(window: QWidget) -> None:
