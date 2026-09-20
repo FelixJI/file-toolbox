@@ -207,3 +207,35 @@ def test_excel_real_worker_business_failure_is_not_reported_as_saved(
         assert tab.ui.table.rowCount() == 1
         assert [(kind, title) for kind, title, _ in messages] == [("warning", "未生成输出")]
     tab.close()
+
+
+def test_excel_output_close_warning_keeps_real_result(
+    app, messages, make_xlsx, tmp_path, monkeypatch
+):
+    history = JsonHistoryStore(tmp_path / "history")
+    monkeypatch.setattr(excel_merge_tab, "JsonHistoryStore", lambda: history)
+    monkeypatch.setattr(settings, "_settings_path", lambda: tmp_path / "settings.json")
+    source = make_xlsx("source.xlsx", {"Data": [["kept"]]})
+    tab = excel_merge_tab.ExcelMergeTab()
+    dest = tab._svc._new_workbook()
+
+    def close():
+        raise OSError("destination close fault")
+
+    monkeypatch.setattr(dest, "close", close)
+    monkeypatch.setattr(tab._svc, "_new_workbook", lambda: dest)
+    tab._add_paths([source])
+    tab.ui.edit_outdir.setText(str(tmp_path / "outputs"))
+    results, failures = observe_start(monkeypatch, ExcelMergeWorker)
+    tab._merge()
+    worker = tab._worker
+    finish(worker, app)
+    assert len(results) == 1 and results[0].success and failures == []
+    assert results[0].output.is_file() and tab.ui.table.rowCount() == 1
+    assert str(results[0].output) in tab.ui.lbl_status.text()
+    assert [(kind, title) for kind, title, _ in messages] == [
+        ("information", "合并完成"),
+        ("warning", "合并收尾告警"),
+    ]
+    assert "destination close fault" in messages[-1][2]
+    tab.close()

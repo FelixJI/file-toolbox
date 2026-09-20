@@ -144,3 +144,26 @@ def test_output_auto_numbered_when_exists(make_xlsx, tmp_path):
     assert r.exit_code == 0
     assert out.read_text(encoding="utf-8") == "precious"
     assert (tmp_path / "合并结果_1.xlsx").is_file()
+
+
+def test_output_close_failure_reports_saved_output(make_xlsx, tmp_path, monkeypatch):
+    from file_toolbox.core.excel_merge import ExcelMergeService
+
+    source = make_xlsx("source.xlsx", {"Data": [["kept"]]})
+    dest = ExcelMergeService()._new_workbook()
+
+    def close():
+        raise OSError("destination close fault")
+
+    monkeypatch.setattr(dest, "close", close)
+    monkeypatch.setattr(ExcelMergeService, "_new_workbook", lambda self: dest)
+    output = tmp_path / "out.xlsx"
+    result = runner.invoke(app, ["excel-merge", str(source), "-o", str(output), "--yes"])
+    assert result.exit_code == 1
+    assert "destination close fault" in result.output
+    assert "完成: 1 个工作表" in result.output
+    wb = load_workbook(output)
+    try:
+        assert wb["source-Data"]["A1"].value == "kept"
+    finally:
+        wb.close()

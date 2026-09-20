@@ -8,14 +8,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from copy import copy
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from copy import copy, deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
-from file_toolbox.common.operation_errors import preserve_history_result
+from file_toolbox.common.operation_errors import OperationResultError, preserve_history_result
 from file_toolbox.core.excel_merge.constants import (
     MODE_VALUES,
     SUPPORTED_SUFFIXES,
@@ -77,18 +78,30 @@ class ExcelMergeService(LoggableMixin):
         for idx, path in enumerate(files, start=1):
             if progress_callback is not None:
                 progress_callback(idx, total, f"读取 {path.name}")
+            next_namer = deepcopy(namer)
+            source_plans: list[SheetPlan] = []
+            stage = "无法读取"
             try:
-                src = self._load_workbook(path, MODE_VALUES)
-            except Exception as e:
-                failed.append(FailedSource(path.name, f"无法读取: {e}"))
+                with self._closing_workbook(self._load_workbook(path, MODE_VALUES)) as src:
+                    stage = "无法枚举工作表"
+                    for ws in src.worksheets:
+                        if ws.sheet_state != "visible" and not options.include_hidden:
+                            source_plans.append(
+                                SheetPlan(path.name, ws.title, "", False, "隐藏工作表")
+                            )
+                            continue
+                        target = next_namer.assign(
+                            compose_sheet_base(path.stem, ws.title, options.naming)
+                        )
+                        source_plans.append(SheetPlan(path.name, ws.title, target, True))
+            except MemoryError:
+                raise
+            except Exception as error:
+                failed.append(FailedSource(path.name, f"{stage}: {error}"))
+                self.logger.warning("源文件预览失败,跳过: %s (%s)", path, error)
                 continue
-            for ws in src.worksheets:
-                if ws.sheet_state != "visible" and not options.include_hidden:
-                    plans.append(SheetPlan(path.name, ws.title, "", False, "隐藏工作表"))
-                    continue
-                target = namer.assign(compose_sheet_base(path.stem, ws.title, options.naming))
-                plans.append(SheetPlan(path.name, ws.title, target, True))
-            src.close()
+            plans.extend(source_plans)
+            namer = next_namer
         return plans, failed
 
     # ==================== 执行 ====================
@@ -115,7 +128,31 @@ class ExcelMergeService(LoggableMixin):
         """
         if options is None:
             options = MergeOptions()
-        dest = self._new_workbook()
+        result: MergeResult | None = None
+        try:
+            with self._closing_workbook(self._new_workbook()) as dest:
+                result = self._merge_into(
+                    dest, files, output, options, progress_callback, cancel_check
+                )
+        except Exception as error:
+            if result is None:
+                raise
+            # 业务已返回,此时的异常来自输出工作簿收尾;保留真实产物/失败/取消状态。
+            raise OperationResultError(result, f"输出工作簿关闭失败: {error}") from error
+        with preserve_history_result(result):
+            self._record_history(result, len(files), options)
+        return result
+
+    def _merge_into(
+        self,
+        dest: Workbook,
+        files: list[Path],
+        output: Path,
+        options: MergeOptions,
+        progress_callback: ProgressCallback | None,
+        cancel_check: CancelCheck | None,
+    ) -> MergeResult:
+        """构建并提交输出;工作簿的关闭由调用方统一负责。"""
         namer = SheetNamer()
         merged: list[MergedSheet] = []
         failed: list[FailedSource] = []
@@ -129,26 +166,46 @@ class ExcelMergeService(LoggableMixin):
                 break
             if progress_callback is not None:
                 progress_callback(idx, total, f"合并 {path.name}")
+            next_namer = deepcopy(namer)
+            source_sheets: list[MergedSheet] = []
+            previous_count = len(dest.worksheets)
+            stage = "无法读取"
             try:
-                src = self._load_workbook(path, options.mode)
-            except Exception as e:
-                failed.append(FailedSource(path.name, f"无法读取: {e}"))
-                self.logger.warning("源文件读取失败,跳过: %s (%s)", path, e)
+                with self._closing_workbook(self._load_workbook(path, options.mode)) as src:
+                    stage = "无法复制工作表"
+                    for ws in src.worksheets:
+                        if ws.sheet_state != "visible" and not options.include_hidden:
+                            continue
+                        target = next_namer.assign(
+                            compose_sheet_base(path.stem, ws.title, options.naming)
+                        )
+                        self._copy_worksheet(ws, dest, target)
+                        source_sheets.append(MergedSheet(path.name, ws.title, target))
+            except MemoryError:
+                raise
+            except Exception as error:
+                self.logger.warning("源文件处理失败,撤回该源: %s (%s)", path, error)
+                try:
+                    for sheet in dest.worksheets[previous_count:]:
+                        dest.remove(sheet)
+                except Exception as cleanup_error:
+                    self.logger.exception("撤回失败源工作表失败,终止合并: %s", path)
+                    raise error from cleanup_error
+                failed.append(FailedSource(path.name, f"{stage}: {error}"))
                 continue
-            for ws in src.worksheets:
-                if ws.sheet_state != "visible" and not options.include_hidden:
-                    continue
-                target = namer.assign(compose_sheet_base(path.stem, ws.title, options.naming))
-                self._copy_worksheet(ws, dest, target)
-                merged.append(MergedSheet(path.name, ws.title, target))
-            src.close()
+            merged.extend(source_sheets)
+            namer = next_namer
 
         if cancelled:
             return MergeResult(output=None, sheets=merged, failed=failed, cancelled=True)
         if not merged:
-            reason = (
-                "全部源文件读取失败" if failed and len(failed) == total else "没有可合并的工作表"
-            )
+            reason = "没有可合并的工作表"
+            if failed and len(failed) == total:
+                reason = (
+                    "全部源文件读取失败"
+                    if all(item.error.startswith("无法读取:") for item in failed)
+                    else "全部源文件处理失败"
+                )
             return MergeResult(output=None, sheets=[], failed=failed, error_message=reason)
 
         output_path = self._normalize_output(output)
@@ -162,12 +219,28 @@ class ExcelMergeService(LoggableMixin):
         self.logger.info(
             "Excel 合并完成: %d 个文件 -> %d 个工作表 -> %s", total, len(merged), output_path
         )
-        result = MergeResult(output=output_path, sheets=merged, failed=failed)
-        with preserve_history_result(result):
-            self._record_history(result, total, options)
-        return result
+        return MergeResult(output=output_path, sheets=merged, failed=failed)
 
     # ==================== 内部实现 ====================
+
+    @contextmanager
+    def _closing_workbook(self, workbook: Workbook) -> Iterator[Workbook]:
+        """关闭本服务取得的工作簿;收尾异常不能取代已有主异常。"""
+        try:
+            yield workbook
+        except BaseException as primary:
+            try:
+                workbook.close()
+            except Exception as cleanup_error:
+                self.logger.exception("Excel 工作簿关闭失败: %s", cleanup_error)
+                primary.add_note(f"工作簿关闭也失败: {cleanup_error}")
+            raise
+        else:
+            try:
+                workbook.close()
+            except Exception:
+                self.logger.exception("Excel 工作簿关闭失败")
+                raise
 
     def _load_workbook(self, path: Path, mode: str) -> Workbook:
         """打开源工作簿。后缀先于 openpyxl 校验,给清晰的中文错误。"""
