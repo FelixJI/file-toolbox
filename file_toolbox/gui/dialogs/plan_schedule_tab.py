@@ -9,7 +9,6 @@ UI 布局由 generated/ui_plan_schedule_dialog.py 的 Ui_PlanScheduleDialog(setu
 import logging
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
@@ -28,6 +27,8 @@ from file_toolbox.core.plan_schedule import (
     SUPPORTED_SUFFIXES,
     TEMPLATE_NAME,
     PlanScheduleService,
+    ScheduleOptions,
+    ScheduleResult,
 )
 from file_toolbox.gui.controllers.plan_schedule_controller import PlanScheduleController
 from file_toolbox.gui.generated.ui_plan_schedule_dialog import Ui_PlanScheduleDialog
@@ -112,7 +113,7 @@ class PlanScheduleTab(QWidget):
                 return input_dir
         return Path(".")
 
-    def _options(self) -> Any:
+    def _options(self) -> ScheduleOptions:
         return self._controller.build_options(
             self.ui.spin_year.value(), self.ui.cmb_cell.currentIndex()
         )
@@ -149,11 +150,12 @@ class PlanScheduleTab(QWidget):
     def _on_progress(self, current: int, total: int, msg: str) -> None:
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
-    def _on_generate_ok(self, result: Any) -> None:
+    def _on_generate_ok(self, result: ScheduleResult) -> None:
         self._populate_table(result)
         summary = self._controller.summarize(result)
         self.ui.lbl_status.setText(summary)
         if result.success:
+            assert result.output is not None
             settings.set(_LAST_OUTDIR_KEY, str(Path(result.output).parent))
             if not self._close_pending:
                 QMessageBox.information(self, "生成完成", summary)
@@ -165,7 +167,7 @@ class PlanScheduleTab(QWidget):
         if not self._close_pending:
             QMessageBox.critical(self, "生成失败", msg)
 
-    def _populate_table(self, result: Any) -> None:
+    def _populate_table(self, result: ScheduleResult) -> None:
         """结果表格:项点行 + 无效行(无效行浅黄)。"""
         rows = self._controller.result_rows(result)
         self.ui.table.setRowCount(len(rows))
