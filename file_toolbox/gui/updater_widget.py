@@ -74,7 +74,7 @@ class UpdateWorker(QThread):
       request = worker.start_download()              # 排队前即保留取消状态
 
     生命周期:不得设 parent(亲和性约束,见模块 docstring);由 MainWindow 属性
-    引用保活,closeEvent 中 quit/wait 收尾。
+    引用保活,closeEvent 中请求 quit,收到 finished 后退出窗口。
     """
 
     ready = Signal(object)  # UpdateCheckResult

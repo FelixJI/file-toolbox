@@ -301,3 +301,114 @@ def test_apply_exception_does_not_allow_duplicate_request_or_claim_original_unch
     win._on_update_applied(request, results[0])
     assert "无法确认" in warnings[0] and "原程序未受影响" not in warnings[0]
     assert win._download_request is request and win._update_banner.isHidden()
+
+
+@pytest.mark.parametrize("start_during_confirmation", [False, True])
+def test_gui_refuses_update_while_business_thread_runs(
+    app, monkeypatch, tmp_path, start_during_confirmation
+):
+    from PySide6.QtCore import QThread
+
+    monkeypatch.chdir(tmp_path)
+    manager = Manager()
+    window = MainWindow(coordinator(manager))
+    window._ensure_tab(7)
+    window._pending_update = window._update_worker._coordinator.check()
+    release, entered = Event(), Event()
+
+    class Business(QThread):
+        def run(self):
+            entered.set()
+            assert release.wait(10)
+
+    business = Business(window._pdf_sort_tab)
+    update = window._update_worker
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda _p, title, _text: warnings.append(title))
+    monkeypatch.setattr(QApplication, "quit", lambda: None)
+
+    def begin():
+        business.start()
+        assert entered.wait(5)
+
+    def confirm(*args):
+        if start_during_confirmation:
+            begin()
+        return QMessageBox.StandardButton.Apply
+
+    monkeypatch.setattr(QMessageBox, "question", confirm)
+    if not start_during_confirmation:
+        begin()
+    update.start()
+    try:
+        window._start_download()
+        assert window._download_request is None, "运行中业务不能进入 SDK 更新提交链"
+        assert manager.downloads == manager.applies == 0
+        assert warnings == ["后台任务尚未结束"]
+        assert window._tabs.isEnabled()
+    finally:
+        release.set()
+        assert business.wait(5000)
+        update.quit()
+        assert update.wait(5000)
+        app.processEvents()
+        window.close()
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "failure", "apply", "closing-cancel"])
+def test_gui_update_excludes_new_business_until_result(app, monkeypatch, tmp_path, outcome):
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtTest import QTest
+
+    monkeypatch.chdir(tmp_path)
+    manager = Manager()
+    window = MainWindow(coordinator(manager))
+    window._tabs.setCurrentIndex(6)
+    window._pending_update = window._update_worker._coordinator.check()
+    entered, release = Event(), Event()
+
+    def download_boundary():
+        entered.set()
+        assert release.wait(10)
+        if outcome == "failure":
+            raise OSError("fake download failed")
+
+    manager.after_progress = download_boundary
+    monkeypatch.setattr(QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Apply)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a: None)
+    monkeypatch.setattr(QApplication, "quit", lambda: None)
+    update = window._update_worker
+    update.start()
+    try:
+        window._start_download()
+        assert entered.wait(5)
+        assert not window._tabs.isEnabled() and not window.btn_history.isEnabled()
+        clicked = []
+        window._excel_merge_tab.ui.btn_merge.clicked.connect(lambda: clicked.append(True))
+        QTest.mouseClick(window._excel_merge_tab.ui.btn_merge, Qt.MouseButton.LeftButton)
+        assert clicked == []
+        if outcome in {"cancel", "closing-cancel"}:
+            window._on_download_cancel()
+            assert not window._tabs.isEnabled(), "仅提出取消不能提前恢复业务入口"
+        if outcome == "closing-cancel":
+            assert not window.close()
+        release.set()
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.timeout.connect(lambda: loop.quit() if window._download_request is None else None)
+        timer.start(2)
+        QTimer.singleShot(5000, loop.quit)
+        loop.exec()
+        assert window._download_request is None
+        if outcome in {"apply", "closing-cancel"}:
+            assert not window._tabs.isEnabled() and not window.btn_history.isEnabled()
+        else:
+            assert window._tabs.isEnabled() and window.btn_history.isEnabled()
+        assert manager.downloads == 1
+        assert manager.applies == (1 if outcome == "apply" else 0)
+    finally:
+        release.set()
+        update.quit()
+        assert update.wait(5000)
+        app.processEvents()
+        window.close()

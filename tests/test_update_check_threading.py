@@ -87,4 +87,11 @@ def _assert_auto_check_runs_off_main_thread(app) -> None:
             "coordinator.check() 在主线程执行:启动自动检查会阻塞 GUI 事件循环"
         )
     finally:
+        # 窗口关闭现在异步等待 finished;测试同样保活窗口直到真实线程退出。
+        worker = win._update_worker
         win.close()
+        assert worker.wait(2000), "更新检查线程未退出"
+        app.processEvents()
+        app.processEvents()
+        assert worker.isFinished()
+        assert not win._closing_workers

@@ -8,6 +8,7 @@ UI 布局由 generated/ui_excel_merge_dialog.py 的 Ui_ExcelMergeDialog(setupUi)
 import logging
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
 
@@ -43,7 +44,12 @@ class ExcelMergeTab(QWidget):
         self._controller = ExcelMergeController()
         self._files: list[Path] = []
         self._worker: ExcelMergeWorker | None = None
+        self._close_pending = False
         self._connect()
+
+    @property
+    def close_pending(self) -> bool:
+        return self._close_pending
 
     def _connect(self) -> None:
         self.ui.btn_add_files.clicked.connect(self._add_files)
@@ -133,7 +139,7 @@ class ExcelMergeTab(QWidget):
             QMessageBox.warning(self, "提示", "请先添加 Excel 文件")
             return
         # 避免重复启动(重复点击不泄漏多个 worker)
-        if self._worker is not None and self._worker.isRunning():
+        if self._worker is not None or self._close_pending:
             return
         outdir = self._resolve_outdir()
         output = outdir / DEFAULT_OUTPUT_NAME
@@ -144,17 +150,20 @@ class ExcelMergeTab(QWidget):
         worker.finished_ok.connect(self._on_merge_ok)
         worker.failed.connect(self._on_merge_failed)
         worker.warning.connect(self._on_history_warning)
+        worker.finished.connect(self._on_worker_finished)
         self._worker = worker  # 持有引用防 GC
         self.ui.btn_merge.setEnabled(False)
         self.ui.lbl_status.setText("合并中…")
         worker.start()
 
     def _on_progress(self, current: int, total: int, msg: str) -> None:
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
     def _on_merge_ok(self, result: MergeResult) -> None:
-        self._worker = None
-        self.ui.btn_merge.setEnabled(True)
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
         self._populate_table(result)
         summary = self._controller.summarize(result)
         self.ui.lbl_status.setText(summary)
@@ -166,22 +175,27 @@ class ExcelMergeTab(QWidget):
             except Exception as error:
                 _logger.warning("Excel 合并输出目录偏好保存失败: %s", error)
                 preference_warning = f"输出文件已保留,但未能记住上次输出目录: {error}"
-            QMessageBox.information(self, "合并完成", summary)
-        else:
+            if not self._close_pending:
+                QMessageBox.information(self, "合并完成", summary)
+        elif not self._close_pending:
             QMessageBox.warning(self, "未生成输出", summary + "\n\n源文件均未被修改。")
 
-        if preference_warning:
+        if preference_warning and not self._close_pending:
             QMessageBox.warning(self, "偏好保存失败", preference_warning)
 
     def _on_history_warning(self, msg: str) -> None:
-        title = "历史保存失败" if msg.startswith("历史保存失败:") else "合并收尾告警"
-        QMessageBox.warning(self, title, msg)
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
+        if not self._close_pending:
+            title = "历史保存失败" if msg.startswith("历史保存失败:") else "合并收尾告警"
+            QMessageBox.warning(self, title, msg)
 
     def _on_merge_failed(self, msg: str) -> None:
-        self._worker = None
-        self.ui.btn_merge.setEnabled(True)
+        if self.sender() is not None and self.sender() is not self._worker:
+            return
         self.ui.lbl_status.setText("合并失败")
-        QMessageBox.critical(self, "合并失败", msg)
+        if not self._close_pending:
+            QMessageBox.critical(self, "合并失败", msg)
 
     def _populate_table(self, result: MergeResult) -> None:
         """结果表格:已合并工作表 + 失败文件(失败行浅黄)。"""
@@ -197,12 +211,25 @@ class ExcelMergeTab(QWidget):
                     item.setBackground(QBrush(_FAIL_COLOR))
                 self.ui.table.setItem(r, c, item)
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        """关闭窗口时停止仍在运行的合并 worker,防泄漏(与 InvoiceTab 同款)。"""
+    def _on_worker_finished(self) -> None:
+        """结果不释放线程;只消费当前 worker 的真实 finished。"""
         worker = self._worker
-        if worker is not None and worker.isRunning():
-            worker.cancel()
-            worker.quit()
-            worker.wait(3000)
+        if worker is None or self.sender() is not worker:
+            return
         self._worker = None
+        worker.deleteLater()
+        self.ui.btn_merge.setEnabled(True)
+        if self._close_pending:
+            self._close_pending = False
+            QTimer.singleShot(0, self.window().close)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """协作取消后异步等待 finished,保留窗口及正在写入的线程。"""
+        if self._worker is not None:
+            if not self._close_pending:
+                self._worker.cancel()
+            self._close_pending = True
+            self.ui.lbl_status.setText("正在等待合并安全结束,完成后自动关闭…")
+            event.ignore()
+            return
         super().closeEvent(event)

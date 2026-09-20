@@ -313,7 +313,7 @@ def test_on_sort_ok_populates_table_and_status(tab, monkeypatch):
     tab._on_sort_ok(result)
 
     assert tab._worker is None
-    assert tab.ui.btn_sort.isEnabled() is True
+    assert tab.ui.btn_sort.isEnabled() is False  # 结果 slot 不释放线程或恢复启动
     assert tab.ui.table.rowCount() == 4
     row = lambda r: [tab.ui.table.item(r, c).text() for c in range(5)]  # noqa: E731
     assert row(0) == ["a.pdf", "1", "2", "2024-02-01", "已排序"]
@@ -346,23 +346,26 @@ def test_on_sort_failed_shows_critical(tab, monkeypatch):
     tab._on_sort_failed("boom")
 
     assert tab._worker is None
-    assert tab.ui.btn_sort.isEnabled() is True
+    assert tab.ui.btn_sort.isEnabled() is False  # 结果 slot 不释放线程或恢复启动
     assert tab.ui.lbl_status.text() == "排序失败"
     assert criticals == ["boom"]
 
 
 def test_close_event_stops_running_worker(tab, monkeypatch):
-    """关闭时仍在运行的 worker 被取消并等待(防泄漏)。"""
+    """关闭时请求取消并拒绝关闭,不在 GUI 线程同步等待。"""
     worker = MagicMock()
     worker.isRunning.return_value = True
     tab._worker = worker
 
-    tab.closeEvent(QCloseEvent())
+    event = QCloseEvent()
+    tab.closeEvent(event)
 
     worker.cancel.assert_called_once()
-    worker.quit.assert_called_once()
-    worker.wait.assert_called_once_with(3000)
-    assert tab._worker is None
+    worker.quit.assert_not_called()
+    worker.wait.assert_not_called()
+    assert tab._worker is worker
+    assert not event.isAccepted()
+    tab._worker = None  # 这里只是 slot mock;真实线程结束由隔离回归验证。
 
 
 def test_close_event_without_worker_noop(tab):
@@ -510,5 +513,6 @@ def test_sort_worker_history_warning_reaches_view_without_losing_result(
     assert [title for title, _msg in warnings] == ["排序已取消", "历史保存失败"]
     assert "history denied" in warnings[1][1]
     assert "已取消" in tab.ui.lbl_status.text() and "已写出 1" in tab.ui.lbl_status.text()
-    assert tab.ui.table.rowCount() == 1 and tab.ui.btn_sort.isEnabled()
+    assert tab.ui.table.rowCount() == 1 and not tab.ui.btn_sort.isEnabled()
+    tab._worker = None  # 本用例同步调用 run;真实 finished 见隔离回归。
     service.sort.assert_called_once()
