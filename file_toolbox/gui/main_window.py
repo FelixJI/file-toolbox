@@ -190,6 +190,7 @@ class MainWindow(QMainWindow):
         self._tab_attrs = tuple(spec[2] for spec in self._lazy_specs.values())
         self._closing_workers: set[QThread] = set()
         self._restart_pending = False
+        self._close_requested = False
         for label, _factory, _attr in self._lazy_specs.values():
             tabs.addTab(QWidget(), label)
         # 各 Tab 对应的历史工具名;"关于"页无历史 → None(按钮禁用)
@@ -296,7 +297,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(self._status_before_tab_error)
         self._tab_error_message = None
         tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
-        self.btn_history.setEnabled(tool is not None)
+        self.btn_history.setEnabled(
+            tool is not None and self._download_request is None and not self._close_requested
+        )
 
     def _open_history_for_current_tab(self) -> None:
         """点击历史按钮:直接打开当前标签页对应的历史(无需二次选择)。"""
@@ -360,7 +363,14 @@ class MainWindow(QMainWindow):
 
     def _start_download(self) -> None:
         """用户点击 banner/关于页"立即更新" → 弹进度对话框 + 向 worker 投递下载请求。"""
-        if self._pending_update is None or self._download_request is not None:
+        if (
+            self._pending_update is None
+            or self._download_request is not None
+            or self._close_requested
+        ):
+            return
+        if self._running_business_workers():
+            QMessageBox.warning(self, "后台任务尚未结束", "请等待当前文件操作完成后再更新。")
             return
         update = self._pending_update
         prompt = f"将下载并应用 v{update.version}，应用会在准备完成后退出并重启。是否继续？"
@@ -374,9 +384,18 @@ class MainWindow(QMainWindow):
             != QMessageBox.StandardButton.Apply
         ):
             return
+        # 确认对话框有嵌套事件循环,返回后再次核对;不能在 SDK 接管后才等待业务。
+        if self._close_requested:
+            return
+        if self._running_business_workers():
+            QMessageBox.warning(self, "后台任务尚未结束", "请等待当前文件操作完成后再更新。")
+            return
+        self._tabs.setEnabled(False)
+        self.btn_history.setEnabled(False)
         self._update_banner.hide()
         request = self._update_worker.start_download()
         if request is None:
+            self._restore_retry_affordances()
             return
         self._download_request = request
         label = f"正在下载 v{update.version}…"
@@ -422,6 +441,11 @@ class MainWindow(QMainWindow):
         if self._pending_update is not None:
             self._update_banner.show()
         self._set_about_downloading(False)
+        if not self._close_requested:
+            self._tabs.setEnabled(True)
+            index = self._tabs.currentIndex()
+            tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
+            self.btn_history.setEnabled(tool is not None)
 
     def _set_about_downloading(self, downloading: bool) -> None:
         """同步关于页"检查更新/立即更新"按钮的可用状态(未构造则跳过)。"""
@@ -513,6 +537,15 @@ class MainWindow(QMainWindow):
 
         settings.set(_GEOMETRY_KEY, bytes(self.saveGeometry().toBase64().data()).decode("ascii"))
 
+    def _running_business_workers(self) -> list[QThread]:
+        return [
+            worker
+            for attr in self._tab_attrs
+            if (tab := getattr(self, attr)) is not None
+            for worker in tab.findChildren(QThread)
+            if worker.isRunning()
+        ]
+
     def _on_closing_worker_finished(self) -> None:
         worker = self.sender()
         if isinstance(worker, QThread):
@@ -525,11 +558,11 @@ class MainWindow(QMainWindow):
 
         # 登记表来自同一 Tab 注册源;getattr 不会构造尚未打开的页。
         tabs = [getattr(self, attr) for attr in self._tab_attrs]
+        self._close_requested = True
         self._tabs.setEnabled(False)  # 关闭期间不再启动新的业务写入。
+        self.btn_history.setEnabled(False)
         try:
-            workers = [
-                worker for tab in tabs if tab is not None for worker in tab.findChildren(QThread)
-            ]
+            workers = self._running_business_workers()
             workers.append(self._update_worker)
             for worker in workers:
                 if not worker.isRunning():
