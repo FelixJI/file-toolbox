@@ -7,7 +7,6 @@ UI 布局由 generated/ui_excel_merge_dialog.py 的 Ui_ExcelMergeDialog(setupUi)
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
@@ -18,6 +17,8 @@ from file_toolbox.core.excel_merge import (
     DEFAULT_OUTPUT_NAME,
     SUPPORTED_SUFFIXES,
     ExcelMergeService,
+    MergeOptions,
+    MergeResult,
 )
 from file_toolbox.gui.controllers.excel_merge_controller import ExcelMergeController
 from file_toolbox.gui.generated.ui_excel_merge_dialog import Ui_ExcelMergeDialog
@@ -106,7 +107,7 @@ class ExcelMergeTab(QWidget):
         if d:
             self.ui.edit_outdir.setText(d)
 
-    def _options(self) -> Any:
+    def _options(self) -> MergeOptions:
         return self._controller.build_options(
             self.ui.cmb_naming.currentIndex(),
             self.ui.cmb_mode.currentIndex(),
@@ -142,6 +143,7 @@ class ExcelMergeTab(QWidget):
         worker.progress.connect(self._on_progress)
         worker.finished_ok.connect(self._on_merge_ok)
         worker.failed.connect(self._on_merge_failed)
+        worker.warning.connect(self._on_history_warning)
         self._worker = worker  # 持有引用防 GC
         self.ui.btn_merge.setEnabled(False)
         self.ui.lbl_status.setText("合并中…")
@@ -150,17 +152,29 @@ class ExcelMergeTab(QWidget):
     def _on_progress(self, current: int, total: int, msg: str) -> None:
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
-    def _on_merge_ok(self, result: Any) -> None:
+    def _on_merge_ok(self, result: MergeResult) -> None:
         self._worker = None
         self.ui.btn_merge.setEnabled(True)
         self._populate_table(result)
         summary = self._controller.summarize(result)
         self.ui.lbl_status.setText(summary)
+        preference_warning = ""
         if result.success:
-            settings.set(_LAST_OUTDIR_KEY, str(Path(result.output).parent))
+            assert result.output is not None
+            try:
+                settings.set(_LAST_OUTDIR_KEY, str(result.output.parent))
+            except Exception as error:
+                _logger.warning("Excel 合并输出目录偏好保存失败: %s", error)
+                preference_warning = f"输出文件已保留,但未能记住上次输出目录: {error}"
             QMessageBox.information(self, "合并完成", summary)
         else:
             QMessageBox.warning(self, "未生成输出", summary + "\n\n源文件均未被修改。")
+
+        if preference_warning:
+            QMessageBox.warning(self, "偏好保存失败", preference_warning)
+
+    def _on_history_warning(self, msg: str) -> None:
+        QMessageBox.warning(self, "历史保存失败", msg)
 
     def _on_merge_failed(self, msg: str) -> None:
         self._worker = None
@@ -168,7 +182,7 @@ class ExcelMergeTab(QWidget):
         self.ui.lbl_status.setText("合并失败")
         QMessageBox.critical(self, "合并失败", msg)
 
-    def _populate_table(self, result: Any) -> None:
+    def _populate_table(self, result: MergeResult) -> None:
         """结果表格:已合并工作表 + 失败文件(失败行浅黄)。"""
         rows: list[tuple[list[str], bool]] = [
             ([m.file, m.sheet, m.target_name, "已合并"], False) for m in result.sheets
