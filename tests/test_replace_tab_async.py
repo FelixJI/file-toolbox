@@ -49,6 +49,7 @@ class _RecordingService:
         self.preview_calls = 0
         self.execute_calls = 0
         self.execute_kwargs: list[dict[str, Any]] = []
+        self.preview_operations: list[list[dict[str, Any]]] = []
         self._block = block
 
     def validate_operations(self, operations):
@@ -57,6 +58,7 @@ class _RecordingService:
     def preview_replace(self, files, operations, cancel_check=None):
         self.preview_calls += 1
         self.preview_threads.append(threading.current_thread())
+        self.preview_operations.append(list(operations))
         if self._block is not None:
             self._block.wait(10)
         return {f: {"match_count": 1, "status": "✓ 准备就绪"} for f in files}
@@ -180,8 +182,12 @@ def test_execute_returns_before_slow_service_finishes(app, tmp_path, monkeypatch
 # ---------------------------------------------------------------------------
 
 
-def test_preview_skipped_while_busy(app, tmp_path):
-    """预览 worker 运行期间,再次刷新预览被跳过(service 不被二次调用)。"""
+def test_refresh_while_busy_is_deferred_not_dropped(app, tmp_path):
+    """忙碌期间的刷新请求被挂起而非丢弃:worker 结束后自动重跑一次。
+
+    旧实现直接 return 丢弃重入(靠全按钮禁用保证不会有重入),预览会停留在
+    旧操作集上;现在操作按钮不再禁用,变更必须反映到下一次预览。
+    """
     block = threading.Event()
     svc = _RecordingService(block=block)
     dlg = _make_dlg(app, svc)
@@ -189,16 +195,54 @@ def test_preview_skipped_while_busy(app, tmp_path):
 
     dlg._do_refresh_preview()
     assert _pump_until(app, lambda: svc.preview_calls == 1)
-    assert not dlg.ui.btn_execute.isEnabled(), "忙碌期间操作按钮应禁用"
+    assert not dlg.ui.btn_execute.isEnabled(), "忙碌期间执行/手动刷新按钮应禁用"
     assert not dlg.ui.btn_cancel.isHidden(), "忙碌期间应显示取消按钮"
 
-    dlg._do_refresh_preview()  # 忙碌 → 跳过
-    assert svc.preview_calls == 1
+    dlg._do_refresh_preview()  # 忙碌 → 挂起为待刷新
+    assert svc.preview_calls == 1, "忙碌期间不得并发启动第二个预览 worker"
 
     block.set()
     assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1)
+    assert _pump_until(app, lambda: svc.preview_calls == 2), "挂起的刷新应自动重跑"
+    # 重跑的预览也要结束(queued 信号回到主线程)后,按钮才恢复
+    assert _pump_until(app, lambda: dlg.worker is None and not dlg._preview_pending)
     assert dlg.ui.btn_execute.isEnabled(), "完成后按钮应恢复"
     assert dlg.ui.btn_cancel.isHidden()
+
+
+def test_add_operation_allowed_while_preview_busy(app, tmp_path, monkeypatch):
+    """回归(用户报告):预览运行期间必须仍能继续添加查找替换。
+
+    旧实现 _add_operation → _do_refresh_preview → 全量 _set_ui_enabled(False),
+    COM 预览单文件可达数十秒,期间添加/编辑/删除按钮全部禁用,无法连续添加。
+    现在预览只禁用执行与手动刷新,添加立即入列,结束后用最新操作集重跑预览。
+    """
+    block = threading.Event()
+    svc = _RecordingService(block=block)
+    dlg = _make_dlg(app, svc)
+    _arm(dlg, tmp_path)
+
+    dlg._do_refresh_preview()
+    assert _pump_until(app, lambda: svc.preview_calls == 1)
+
+    for btn in (
+        dlg.ui.btn_simple_replace,
+        dlg.ui.btn_regex_replace,
+        dlg.ui.btn_edit_operation,
+        dlg.ui.btn_remove_operation,
+        dlg.ui.btn_select_files,
+    ):
+        assert btn.isEnabled(), "预览进行中操作/文件按钮必须保持可用"
+
+    monkeypatch.setattr(dlg, "_prompt_params", lambda t, e=None: {"find": "x", "replace": "y"})
+    dlg._add_operation(SIMPLE)
+    assert len(dlg.operations) == 2, "预览进行中添加的操作应立即入列"
+    assert dlg.ui.list_operations.count() == 2
+
+    block.set()
+    # 无论防抖定时器先于还是后于 worker 结束触发,最终都会用两条操作重跑预览
+    assert _pump_until(app, lambda: svc.preview_calls == 2)
+    assert len(svc.preview_operations[1]) == 2, "重跑的预览应带上最新操作集"
 
 
 def test_execute_skipped_while_preview_busy(app, tmp_path, monkeypatch):

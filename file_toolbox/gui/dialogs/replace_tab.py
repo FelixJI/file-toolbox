@@ -36,6 +36,8 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self._history = JsonHistoryStore()
         self._svc = ContentReplaceService(history_store=self._history)
         self.operations: list[dict[str, Any]] = []
+        # 预览运行期间的变更(增删改操作/文件)挂起于此,worker 结束后自动重跑
+        self._preview_pending = False
         self.ui.btn_cancel.setVisible(False)
         self._connect_signals()
         self._update_status()
@@ -58,13 +60,16 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self.ui.btn_cancel.clicked.connect(self._on_cancel)
 
     # ---------- 操作管理 ----------
+    # 增删改后走 mixin 的防抖 _refresh_preview(200ms)而非立即 _do_refresh_preview:
+    # 连续添加多条操作时合并为一次预览,且预览不再禁用操作按钮(见 _set_preview_busy),
+    # 不会出现"每加一条就得等一次 COM 预览(单文件可达数十秒)"的阻塞。
     def _add_operation(self, op_type: str) -> None:
         params = self._prompt_params(op_type)
         if params is None:
             return
         self.operations.append({"type": op_type, "params": params})
         self._refresh_op_list()
-        self._do_refresh_preview()
+        self._refresh_preview()
 
     def _edit_operation(self) -> None:
         row = self.ui.list_operations.currentRow()
@@ -76,7 +81,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             return
         self.operations[row] = {"type": op["type"], "params": params}
         self._refresh_op_list()
-        self._do_refresh_preview()
+        self._refresh_preview()
 
     def _remove_operation(self) -> None:
         row = self.ui.list_operations.currentRow()
@@ -84,7 +89,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             return
         del self.operations[row]
         self._refresh_op_list()
-        self._do_refresh_preview()
+        self._refresh_preview()
 
     def _refresh_op_list(self) -> None:
         from PySide6.QtWidgets import QListWidgetItem
@@ -113,7 +118,11 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             self.ui.table_preview.setRowCount(0)
             return
         if self._worker_busy():
-            return  # 忙碌期间操作按钮已禁用,此处兜底防抖动定时器重入
+            # 预览期间操作/文件仍可编辑(见 _set_preview_busy),防抖定时器或手动
+            # 刷新的重入不能像旧实现那样直接丢弃——否则预览会停留在旧操作集上;
+            # 挂起为待刷新,当前 worker 结束后由 _rerun_pending_preview 自动重跑
+            self._preview_pending = True
+            return
         valid, msg = self._svc.validate_operations(self.operations)
         if not valid:
             QMessageBox.warning(self, "操作无效", msg)
@@ -125,17 +134,27 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         )
         worker.preview_ok.connect(self._on_preview_ok)
         worker.failed.connect(self._on_worker_failed)
-        self._set_ui_enabled(False)
+        # 启动即清挂起标记:执行完成后紧跟的立即刷新(_on_execute_ok)不会在
+        # 预览结束后再凭旧标记多跑一轮
+        self._preview_pending = False
+        self._set_preview_busy(True)
         self.ui.label_status.setText("正在预览匹配...")
         self.ui.progress_bar.setRange(0, 0)  # 不定态:预览无逐文件进度回调
         self.ui.progress_bar.setVisible(True)
         self.worker = worker
         worker.start()
 
+    def _rerun_pending_preview(self) -> None:
+        """预览运行期间有变更被挂起时,结束后用最新状态自动重跑一次。"""
+        if self._preview_pending:
+            self._preview_pending = False
+            self._refresh_preview()
+
     def _on_preview_ok(self, result: dict[Path, dict[str, Any]]) -> None:
         self.worker = None
         self._render_preview(result)
         self._restore_ui()
+        self._rerun_pending_preview()
 
     def _render_preview(self, result: dict[Path, dict[str, Any]]) -> None:
         tbl = self.ui.table_preview
@@ -198,6 +217,8 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self.worker = None
         self._restore_ui()
         QMessageBox.critical(self, "替换失败", msg)
+        # 失败也要消费挂起标记:若运行期间用户改过操作,用新状态再试一次预览
+        self._rerun_pending_preview()
 
     def _on_cancel(self) -> None:
         if self.worker is not None and hasattr(self.worker, "cancel"):
@@ -225,7 +246,11 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self.worker = None
 
     def _set_ui_enabled(self, enabled: bool) -> None:
-        """预览/执行进行中禁用操作按钮并显示取消;完成则反之。"""
+        """执行进行中禁用全部操作按钮并显示取消;完成则反之。
+
+        预览只做轻量禁用(_set_preview_busy):保留增删改操作与文件选择入口,
+        不阻塞连续添加;全量禁用仅用于真正改写文件的执行阶段。
+        """
         for btn in (
             self.ui.btn_select_files,
             self.ui.btn_select_folder,
@@ -240,6 +265,17 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         ):
             btn.setEnabled(enabled)
         self.ui.btn_cancel.setVisible(not enabled)
+
+    def _set_preview_busy(self, busy: bool) -> None:
+        """预览进行中只禁用会并发启动 worker 的入口(执行/手动刷新)。
+
+        预览只读、worker 持有文件与操作列表的快照,进行期间继续增删改操作、
+        选文件、看历史都安全;旧实现全量禁用,导致"每加一条查找替换都要等
+        一次 COM 预览才能继续添加"。变更由 _preview_pending 挂起,结束后重跑。
+        """
+        self.ui.btn_execute.setEnabled(not busy)
+        self.ui.btn_refresh_preview.setEnabled(not busy)
+        self.ui.btn_cancel.setVisible(busy)
 
     def _restore_ui(self) -> None:
         """worker 结束(成功/失败/取消)后恢复控件状态。"""
