@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+### Bug Fixes
+
+- **gui:** 预览期间保留替换操作编辑入口 (#120) (b84ccf5)
+
 ## 0.3.3
 
 ### Bug Fixes
