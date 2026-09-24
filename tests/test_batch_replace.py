@@ -1,8 +1,11 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from file_toolbox.core.batch_replace import service as service_mod
-from file_toolbox.core.batch_replace.handlers import text_handler as text_handler_mod
+# 适配说明(Issue #124):psutil/chardet 已改为被测模块内按需导入,测试直接
+# patch 其规范模块(sys.modules 中同一对象)。
+import chardet
+import psutil
+
 from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
 from file_toolbox.core.batch_replace.service import ContentReplaceService
 from file_toolbox.core.batch_replace.types import ReplaceOperationType
@@ -153,7 +156,7 @@ def test_get_office_pids_matches_process_name_case_insensitively(monkeypatch):
             self.info = {"pid": pid, "name": name}
 
     monkeypatch.setattr(
-        service_mod.psutil,
+        psutil,  # 适配说明(Issue #124)
         "process_iter",
         lambda attrs: [_Process(1234, "winword.exe"), _Process(5678, "EXCEL.EXE")],
     )
@@ -163,13 +166,13 @@ def test_get_office_pids_matches_process_name_case_insensitively(monkeypatch):
 
 def test_kill_office_processes_checks_name_before_kill(monkeypatch):
     """清理新 PID 前再次核对进程名，避免 PID 复用时误杀其他进程。"""
-    monkeypatch.setattr(service_mod.psutil, "process_iter", lambda attrs: [])
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
     process = MagicMock()
     process.name.return_value = "WINWORD.EXE"
 
     svc = ContentReplaceService()
     monkeypatch.setattr(svc, "_get_office_pids", lambda name: [4321])
-    monkeypatch.setattr(service_mod.psutil, "Process", lambda pid: process)
+    monkeypatch.setattr(psutil, "Process", lambda pid: process)
     svc._kill_new_office_processes("WINWORD.EXE", [])
 
     assert process.kill.called
@@ -536,8 +539,8 @@ def test_get_office_pids_collects_matching_processes(monkeypatch):
             self.info = {"pid": pid, "name": "WINWORD.EXE"}
 
     monkeypatch.setattr(
-        service_mod.psutil, "process_iter", lambda attrs: [_Process(1234), _Process(5678)]
-    )
+        psutil, "process_iter", lambda attrs: [_Process(1234), _Process(5678)]
+    )  # 适配说明(Issue #124):psutil 改为按需导入,patch 规范模块
     svc = ContentReplaceService()
     pids = svc._get_office_pids("WINWORD.EXE")
     assert pids == [1234, 5678]
@@ -549,21 +552,21 @@ def test_get_office_pids_skips_disappeared_process(monkeypatch):
     class _Process:
         @property
         def info(self):
-            raise service_mod.psutil.NoSuchProcess(1234)
+            raise psutil.NoSuchProcess(1234)  # 适配说明(Issue #124)
 
-    monkeypatch.setattr(service_mod.psutil, "process_iter", lambda attrs: [_Process()])
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [_Process()])
     svc = ContentReplaceService()
     assert svc._get_office_pids("WINWORD.EXE") == []
 
 
 def test_kill_new_office_processes_calls_psutil_kill(monkeypatch):
     """_kill_new_office_processes 对新 PID 调用 psutil kill/wait。"""
-    monkeypatch.setattr(service_mod.psutil, "process_iter", lambda attrs: [])
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
     process = MagicMock()
     process.name.return_value = "WINWORD.EXE"
     svc = ContentReplaceService()
     monkeypatch.setattr(svc, "_get_office_pids", lambda name: [9999])
-    monkeypatch.setattr(service_mod.psutil, "Process", lambda pid: process)
+    monkeypatch.setattr(psutil, "Process", lambda pid: process)
     svc._kill_new_office_processes("WINWORD.EXE", [])
     assert process.kill.called
     process.wait.assert_called_once_with(timeout=5)
@@ -704,7 +707,7 @@ def test_text_read_content_uses_chardet_before_legacy_fallback(tmp_path, monkeyp
     f = tmp_path / "weird.bin"
     f.write_bytes(b"\x93hello\x94")
     monkeypatch.setattr(
-        text_handler_mod.chardet,
+        chardet,  # 适配说明(Issue #124):chardet 改为方法内按需导入,patch 规范模块
         "detect",
         lambda data: {"encoding": "windows-1252", "confidence": 0.99},
     )
@@ -718,7 +721,7 @@ def test_text_read_content_low_confidence_uses_latin1_fallback(tmp_path, monkeyp
     f = tmp_path / "weird.bin"
     f.write_bytes(b"\x80")
     monkeypatch.setattr(
-        text_handler_mod.chardet,
+        chardet,  # 适配说明(Issue #124):chardet 改为方法内按需导入,patch 规范模块
         "detect",
         lambda data: {"encoding": "windows-1252", "confidence": 0.1},
     )

@@ -7,10 +7,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from cattrs import Converter
-from cattrs.errors import BaseValidationError, ForbiddenExtraKeysError
+if TYPE_CHECKING:
+    from cattrs import Converter
 
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
 _PLAN_SCHEMA_VERSION = 4
@@ -322,20 +322,36 @@ def _unstructure_cell_ref(value: CellRef) -> str:
     return value.address
 
 
-_PLAN_CONVERTER = Converter(
-    forbid_extra_keys=True,
-    unstruct_collection_overrides={tuple: list},
-)
-_PLAN_CONVERTER.register_structure_hook(str, _structure_str)
-_PLAN_CONVERTER.register_structure_hook(bool, _structure_bool)
-_PLAN_CONVERTER.register_structure_hook(Path, _structure_path)
-_PLAN_CONVERTER.register_structure_hook(CellRef, _structure_cell_ref)
-_PLAN_CONVERTER.register_unstructure_hook(CellRef, _unstructure_cell_ref)
+_PLAN_CONVERTER_CACHE: Converter | None = None
+
+
+def _plan_converter() -> Converter:
+    """惰性构造并缓存方案转换器。
+
+    cattrs(连同 attr)冷导入数十毫秒,且只在真正读写方案时需要;顶层构造会让
+    考勤页首切为它预付导入成本(Issue #124)。进程内只构造一次,注册的 hooks
+    与原模块级实例完全一致。
+    """
+    global _PLAN_CONVERTER_CACHE
+    if _PLAN_CONVERTER_CACHE is None:
+        from cattrs import Converter
+
+        converter = Converter(
+            forbid_extra_keys=True,
+            unstruct_collection_overrides={tuple: list},
+        )
+        converter.register_structure_hook(str, _structure_str)
+        converter.register_structure_hook(bool, _structure_bool)
+        converter.register_structure_hook(Path, _structure_path)
+        converter.register_structure_hook(CellRef, _structure_cell_ref)
+        converter.register_unstructure_hook(CellRef, _unstructure_cell_ref)
+        _PLAN_CONVERTER_CACHE = converter
+    return _PLAN_CONVERTER_CACHE
 
 
 def plan_to_dict(plan: AttendancePlan) -> dict[str, object]:
     """使用 cattrs 把方案转换为 JSON 兼容对象。"""
-    value = _PLAN_CONVERTER.unstructure(
+    value = _plan_converter().unstructure(
         replace(plan, schema_version=_PLAN_SCHEMA_VERSION), AttendancePlan
     )
     return cast(dict[str, object], value)
@@ -457,8 +473,10 @@ def _normalize_plan(plan: AttendancePlan) -> AttendancePlan:
 
 def plan_from_dict(value: object) -> AttendancePlan:
     """迁移历史 schema 后使用 cattrs 严格解析持久化方案。"""
+    from cattrs.errors import BaseValidationError, ForbiddenExtraKeysError  # 按需导入
+
     try:
-        plan = _PLAN_CONVERTER.structure(_migrate_plan_payload(value), AttendancePlan)
+        plan = _plan_converter().structure(_migrate_plan_payload(value), AttendancePlan)
     except (BaseValidationError, ForbiddenExtraKeysError, KeyError, TypeError) as exc:
         raise ValueError(f"无效的考勤方案: {exc}") from exc
     return _normalize_plan(plan)

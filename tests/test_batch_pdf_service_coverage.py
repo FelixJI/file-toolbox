@@ -83,9 +83,10 @@ def test_detect_engines_async_delegates():
 
 def test_convert_pdf_to_image_pdf_delegates(tmp_path, monkeypatch):
     """_convert_pdf_to_image_pdf 委托 convert_pdf_to_image_pdf(行 128)。"""
-    from file_toolbox.core.batch_pdf import service as svc_mod
+    # 适配说明(Issue #124):service 改为方法内按需导入 pdf_utils,patch 其规范模块。
+    from file_toolbox.core.batch_pdf import pdf_utils
 
-    monkeypatch.setattr(svc_mod, "convert_pdf_to_image_pdf", lambda *a, **k: (True, "ok"))
+    monkeypatch.setattr(pdf_utils, "convert_pdf_to_image_pdf", lambda *a, **k: (True, "ok"))
     svc = PDFGeneratorService()
     ok, err = svc._convert_pdf_to_image_pdf(tmp_path / "in.pdf", tmp_path / "out.pdf", dpi=72)
     assert (ok, err) == (True, "ok")
@@ -134,9 +135,10 @@ def test_generate_pdf_image_type_explicit_config(tmp_path, monkeypatch):
 
 
 def test_merge_pdfs_service_delegates(tmp_path, monkeypatch):
-    from file_toolbox.core.batch_pdf import service as svc_mod
+    # 适配说明(Issue #124):service 改为方法内按需导入 pdf_utils,patch 其规范模块。
+    from file_toolbox.core.batch_pdf import pdf_utils
 
-    monkeypatch.setattr(svc_mod, "merge_pdfs", lambda *a, **k: (True, ""))
+    monkeypatch.setattr(pdf_utils, "merge_pdfs", lambda *a, **k: (True, ""))
     svc = PDFGeneratorService()
     src = tmp_path / "a.pdf"
     src.write_bytes(b"%PDF-1.4")

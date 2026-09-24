@@ -314,6 +314,151 @@ def test_main_window_import_stays_light():
     assert proc.stdout.strip() == "", f"启动链被污染: {proc.stdout.strip()}"
 
 
+def test_tab_materialize_import_boundaries():
+    """全页物化导入契约:构造十个 Tab 后不得拉入各页的纯能力型重依赖(Issue #124)。
+
+    回归(旧实现必红):此前打开生成 PDF 页会顶层拉入 pdf_utils(pypdfium2+pypdf+
+    PIL),内容替换页拉入 chardet,考勤/workers 聚合拉入 cattrs+attr——首切卡顿的
+    直接来源。这些依赖现在只在对应能力真正使用时按需导入。
+    psutil 是有意豁免:ContentReplaceService 构造时必须做 Office PID 基线快照
+    (close 只杀任务期间新起进程的治理契约),页面构造期的这份导入是功能性需求。
+    子进程隔离验证(与 test_main_window_import_stays_light 同法)。
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import file_toolbox
+
+    repo_root = Path(file_toolbox.__file__).resolve().parents[1]
+    code = (
+        "import os, sys, tempfile\n"
+        "os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')\n"
+        "os.environ.setdefault('FILE_TOOLBOX_NO_COM_DETECT', '1')\n"
+        "os.chdir(tempfile.mkdtemp(prefix='ftb-import-boundary-'))\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "app = QApplication([])\n"
+        "from file_toolbox.gui.main_window import MainWindow\n"
+        "win = MainWindow()\n"
+        "win._materialize_all_tabs()\n"
+        "app.processEvents()\n"
+        "mods = sys.modules\n"
+        "leaked = {m for m in mods\n"
+        "          if m.split('.')[0] in {'pypdfium2', 'pypdf', 'chardet',\n"
+        "                                 'cattrs', 'attr', 'PIL'}}\n"
+        "print(','.join(sorted(leaked)))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        check=True,
+    )
+    assert proc.stdout.strip() == "", f"页面构造链被重依赖污染: {proc.stdout.strip()}"
+
+
+def test_rapid_tab_toggle_constructs_each_tab_once(app):
+    """快速往返切换(A→B→A、连点):每页至多构造一次,页序与标签不变(AC5)。"""
+    win = MainWindow(LatestCoordinator())
+    tabs = win._tabs
+    labels_before = [tabs.tabText(i) for i in range(tabs.count())]
+
+    for _ in range(3):
+        for idx in (0, 2, 4, 2, 0, 8, 2):
+            tabs.setCurrentIndex(idx)
+            app.processEvents()
+
+    # 每个被访问页恰构造一次:再次访问拿到同一对象
+    assert win._pdf_tab is not None and win._attendance_tab is not None
+    assert win._plan_schedule_tab is not None
+    pdf_first = win._pdf_tab
+    tabs.setCurrentIndex(2)
+    app.processEvents()
+    assert win._pdf_tab is pdf_first
+    assert [tabs.tabText(i) for i in range(tabs.count())] == labels_before
+    assert tabs.currentIndex() == 2
+
+
+def test_tab_switch_responsive_during_slow_engine_probe(app, monkeypatch, tmp_path):
+    """慢引擎探测(注入 2s)期间切页可用、心跳最大间隔≤250ms(AC3)。
+
+    真实事件循环 + 真实探测线程(仅替换注册表探测边界);期间用户应能切至
+    其它可用页,GUI 心跳不出现 >250ms 的空窗;探测完成后 PDF 页引擎 label
+    到达终态(#123 信号桥语义)。
+    """
+    import threading
+    import time
+
+    from PySide6.QtCore import QTimer
+
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
+    EngineManager._cached_engines = None
+    EngineManager._cache_source = None
+    EngineManager._flight_subscribers = None
+
+    release = threading.Event()
+
+    def slow_probe(prog_id: str) -> bool:
+        release.wait(timeout=10)
+        return prog_id == "Word.Application"
+
+    monkeypatch.setattr(EngineManager, "_probe_registry", staticmethod(slow_probe))
+
+    win = MainWindow(LatestCoordinator())
+    tabs = win._tabs
+    heartbeats: list[float] = []
+
+    def _beat() -> None:
+        heartbeats.append(time.monotonic())
+
+    beat = QTimer()
+    beat.setInterval(50)
+    beat.timeout.connect(_beat)
+    beat.start()
+
+    # 切到 PDF 页(触发构造 + 异步探测被阻塞 2s),随后立即切走再切回
+    tabs.setCurrentIndex(2)
+    app.processEvents()
+    assert tabs.currentIndex() == 2
+    switch_costs = []
+    for idx in (0, 4, 0, 2):
+        s0 = time.monotonic()
+        tabs.setCurrentIndex(idx)
+        app.processEvents()
+        switch_costs.append(time.monotonic() - s0)
+        assert tabs.currentIndex() == idx, f"探测期间应能切至页 {idx}"
+
+    # 阻塞期间持续运转事件循环约 2s,收心跳样本
+    blocked_deadline = time.monotonic() + 2.0
+    while time.monotonic() < blocked_deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    release.set()
+    done_deadline = time.monotonic() + 5
+    while time.monotonic() < done_deadline:
+        app.processEvents()
+        label = win._pdf_tab.ui.label_engine_info.text()
+        if label != "正在检测可用引擎...":
+            break
+        time.sleep(0.01)
+
+    gaps = [b - a for a, b in zip(heartbeats, heartbeats[1:], strict=False)]
+    max_gap_ms = max(gaps) * 1000 if gaps else 0.0
+    assert max_gap_ms <= 250.0, f"GUI 心跳最大间隔 {max_gap_ms:.0f}ms 超过 250ms 预算"
+    assert max(switch_costs) <= 0.25, "探测期间单次切页应在 250ms 内完成"
+    assert win._pdf_tab.ui.label_engine_info.text().startswith("可用引擎: MS Office")
+
+    beat.stop()
+    EngineManager._cached_engines = None
+    EngineManager._cache_source = None
+    EngineManager._flight_subscribers = None
+
+
 def test_geometry_roundtrip_persists_across_sessions(app, monkeypatch, tmp_path):
     """关闭主窗口保存几何,下次启动恢复同一尺寸。"""
     monkeypatch.chdir(tmp_path)

@@ -25,7 +25,10 @@ from .converters.image_converter import ImageConverter
 from .converters.ppt_converter import PptConverter
 from .converters.word_converter import WordConverter
 from .engine_manager import EngineManager
-from .pdf_utils import convert_pdf_to_image_pdf, get_file_info, merge_pdfs
+
+# 注意:pdf_utils(顶层导入 pypdfium2/pypdf,连带 PIL)不在模块顶层导入——构造
+# 服务/打开生成 PDF 页只需轻量对象组装,该链冷导入合计可达数百 ms;合并、
+# 图片型转换、文件信息等能力在首次调用时按需导入(Issue #124 首切响应预算)。
 
 
 class PDFGeneratorService:
@@ -130,6 +133,8 @@ class PDFGeneratorService:
         scale_mode: str = SCALE_DEFAULT,
     ) -> tuple[bool, str]:
         """将可编辑PDF转换为图片型PDF"""
+        from .pdf_utils import convert_pdf_to_image_pdf  # 按需导入(见模块顶部说明)
+
         return convert_pdf_to_image_pdf(
             input_pdf, output_pdf, dpi, paper_size, orientation, scale_mode
         )
@@ -241,6 +246,8 @@ class PDFGeneratorService:
         Returns:
             (是否成功, 错误消息)
         """
+        from .pdf_utils import merge_pdfs  # 按需导入(见模块顶部说明)
+
         return merge_pdfs(pdf_files, output_path, print_mode)
 
     def batch_generate(
@@ -373,6 +380,8 @@ class PDFGeneratorService:
         Returns:
             文件信息字典
         """
+        from .pdf_utils import get_file_info  # 按需导入(见模块顶部说明)
+
         return get_file_info(file_path, SUPPORTED_FORMATS)
 
     def _new_temp_pdf(self, name: str) -> Path:
