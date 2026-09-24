@@ -6,7 +6,7 @@ import re
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
@@ -39,7 +39,11 @@ from file_toolbox.core.attendance import (
     default_rules,
 )
 from file_toolbox.gui.generated.ui_attendance_dialog import Ui_AttendanceDialog
-from file_toolbox.gui.workers import AttendanceWorker
+
+if TYPE_CHECKING:
+    # 仅类型引用:运行时在 _start_worker 内按需导入,避免考勤页首切连带
+    # gui.workers 聚合链(Issue #124;本模块顶部已 from __future__ import annotations)。
+    from file_toolbox.gui.workers import AttendanceWorker
 
 _WORKER_CLOSE_WAIT_MS = 5000
 _INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -775,6 +779,9 @@ class AttendanceTab(QWidget):
     ) -> None:
         if self._worker is not None:
             return
+        # 按需导入:worker 真正启动才拉起其依赖链,页面构造/首切不预付(Issue #124)。
+        from file_toolbox.gui.workers import AttendanceWorker
+
         worker = AttendanceWorker(self._service, request, mode, self)
         worker.finished_ok.connect(
             self._on_preview_ok if mode == "preview" else self._on_generate_ok

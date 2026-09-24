@@ -9,8 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
-import psutil
-
 from file_toolbox.common.base_operation import BaseOperationService
 from file_toolbox.common.file_utils import format_file_size
 from file_toolbox.common.history import JsonHistoryStore
@@ -65,6 +63,10 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
 
     def _get_office_pids(self, process_name: str) -> list[int]:
         """获取指定 Office 进程的 PID 列表"""
+        # 按需导入:psutil 只在执行替换(进程治理)时需要,顶层导入会让内容替换
+        # 页首切预付冷导入成本(Issue #124)。
+        import psutil
+
         pids: list[int] = []
         target_name = process_name.casefold()
         for process in psutil.process_iter(["pid", "name"]):
@@ -80,6 +82,8 @@ class ContentReplaceService(BaseOperationService, LoggableMixin):
         self, process_name: str, pids_before: list[int], *, strict: bool = False
     ) -> None:
         """强制结束新启动的 Office 进程"""
+        import psutil  # 按需导入(同 _get_office_pids)
+
         current_pids = self._get_office_pids(process_name)
         new_pids = set(current_pids) - set(pids_before)
 

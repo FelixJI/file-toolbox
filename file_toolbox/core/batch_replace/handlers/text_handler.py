@@ -9,8 +9,6 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-import chardet
-
 from file_toolbox.core.batch_replace.types import ReplaceOperationType
 
 
@@ -37,6 +35,10 @@ class TextHandler:
                 continue
 
         try:
+            # 按需导入:仅非 UTF-8 文本才需要 chardet;顶层导入会让内容替换页
+            # 首切预付其冷导入成本(Issue #124)。
+            import chardet
+
             detected = chardet.detect(raw_data)
             detected_encoding = detected.get("encoding")
             confidence = float(detected.get("confidence") or 0.0)

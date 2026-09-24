@@ -12,8 +12,9 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from pypdf import PdfReader, PdfWriter
-
+# 注意:pypdf(冷导入数十 ms)不在模块顶层导入——构造 PDF 排序页/worker 时
+# 只需轻量组装;读写 PDF 的能力在 _plan_one/_write_sorted 首次调用时按需导入
+# (Issue #124 首切响应预算)。
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.operation_errors import preserve_history_result
@@ -167,6 +168,8 @@ class PdfSortService(LoggableMixin):
         self, path: Path, regex: re.Pattern[str], options: SortOptions
     ) -> tuple[list[PagePlan], list[int] | None, str]:
         """读取一个 PDF,返回 (每页计划, 新页序或 None, 原因说明)。"""
+        from pypdf import PdfReader  # 按需导入(见模块顶部说明)
+
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             raise ValueError(
                 f"不支持的格式 {path.suffix or '(无后缀)'},仅支持 {'/'.join(SUPPORTED_SUFFIXES)}"
@@ -214,6 +217,8 @@ class PdfSortService(LoggableMixin):
 
     def _write_sorted(self, path: Path, order: list[int], output: Path) -> Path:
         """按新页序把源 PDF 的页面复制进新文件(不保留原书签/目录)。"""
+        from pypdf import PdfReader, PdfWriter  # 按需导入(见模块顶部说明)
+
         writer = PdfWriter()
         try:
             with path.open("rb") as stream:
