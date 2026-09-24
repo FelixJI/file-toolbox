@@ -1,11 +1,20 @@
 """
 Office引擎管理器
 
-负责检测和初始化 Microsoft Office / WPS Office 应用
+负责检测和初始化 Microsoft Office / WPS Office 应用。
+
+检测/验证模型(Issue #123 后的语义):
+- 启动期检测走注册表探测(毫秒级,不启动 Office 进程),并发请求由 single-flight
+  合并为一次探测。
+- 不存在独立的"预检兑现"步骤:真实 COM Dispatch 的成功本身就是最强证据,由
+  `_init_office_app` 在转换期成功后经 `record_engine_evidence` 喂养缓存(精确
+  更新对应引擎键);临时 Dispatch 失败不写缓存、不落盘,由 `_prog_ids_to_try`
+  的转换期 ProgID 回退兜底。
 """
 
 import contextlib
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -53,16 +62,31 @@ _APP_CONFIG: dict[str, _AppSpec] = {
 }
 
 
+def _engine_suite_for_prog_id(prog_id: str) -> str | None:
+    """按 ProgID 反查所属引擎套件:任一 kind 的 ms_prog_id → "office",
+    wps_prog_id → "wps";不在配置表内 → None(调用方据此跳过证据喂养)。"""
+    for spec in _APP_CONFIG.values():
+        if prog_id == spec.ms_prog_id:
+            return "office"
+        if prog_id == spec.wps_prog_id:
+            return "wps"
+    return None
+
+
 class EngineManager(LoggableMixin):
     """Office引擎管理器"""
 
-    # 缓存检测结果（类变量，所有实例共享）
+    # 检测结果缓存（类变量，所有实例共享）：None = 尚未检测过。
     _cached_engines: dict[str, bool] | None = None
-    # 缓存是否已通过真 Dispatch "兑现"(force_refresh 路径)验证过。
-    # 进程内只兑现一次,避免每次生成都重新 Dispatch Word/WPS(冷启动每个数秒)。
-    # 注册表探测(force_refresh=False)不置此标志——它只是快速预筛,仍需兑现。
-    # 跨进程的兑现记忆由 engine_cache 持久缓存(带 TTL)承担,命中时无需兑现。
-    _verified: bool = False
+    # 最近一次检测完成后持久缓存的状态("hit"/"mismatch"/"expired"/"future"/
+    # "invalid"/"missing"/"io");None = 本进程尚未完成过检测,get_engine_info
+    # 不加缓存来源后缀。
+    _cache_source: str | None = None
+    # single-flight 并发合并(AC5):类级锁保护订阅者列表;列表非 None 表示有
+    # 进行中的探测 flight,并发 detect_engines_async 挂入列表而非各开线程。
+    # 锁内只做登记,回调投递一律在锁外(见 _serve_flight)。
+    _flight_lock = threading.Lock()
+    _flight_subscribers: list[Callable[[str], None]] | None = None
 
     def __init__(self) -> None:
         self._word_app = None
@@ -99,8 +123,8 @@ class EngineManager(LoggableMixin):
     def _probe_registry(prog_id: str) -> bool:
         """注册表探测:HKCR 下是否存在该 ProgID(毫秒级,不启动任何进程)。
 
-        作为快速预筛——"注册了"基本等于"装了",首次生成时再用真 Dispatch
-        兑现(见 service/worker)。非 Windows 或 winreg 不可用时返回 False。
+        作为快速预筛——"注册了"基本等于"装了";更强证据由转换期真实 Dispatch
+        成功后喂养(record_engine_evidence)。非 Windows 或 winreg 不可用时返回 False。
         """
         try:
             import winreg
@@ -116,8 +140,9 @@ class EngineManager(LoggableMixin):
     def _detect_available_engines(self, force_refresh: bool = False) -> dict[str, bool]:
         """检测可用的 Office 引擎(带缓存)。
 
-        - 默认(force_refresh=False):走注册表探测,毫秒级,不启动 Office 进程。
-        - force_refresh=True:走真 Dispatch(_try_detect),用于生成入口兑现验证。
+        - 默认(force_refresh=False):走注册表探测,毫秒级,不启动 Office 进程;
+          进程内 memo(``_cached_engines`` 已填充)时直接返回,不重复探测。
+        - force_refresh=True:走真 Dispatch(_try_detect),用于显式重检与测试 seam。
         """
         if EngineManager._cached_engines is not None and not force_refresh:
             return EngineManager._cached_engines
@@ -144,57 +169,67 @@ class EngineManager(LoggableMixin):
         EngineManager._cached_engines = engines
         return engines
 
-    def ensure_verified(self) -> None:
-        """进程内一次性"兑现":把注册表预筛结果用真 COM Dispatch 验证一次。
+    def record_engine_evidence(self, engine: str, available: bool) -> None:
+        """记录一条来自真实转换的引擎证据,精确更新进程内缓存与持久缓存。
 
-        设计目标:消除 worker 每次生成都全量 Dispatch Word+WPS 的数秒级冷启动开销。
-        - 缓存尚未填充(未经对话框探测直接生成)时,先补一次注册表预筛(毫秒级)。
-        - **持久缓存优先**:有效期内的既有兑现结果(engine_cache 落盘,默认 7 天)
-          与实时注册表探测**一致**时直接采信,跨进程零 Dispatch;不一致(安装发生
-          变化)或已过期才走真 Dispatch,不采信安装变更前的旧结论。
-        - 只对**缓存判定可用**的引擎做真 Dispatch(注册表说没装就不启动该引擎),
-          避免无条件双引擎全量启动。
-        - 精确更新被验证的引擎键,不污染整份缓存。
-        - 兑现失败(如 Office 临时忙)时:该引擎回退为缓存原值,不抛出——转换时
-          `_prog_ids_to_try` 仍会逐个 ProgID 尝试并回退兜底。
-        - 兑现完成后把结果写回持久缓存(写入失败仅告警,不影响生成本身)。
+        本方法由"保证不抛出"的路径调用(证据是转换的副产品,不是门槛),写失败
+        仅告警。
 
-        此方法在后台线程(由 PdfGenerateWorker)调用,COM 线程初始化由调用方负责。
+        - ``available=True``:真实 Dispatch 转换成功,优先于注册表预筛结论——
+          ``_cached_engines[engine] = True``;持久化精确更新该键:落盘记录中本键
+          =True,另一键优先取现有有效持久记录值,否则取当前进程内缓存值,不污染
+          整份缓存。
+        - ``available=False``:临时失败(Office 忙/会话损坏)与"未安装"不可区分,
+          只记 warning——不改 ``_cached_engines``、不落盘,临时失败不得固化为
+          TTL 级结论;兜底由 ``_prog_ids_to_try`` 转换期逐 ProgID 回退承担。
+        - ``_cached_engines`` 为 None(未经检测直接转换)时先补注册表预筛(毫秒级)。
         """
-        if EngineManager._verified:
-            return  # 进程内已兑现,直接返回
-
-        # 兑现前提是先有注册表预筛结果;未探测过时补一次(毫秒级,不启动 Office)。
-        if EngineManager._cached_engines is None:
-            self._detect_available_engines()
-        cached = EngineManager._cached_engines or {"office": False, "wps": False}
-
-        # 持久缓存命中且与实时注册表一致 → 采信,跳过全部 Dispatch。
-        persisted = engine_cache.load()
-        if persisted is not None and persisted == cached:
-            EngineManager._verified = True
+        if not available:
+            self.logger.warning(f"引擎证据: {engine} 本轮转换失败(临时性,不写入缓存)")
             return
 
-        verified = dict(cached)
-        # 仅兑现预筛判定的可用引擎,避免无谓启动未安装的 Office。
-        # 经类访问调用 staticmethod(与 _probe_registry 一致),避免 self 绑定歧义。
-        if cached.get("office"):
-            verified["office"] = EngineManager._try_detect(
-                "Word.Application",
-                lambda m: self.logger.warning(f"兑现Microsoft Office Word失败: {m}"),
-            )
-        if cached.get("wps"):
-            verified["wps"] = EngineManager._try_detect(
-                "KWPS.Application",
-                lambda m: self.logger.warning(f"兑现WPS Office失败: {m}"),
-            )
-        EngineManager._cached_engines = verified
-        EngineManager._verified = True
-        if not engine_cache.save(verified):
-            self.logger.warning("引擎验证缓存写入失败(不影响本次生成)")
+        if EngineManager._cached_engines is None:
+            self._detect_available_engines()  # 注册表预筛(毫秒级)
+        cached = EngineManager._cached_engines or {}
+        cached[engine] = True
+        EngineManager._cached_engines = cached
+
+        persisted, _reason = engine_cache.load_with_reason()
+        record = dict(persisted) if persisted is not None else dict(cached)
+        record[engine] = True
+        if engine_cache.save(record):
+            self.logger.info(f"引擎证据: {engine} 可用(真实转换成功),缓存已更新")
+        else:
+            self.logger.warning("引擎证据缓存写入失败(不影响本次转换)")
+
+    def _refresh_cache_source(self, engines: dict[str, bool]) -> None:
+        """检测完成后刷新缓存来源回显(类属性 ``_cache_source``)并做诊断日志。
+
+        持久记录与本次检测结果一致 → "hit"(get_engine_info 加"（缓存已验证）"
+        后缀);有记录但不一致 → "mismatch";无有效记录 → 透传 load_with_reason
+        的原因(missing/expired/future/invalid/io)。
+
+        确定未安装(office=False 且 wps=False)也是可缓存结论:落盘
+        ``{"office": False, "wps": False}``,让无 Office 机器的下个进程直接命中
+        缓存回显(AC2),免重复探测。
+        """
+        persisted, reason = engine_cache.load_with_reason()
+        if persisted is not None and persisted == engines:
+            EngineManager._cache_source = "hit"
+        elif persisted is not None:
+            EngineManager._cache_source = "mismatch"
+        else:
+            EngineManager._cache_source = reason
+        self.logger.info(f"引擎缓存: {EngineManager._cache_source}")
+        if engines == {"office": False, "wps": False}:
+            engine_cache.save({"office": False, "wps": False})
 
     def get_engine_info(self, use_cache: bool = True) -> str:
-        """获取当前引擎信息"""
+        """获取当前引擎信息。
+
+        持久缓存命中(``_cache_source == "hit"``)时文案追加"（缓存已验证）"
+        后缀,向用户回显结论的缓存来源;其余来源(含未检测过)不加后缀。
+        """
         if use_cache and EngineManager._cached_engines is None:
             return "正在检测可用引擎..."
 
@@ -206,38 +241,46 @@ class EngineManager(LoggableMixin):
         if engines["wps"]:
             info_parts.append("WPS (Kingsoft Virtual Printer)")
 
-        if not info_parts:
-            return "未检测到Office软件"
-
-        return "可用引擎: " + "、".join(info_parts)
+        info = "未检测到Office软件" if not info_parts else "可用引擎: " + "、".join(info_parts)
+        if EngineManager._cache_source == "hit":
+            info += "（缓存已验证）"
+        return info
 
     def detect_engines_async(self, callback: Callable[[str], None] | None = None) -> None:
-        """异步检测引擎(在后台守护线程执行,不阻塞调用线程)。
+        """异步检测引擎(single-flight 并发合并,不阻塞调用线程)。
 
-        启动检测走**注册表探测**(force_refresh=False):毫秒级、不启动任何 Office
-        进程,仅查 HKCR 下是否注册了 ProgID。真正的 COM Dispatch "兑现"留到生成时
-        (PdfGenerateWorker.run() 调用 ensure_verified;持久缓存命中时免 Dispatch)。
-        这避免了每次打开对话框都 Dispatch Word/WPS 导致的启动卡顿与进程泄漏(本特性
-        核心目标)。
+        - 锁内只做登记:无进行中的探测 flight 时登记新 flight 并启动一个 daemon
+          线程;已有 flight 时把 callback 挂入订阅者列表后立即返回——并发请求合并
+          为一次探测(AC5),同一结果由 _serve_flight 在锁外广播给全部订阅者。
+        - 探测走**注册表**(force_refresh=False):毫秒级、不启动任何 Office 进程;
+          真实 COM Dispatch 的证据由转换期 `_init_office_app` 成功后喂养,启动期
+          零 Dispatch(避免打开对话框就拉起 Word/WPS 的卡顿与进程泄漏)。
+        - 飞行标志在**结果计算完成后**才清除:清除后到达的晚到订阅者会开启新
+          flight,其探测体命中进程内 memo(``_cached_engines`` 已填充,不再重探
+          注册表),开销可忽略——与"并入旧 flight"同为正确行为,取实现最简者。
+        - 禁止在锁内执行回调、禁止让 GUI 等锁:登记临界区不含任何探测/IO。
 
-        把检测放后台线程是为了:既不冻结 GUI 主线程,也让回调异步切回主线程
-        (pdf_tab 用 QTimer.singleShot(0,...) 处理)。
+        把检测放后台线程是为了既不冻结 GUI 主线程,也让结果异步切回对话框线程
+        (pdf_tab 经 _engine_detected 信号桥投递,见其 docstring)。
 
-        COM 注意:即便走注册表探测,此线程也保留 CoInitialize 配对(见 _run_async_detect),
-        以防未来扩展为真 Dispatch;win32com 要求使用它的每个线程先 CoInitialize,否则进程
-        退出时抛 CO_E_NOTINITIALIZED(0x800401f0)致命异常。
-
-        worker 体被抽到 _async_detect_body(callback),便于测试同步断言(无需 COM)。
+        COM 注意:即便走注册表探测,探测线程也保留 CoInitialize 配对(见
+        _run_async_detect),以防未来扩展为真 Dispatch;win32com 要求使用它的每个
+        线程先 CoInitialize,否则进程退出时抛 CO_E_NOTINITIALIZED(0x800401f0)
+        致命异常。
         """
-        import threading
+        launch_flight = False
+        with EngineManager._flight_lock:
+            if EngineManager._flight_subscribers is None:
+                EngineManager._flight_subscribers = []
+                launch_flight = True
+            if callback is not None:
+                EngineManager._flight_subscribers.append(callback)
+        if launch_flight:
+            # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
+            threading.Thread(target=self._run_async_detect, daemon=True).start()
 
-        # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
-        threading.Thread(target=self._run_async_detect, args=(callback,), daemon=True).start()
-
-    def _run_async_detect(
-        self, callback: Callable[[str], None] | None = None
-    ) -> None:  # pragma: no cover
-        """后台线程入口:CoInitialize 配对 + 调用 _async_detect_body。"""
+    def _run_async_detect(self) -> None:
+        """后台线程入口:CoInitialize 配对 + single-flight 投递。"""
         com_inited = False
         try:
             import pythoncom
@@ -247,25 +290,48 @@ class EngineManager(LoggableMixin):
         except Exception:
             com_inited = False  # 非 Windows / 无 pywin32
         try:
-            self._async_detect_body(callback)
+            self._serve_flight()
         finally:
             if com_inited:
                 with contextlib.suppress(Exception):
                     pythoncom.CoUninitialize()
 
-    def _async_detect_body(self, callback: Callable[[str], None] | None = None) -> None:
+    def _serve_flight(self) -> None:
+        """single-flight 投递体:计算一次结果,广播给订阅者,再解除飞行。
+
+        订阅者列表在**结果计算完成后**于锁内取走并清空——飞行中到达的请求并入
+        本次投递;清除之后到达的请求由 detect_engines_async 开启新 flight(见其
+        docstring 的晚到订阅者策略)。回调逐个在锁外执行,单个订阅者抛异常不影响
+        其余订阅者收到结果。
+        """
+        result = self._async_detect_body()
+        with EngineManager._flight_lock:
+            subscribers = EngineManager._flight_subscribers or []
+            EngineManager._flight_subscribers = None
+        for subscriber in subscribers:
+            try:
+                subscriber(result)
+            except Exception:
+                self.logger.warning("引擎检测回调投递失败", exc_info=True)
+
+    def _async_detect_body(self, callback: Callable[[str], None] | None = None) -> str:
         """detect_engines_async 的可测核心体(同步可调用,不依赖 COM)。
 
-        - 默认走注册表探测(force_refresh=False),不启动 Office。
-        - 真正的 COM Dispatch 兑现由 PdfGenerateWorker.run() 在生成时调用
-          ensure_verified 完成(持久缓存命中时免 Dispatch)。
+        终态契约:成功与异常都必回调一次——成功回调/返回检测完成后的展示文案
+        (含缓存来源后缀,见 _refresh_cache_source);任何异常回调/返回
+        ``"引擎检测失败: {e}"``,页面不会停在"正在检测"状态。callback 在 try
+        之外调用:订阅者自身抛错不会被误报成检测失败,也不会触发二次回调。
         """
         try:
-            self._detect_available_engines()  # force_refresh=False → 注册表探测
-            if callback:
-                callback(self.get_engine_info(use_cache=True))
+            engines = self._detect_available_engines()  # force_refresh=False → 注册表/memo
+            self._refresh_cache_source(engines)
+            result = self.get_engine_info(use_cache=True)
         except Exception as e:  # COM/线程异常不应波及调用线程
+            result = f"引擎检测失败: {e}"
             self.logger.warning(f"异步引擎检测失败: {e}")
+        if callback is not None:
+            callback(result)
+        return result
 
     # ------------------------------------------------------------------ #
     #  应用初始化(配置驱动)
@@ -319,6 +385,12 @@ class EngineManager(LoggableMixin):
                 app = init_office_app(prog_id)
                 setattr(self, spec.app_attr, app)
                 setattr(self, spec.engine_attr, prog_id)
+                # 真实 Dispatch 成功是最强证据:精确喂养该引擎键(record_engine_
+                # evidence 保证不抛,不会把成功转换误入下方回退分支)。Dispatch
+                # 失败的分支不记录 False——临时忙与装坏不可区分,由回退循环兜底。
+                suite = _engine_suite_for_prog_id(prog_id)
+                if suite is not None:
+                    self.record_engine_evidence(suite, True)
                 return app
             except Exception as e:
                 last_error = e

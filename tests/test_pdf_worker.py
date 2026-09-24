@@ -20,17 +20,6 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-@pytest.fixture(autouse=True)
-def _stub_engine_validation(monkeypatch):
-    """默认 stub 掉 worker.run() 里的引擎兑现检测(ensure_verified),避免测试环境
-    真实 COM Dispatch 产生非致命 traceback 噪声(test_worker_invokes_engine_validation
-    会用自带 spy 覆盖此 stub,单独验证兑现调用)。
-    """
-    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
-
-    monkeypatch.setattr(EngineManager, "ensure_verified", lambda self: None)
-
-
 class _FakeService:
     """假 service:记录调用,可控成功/失败。"""
 
@@ -143,52 +132,32 @@ def test_worker_cancel_sets_flag(app):
     assert worker._cancel is True
 
 
-def test_worker_invokes_engine_validation(app, monkeypatch):
-    """run() 对含 Office 文档的批处理应实例化 EngineManager 并调用 ensure_verified 兑现。
+def test_worker_no_engine_precheck_dispatch(app, monkeypatch):
+    """含 Office 文档的批处理:worker 在 batch_generate 前后都不做任何引擎 Dispatch。
 
-    回归:此前 worker 以 force_refresh=True 全量双引擎 Dispatch,每次生成重复检测;
-    现改为进程内一次性按需兑现(ensure_verified)。本例用 .docx 触发兑现路径。
+    回归(Issue #123,旧实现必红):旧 worker.run() 先调 ensure_verified(),在
+    持久缓存缺失/不一致时以 Word/KWPS 作套件代理真 Dispatch"验证"——双安装机器
+    上生成前先冷启动两个 Office 进程再退出,随后实际转换又重新启动。新契约:
+    验证专用 Dispatch 恒为 0,真实 Dispatch 只发生在转换器内部按需初始化。
     """
     from pathlib import Path
+    from unittest.mock import MagicMock
 
-    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    import win32com.client
 
-    calls = []
-
-    def _spy(self):
-        calls.append(True)
-
-    monkeypatch.setattr(EngineManager, "ensure_verified", _spy)
+    dispatch = MagicMock()
+    monkeypatch.setattr(win32com.client, "Dispatch", dispatch)
 
     results = [_make_result("a.docx")]
-    svc = _FakeService(results)
+    svc = _FakeService(results)  # 假 service 不触发真实转换,Dispatch 只可能来自预检
     worker = PdfGenerateWorker(svc, [Path("a.docx")], {})
 
     worker.run()
 
-    assert len(calls) == 1
+    assert dispatch.call_count == 0, "worker 不应做任何引擎预检 Dispatch"
 
 
-def test_worker_skips_engine_validation_for_non_office_files(app, monkeypatch):
-    """纯图片/PDF 批处理不触发 ensure_verified —— 零 Office Dispatch 开销。
-
-    回归:此前 worker 无条件 force_refresh,即便转换纯图片也会启动 Word/WPS 进程;
-    现在 _needs_office() 判定为 False 时完全跳过兑现。
-    """
-    from pathlib import Path
-
-    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
-
-    calls = []
-    monkeypatch.setattr(EngineManager, "ensure_verified", lambda self: calls.append(True))
-
-    results = [_make_result("a.png"), _make_result("b.pdf")]
-    svc = _FakeService(results)
-    worker = PdfGenerateWorker(svc, [Path("a.png"), Path("b.pdf")], {})
-
-    worker.run()
-
-    assert calls == [], "纯图片/PDF 批处理不应触发引擎兑现"
+# ---------- pythoncom 不可用(com_inited=False,覆盖 73-74) ----------
 
 
 def test_worker_start_delivers_finished_ok_across_threads(app):
@@ -245,39 +214,6 @@ def test_worker_start_delivers_failed_across_threads(app):
     assert "cross-thread boom" in captured.get("fail", "")
     assert ok == []
     assert svc.closed is True  # finally 仍 close
-
-
-# ---------- 兑现检测异常不致命(覆盖 83-85) ----------
-
-
-def test_worker_run_survives_engine_detection_exception(app, monkeypatch):
-    """EngineManager.ensure_verified 抛异常 → worker 记 warning 后继续,
-    batch_generate 仍被调用,finished_ok 正常投递(覆盖兑现失败的非致命分支)。
-    """
-    from pathlib import Path
-
-    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
-
-    # 覆盖 autouse 的 _stub_engine_validation:这里强制抛异常
-    def _raise(self):
-        raise RuntimeError("dispatch failed")
-
-    monkeypatch.setattr(EngineManager, "ensure_verified", _raise)
-
-    results = [_make_result("a.docx")]
-    svc = _FakeService(results)
-    worker = PdfGenerateWorker(svc, [Path("a.docx")], {})
-
-    captured = {}
-    worker.finished_ok.connect(lambda r: captured.setdefault("ok", r))
-    worker.failed.connect(lambda m: captured.setdefault("fail", m))
-
-    worker.run()  # 不应抛
-
-    # 兑现异常非致命:batch_generate 仍调用,finished_ok 仍投递
-    assert captured.get("ok") == results
-    assert "fail" not in captured
-    assert len(svc.batch_calls) == 1, "兑现失败后仍应调 batch_generate"
 
 
 # ---------- pythoncom 不可用(com_inited=False,覆盖 73-74) ----------

@@ -16,14 +16,6 @@ SUPPORTED_FORMATS = {
 # 所有支持的扩展名
 ALL_SUPPORTED_EXTENSIONS = [ext for exts in SUPPORTED_FORMATS.values() for ext in exts]
 
-# 需要 Office 引擎(Word/Excel/PowerPoint)的扩展名集合。
-# 生成 worker 据此判断是否需要做引擎兑现:纯图片/PDF 批处理完全跳过 Office Dispatch。
-OFFICE_EXTENSIONS = (
-    set(SUPPORTED_FORMATS["word"])
-    | set(SUPPORTED_FORMATS["excel"])
-    | set(SUPPORTED_FORMATS["powerpoint"])
-)
-
 # 纸张尺寸定义 (宽, 高) 单位: mm
 PAPER_SIZES = {
     "A3": (297, 420),
@@ -56,8 +48,9 @@ ENGINE_AUTO = "auto"  # 自动检测
 ENGINE_MS_OFFICE = "office"  # Microsoft Office
 ENGINE_WPS = "wps"  # WPS Office
 
-# 引擎验证缓存有效期(秒,7天):ensure_verified 的真 Dispatch 兑现结果跨进程落盘,
-# 有效期内且与实时注册表探测一致时免再次 Dispatch,过期后首次生成重新兑现。
+# 引擎检测缓存有效期(秒,7天):注册表检测结论/真实转换证据跨进程落盘,
+# 有效期内且与实时注册表探测一致时,后续进程直接采信缓存结论展示,过期后
+# 由下次检测/转换重新喂养(engine_manager._refresh_cache_source / record_engine_evidence)。
 ENGINE_CACHE_TTL = 7 * 24 * 60 * 60
 
 # 图片型PDF清晰度选项 (DPI)
