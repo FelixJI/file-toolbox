@@ -1,10 +1,11 @@
-"""引擎验证结果持久缓存(带有效期)。
+"""引擎检测结果持久缓存(带有效期)。
 
-EngineManager.ensure_verified 的真 Dispatch 兑现要启动 Word/WPS 进程(冷启动每个
-数秒),此前只存进程内类变量——跨进程无记忆,每次启动应用后的首次生成都重复付
-这笔开销。本模块把兑现结果落盘到 ``.file_toolbox/settings.json``,附
-``verified_at`` 时间戳;在 ENGINE_CACHE_TTL 有效期内、且与实时注册表探测一致时
-(一致性比对由调用方负责),后续进程直接采信,零 Dispatch。
+引擎检测的结论有两类可信来源:注册表探测(毫秒级)与真实转换成功后的证据
+喂养(``EngineManager.record_engine_evidence``)。此前只存进程内类变量——跨进程
+无记忆,每次启动应用后都要重复探测/验证。本模块把结论落盘到
+``.file_toolbox/settings.json``,附 ``verified_at`` 时间戳;在 ENGINE_CACHE_TTL
+有效期内、且与实时注册表探测一致时(一致性比对由调用方负责),后续进程直接
+采信。
 
 失败语义:读取/写入的任何异常都吞掉——缓存只加速,不承担正确性;即便采信了
 过期环境下的结果,转换时 `_prog_ids_to_try` 仍逐个 ProgID 尝试回退兜底。
@@ -22,13 +23,11 @@ from .constants import ENGINE_CACHE_TTL
 CACHE_KEY = "pdf_engine_cache"
 
 
-def _validated(record: Any, *, now: float | None = None) -> dict[str, bool] | None:
-    """校验记录结构与有效期,合法则返回 ``{"office","wps"}``,否则 None。
+def _structure_valid(record: Any) -> dict[str, bool] | None:
+    """结构校验(不含时间):office/wps 必须是 bool,verified_at 必须是数字。
 
-    - 结构:office/wps 必须是 bool,verified_at 必须是数字(JSON 里 bool 是 int
-      的子类,需显式排除)。
-    - 有效期:``0 <= now - verified_at < ENGINE_CACHE_TTL``。verified_at 落在
-      "未来"(时钟回拨)视为不合法,避免回拨后长期采信旧记录。
+    JSON 里 bool 是 int 的子类,需显式排除。合法返回 ``{"office","wps"}``,
+    否则 None。
     """
     if not isinstance(record, dict):
         return None
@@ -39,19 +38,38 @@ def _validated(record: Any, *, now: float | None = None) -> dict[str, bool] | No
         return None
     if isinstance(verified_at, bool) or not isinstance(verified_at, (int, float)):
         return None
-    current = time.time() if now is None else now
-    age = current - float(verified_at)
-    if not 0 <= age < ENGINE_CACHE_TTL:
-        return None
     return {"office": office, "wps": wps}
 
 
-def load(*, now: float | None = None) -> dict[str, bool] | None:
-    """读取有效期内的兑现结果;无记录/过期/损坏/IO 异常 → None。"""
+def load_with_reason(*, now: float | None = None) -> tuple[dict[str, bool] | None, str]:
+    """读取缓存并返回 ``(记录, 原因)``,原因可诊断 UI 回显与日志。
+
+    原因枚举:``"hit"``(结构+时间均合法)、``"expired"``(结构合法但超 TTL)、
+    ``"future"``(verified_at 落在未来,时钟回拨)、``"invalid"``(结构不合法/
+    损坏)、``"missing"``(无记录)、``"io"``(读取异常)。记录为 None 时原因
+    必为后五者之一。
+    """
     try:
-        return _validated(settings.get(CACHE_KEY), now=now)
+        record = settings.get(CACHE_KEY)
     except Exception:
-        return None
+        return None, "io"
+    if record is None:
+        return None, "missing"
+    engines = _structure_valid(record)
+    if engines is None:
+        return None, "invalid"
+    # 时间校验独立于结构校验,以区分 expired/future/invalid 三种失效形态。
+    # 链式比较同时排除 NaN/inf 时间戳(json 可解析出它们,旧语义视为不合法)。
+    current = time.time() if now is None else now
+    age = current - float(record["verified_at"])
+    if not 0 <= age < ENGINE_CACHE_TTL:
+        return None, "future" if age < 0 else "expired"
+    return engines, "hit"
+
+
+def load(*, now: float | None = None) -> dict[str, bool] | None:
+    """读取有效期内的缓存记录;无记录/过期/损坏/IO 异常 → None。"""
+    return load_with_reason(now=now)[0]
 
 
 def save(engines: dict[str, bool], *, now: float | None = None) -> bool:

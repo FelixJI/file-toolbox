@@ -4,7 +4,7 @@ import contextlib
 import logging
 from typing import Any
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -57,6 +57,11 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     # 暴露为类属性以满足该契约(无需混入 LoggableMixin,避免上述 GC 风险)。
     logger = _module_logger
 
+    # 引擎检测回显桥:检测 daemon 线程只 emit,Qt queued 连接投递回对话框线程。
+    # 对话框销毁即自动断连,晚到的检测结果被安全丢弃(AC1/AC5)。载荷携带请求
+    # 代次 token,槽侧只接受最新请求的结果,旧代次不覆盖新状态(AC5)。
+    _engine_detected = Signal(int, str)
+
     SUPPORTED_FORMATS: set[str] = {
         ".doc",
         ".docx",
@@ -93,6 +98,8 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self._setup_button_groups()
         self._init_combos()
         self._connect_signals()
+        self._engine_echo_token = 0
+        self._engine_detected.connect(self._on_engine_detected)
         self._init_engine_info()
 
     # ---------- 初始化 ----------
@@ -157,13 +164,18 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.btn_cancel.clicked.connect(self._on_cancel)
 
     def _init_engine_info(self) -> None:
-        """启动时异步检测可用 Office 引擎并更新提示。
+        """启动时异步检测可用 Office 引擎并更新提示(回显经信号桥回 GUI 线程)。
 
         启动检测走**注册表探测**(force_refresh=False,毫秒级、不启动 Office 进程);
-        真正的 COM Dispatch 兑现留到生成时由 PdfGenerateWorker 以 force_refresh=True
-        完成。故:
-        - 正常形态:经服务的异步接口在后台线程做注册表探测,回调通过
-          QTimer.singleShot(0,...) 切回主线程更新,避免冻结 UI。
+        真实 COM Dispatch 的证据由转换成功时的 record_engine_evidence 喂养持久缓存,
+        不存在独立"验证预检"步骤(Issue #123)。回显链:检测 daemon 线程只
+        ``_engine_detected.emit(token, info)``——Qt queued 连接把结果投递回对话框
+        所在线程更新 label。不能用无 context 的 ``QTimer.singleShot(0, ...)``:
+        从 daemon 线程调用时 Qt 在**调用线程**建 timer,而该线程没有事件循环,
+        回调永不投递(仓库锁定 PySide6 6.11.2 上实证,Issue #123 WP-A 探针),
+        label 会永久停留"正在检测"——这正是用户看到"检测慢"的直接根因。
+        - 正常形态:经服务的异步接口在后台线程做注册表探测(single-flight 合并
+          并发请求),结果经信号回主线程,不冻结 UI。
         - 测试/CI 形态:置环境变量 FILE_TOOLBOX_NO_COM_DETECT=1 跳过后台探测,
           仅回退为缓存信息(无缓存时显示占位),让纯 UI 逻辑测试不触碰 COM。
         """
@@ -179,15 +191,29 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             return
 
         self.ui.label_engine_info.setText("正在检测可用引擎...")
+        self._engine_echo_token += 1
+        token = self._engine_echo_token
 
         def _on_detected(info: str) -> None:
-            QTimer.singleShot(0, lambda: self.ui.label_engine_info.setText(info))
+            # 检测 daemon 线程内执行:只 emit(线程安全),UI 写入全部发生在
+            # _on_engine_detected 槽(对话框线程)。token 随载荷传递,槽侧裁决。
+            self._engine_detected.emit(token, info)
 
         try:
             self._svc.detect_engines_async(callback=_on_detected)
         except Exception:
             # 非 Windows 或缺少 pywin32 时退回同步(带缓存)信息
             self.ui.label_engine_info.setText(self._svc.get_engine_info(use_cache=True))
+
+    def _on_engine_detected(self, token: int, info: str) -> None:
+        """引擎检测回显槽(对话框线程):只接受最新代次请求的结果。
+
+        旧代次的晚到结果直接丢弃,不覆盖新状态(AC5);异常终态文案同样经此
+        槽回显,页面不会停留在"正在检测"。
+        """
+        if token != self._engine_echo_token:
+            return
+        self.ui.label_engine_info.setText(info)
 
     def _refresh_engine_info_label(self) -> None:
         """用当前缓存刷新引擎信息 label,消除"正在检测..."残留。

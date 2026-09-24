@@ -1,10 +1,12 @@
-"""EngineManager 注册表探测单元测试。
+"""EngineManager 注册表探测/证据喂养/single-flight 单元测试。
 
-不触发真实 COM Dispatch,仅用 monkeypatch 替换 winreg。这些测试直接用 winreg 的
-真实模块对象做 monkeypatch,故仅在 Windows(winreg 存在)上有效;非 Windows 跳过
-(产品本身的 _probe_registry 已对 ImportError 做了回退处理)。
+不触发真实 COM Dispatch,仅用 monkeypatch 替换 winreg/Dispatch/engine_cache。
+winreg 相关用例直接用真实模块对象做 monkeypatch,故仅在 Windows(winreg 存在)
+上有效;非 Windows 跳过(产品本身的 _probe_registry 已对 ImportError 做了回退
+处理)。
 """
 
+import threading
 import time
 from unittest.mock import MagicMock
 
@@ -14,15 +16,35 @@ from file_toolbox.core.batch_pdf import engine_cache
 from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
 
+@pytest.fixture(autouse=True)
+def _reset_engine_manager_class_state():
+    """每用例前后重置 EngineManager 类级状态(缓存/缓存来源/飞行订阅者)。
+
+    memo 与 single-flight 订阅者是类级共享状态,任一用例遗留都会改变后续用例的
+    探测/投递路径;原先各用例手写的尾部清理只覆盖 _cached_engines 一项。
+    """
+    EngineManager._cached_engines = None
+    EngineManager._cache_source = None
+    EngineManager._flight_subscribers = None
+    yield
+    EngineManager._cached_engines = None
+    EngineManager._cache_source = None
+    EngineManager._flight_subscribers = None
+
+
 @pytest.fixture
 def engine_cache_stub(monkeypatch):
-    """隔离持久引擎缓存:load 可编程返回,save 只记录不落盘。
+    """隔离持久引擎缓存:load/load_with_reason 可编程返回,save 只记录不落盘。
 
-    没有此 stub 时 ensure_verified 会真读写 cwd 下 .file_toolbox/settings.json,
-    既污染仓库工作树,也让断言依赖文件系统。
+    没有此 stub 时证据喂养与缓存来源回显会真读写 cwd 下
+    .file_toolbox/settings.json(含事务锁 sidecar 文件),既污染仓库工作树,
+    也让断言依赖文件系统。
     """
-    state = {"load": None, "saved": []}
+    state = {"load": None, "reason": "missing", "saved": []}
     monkeypatch.setattr(engine_cache, "load", lambda *a, **k: state["load"])
+    monkeypatch.setattr(
+        engine_cache, "load_with_reason", lambda *a, **k: (state["load"], state["reason"])
+    )
     monkeypatch.setattr(
         engine_cache, "save", lambda engines, *a, **k: state["saved"].append(dict(engines)) or True
     )
@@ -105,231 +127,246 @@ def test_detect_force_refresh_uses_real_dispatch(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# ensure_verified:进程内一次性兑现(只检测缓存判定可用的引擎,_verified 去重)
+# 转换期证据喂养(record_engine_evidence):预检兑现(ensure_verified)已删除,
+# 真实 Dispatch 成功即证据,精确更新缓存;临时失败不写死 False、不落盘。
 # ---------------------------------------------------------------------------
 
 
-def test_ensure_verified_only_verifies_available_engines(monkeypatch, engine_cache_stub):
-    """首次兑现:只对缓存判定可用的引擎做真 Dispatch(不双引擎全量启动)。
+def test_conversion_success_feeds_engine_evidence(monkeypatch, engine_cache_stub):
+    """转换成功即喂养:Dispatch Word.Application 成功 → office=True 精确落盘。
 
-    缓存 office=True、wps=False → 只 Dispatch Word.Application,不碰 KWPS。
+    落盘记录的另一键保留既有持久值(wps=False),不被注册表预筛值(wps=True)
+    覆盖——证据只精确更新对应引擎键,不污染整份缓存。
     """
-    EngineManager._cached_engines = {"office": True, "wps": False}
-    EngineManager._verified = False
+    EngineManager._cached_engines = None
+    # 注册表预筛:office 未注册、wps 注册(record_engine_evidence 补筛会用到)
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda prog_id: prog_id == "KWPS.Application"
+    )
+    engine_cache_stub["load"] = {"office": False, "wps": False}  # 既有持久记录
     em = EngineManager()
 
-    detected = []
-    monkeypatch.setattr(
-        EngineManager, "_try_detect", lambda prog_id, log: detected.append(prog_id) or True
-    )
+    app = MagicMock()
+    dispatch = _stub_dispatch(monkeypatch, return_value=app)
 
-    em.ensure_verified()
+    # auto 引擎:预筛 wps-only → 目标 KWPS,但回退顺序首个 Word.Application 成功
+    assert em.init_word() is app
 
-    assert detected == ["Word.Application"]  # 只兑现 office
-    assert EngineManager._verified is True
-    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    assert EngineManager._cached_engines["office"] is True
+    assert engine_cache_stub["saved"] == [{"office": True, "wps": False}]
+    assert dispatch.call_count == 1
+
+
+def test_conversion_evidence_other_key_falls_back_to_cache(monkeypatch, engine_cache_stub):
+    """无既有持久记录时,落盘另一键取当前进程内缓存(注册表预筛)值。"""
     EngineManager._cached_engines = None
-    EngineManager._verified = False
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda prog_id: prog_id == "KWPS.Application"
+    )
+    em = EngineManager()
+    _stub_dispatch(monkeypatch, return_value=MagicMock())
+
+    assert em.init_word() is not None
+
+    # 预筛 {office:False,wps:True} + office 证据 → {office:True,wps:True}
+    assert engine_cache_stub["saved"] == [{"office": True, "wps": True}]
 
 
-def test_ensure_verified_dedupes_within_process(monkeypatch, engine_cache_stub):
-    """_verified 标志:第二次 ensure_verified 直接返回,不再 Dispatch。"""
+def test_transient_dispatch_failure_keeps_registry_verdict(monkeypatch, engine_cache_stub):
+    """临时 Dispatch 失败不得写死 False:registry office=True + 首个 ProgID 失败 →
+    缓存 office 保持 True、save 未以 office=False 落盘、回退循环仍尝试第二 ProgID。
+
+    旧实现(ensure_verified 把临时 Dispatch 失败写成 False 并落盘 7 天)此测试必红。
+    """
     EngineManager._cached_engines = {"office": True, "wps": True}
-    EngineManager._verified = False
     em = EngineManager()
 
-    calls = []
-    monkeypatch.setattr(
-        EngineManager, "_try_detect", lambda prog_id, log: calls.append(prog_id) or True
-    )
+    wps_app = MagicMock()
+    dispatch = _stub_dispatch(monkeypatch, side_effect=[RuntimeError("office busy"), wps_app])
 
-    em.ensure_verified()
-    em.ensure_verified()  # 第二次应短路
+    assert em.init_word() is wps_app  # 首个 ProgID(Word)失败 → 回退 KWPS 成功
+    assert dispatch.call_count == 2
 
-    assert len(calls) == 2  # 仅首次两个(office + wps),第二次零 Dispatch
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
+    # office 键保持注册表结论 True;落盘记录里 office 恒为 True(只追加 wps 证据)
+    assert EngineManager._cached_engines["office"] is True
+    assert engine_cache_stub["saved"] == [{"office": True, "wps": True}]
 
 
-def test_ensure_verified_no_op_when_no_engines(monkeypatch, engine_cache_stub):
-    """缓存为空 → 先补注册表预筛;预筛判定无可用引擎 → 不 Dispatch,仍置 _verified。"""
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
+def test_record_engine_evidence_false_is_warning_only(engine_cache_stub, caplog):
+    """record_engine_evidence(engine, False):不改缓存、不落盘,只记 warning。"""
+    EngineManager._cached_engines = {"office": True, "wps": False}
     em = EngineManager()
 
+    with caplog.at_level("WARNING"):
+        em.record_engine_evidence("office", False)
+
+    assert EngineManager._cached_engines == {"office": True, "wps": False}  # 不改缓存
+    assert engine_cache_stub["saved"] == []  # 不落盘
+    assert any("office" in record.getMessage() for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# 检测终态契约、缓存来源回显(AC2)、single-flight 并发合并(AC5)、memo 快速路径
+# ---------------------------------------------------------------------------
+
+
+def test_detect_persists_no_engine_conclusion(monkeypatch, engine_cache_stub):
+    """注册表判定双无 → 检测完成落盘 {False,False}(AC2:无 Office 也有可缓存结论)。"""
+    EngineManager._cached_engines = None
+    em = EngineManager()
     monkeypatch.setattr(EngineManager, "_probe_registry", lambda prog_id: False)
-    monkeypatch.setattr(
-        EngineManager, "_try_detect", lambda *a, **k: pytest.fail("无可兑现引擎不应 Dispatch")
-    )
 
-    em.ensure_verified()
+    received: list[str] = []
+    em._async_detect_body(callback=received.append)
 
-    assert EngineManager._verified is True
-    assert EngineManager._cached_engines == {"office": False, "wps": False}
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
-
-
-def test_ensure_verified_updates_cache_with_dispatch_result(monkeypatch, engine_cache_stub):
-    """兑现结果(Dispatch 失败 → False)精确写回缓存,不污染其他引擎键。"""
-    EngineManager._cached_engines = {"office": True, "wps": True}
-    EngineManager._verified = False
-    em = EngineManager()
-
-    # office 兑现成功(True),wps 兑现失败(False)
-    def fake_detect(prog_id, log):
-        return prog_id == "Word.Application"
-
-    monkeypatch.setattr(EngineManager, "_try_detect", fake_detect)
-
-    em.ensure_verified()
-
-    assert EngineManager._cached_engines == {"office": True, "wps": False}
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
-
-
-# ---------------------------------------------------------------------------
-# ensure_verified × engine_cache 持久缓存:有效期内且与注册表一致 → 跨进程零 Dispatch
-# ---------------------------------------------------------------------------
-
-
-def test_ensure_verified_adopts_matching_persistent_cache(monkeypatch, engine_cache_stub):
-    """持久缓存有效期内且与实时注册表探测一致 → 直接采信,零 Dispatch、不回写。"""
-    EngineManager._cached_engines = {"office": True, "wps": False}
-    EngineManager._verified = False
-    engine_cache_stub["load"] = {"office": True, "wps": False}
-    em = EngineManager()
-
-    monkeypatch.setattr(
-        EngineManager, "_try_detect", lambda *a, **k: pytest.fail("持久缓存命中不应 Dispatch")
-    )
-
-    em.ensure_verified()
-
-    assert EngineManager._verified is True
-    assert EngineManager._cached_engines == {"office": True, "wps": False}
-    assert engine_cache_stub["saved"] == []
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
-
-
-def test_ensure_verified_rejects_mismatched_persistent_cache(monkeypatch, engine_cache_stub):
-    """持久缓存与实时注册表不一致(安装变化)→ 不采信,重新兑现并回写新结果。"""
-    EngineManager._cached_engines = {"office": True, "wps": False}
-    EngineManager._verified = False
-    engine_cache_stub["load"] = {"office": False, "wps": False}  # 旧结论:office 不可用
-    em = EngineManager()
-
-    monkeypatch.setattr(EngineManager, "_try_detect", lambda prog_id, log: True)
-
-    em.ensure_verified()
-
-    assert EngineManager._verified is True
-    assert EngineManager._cached_engines == {"office": True, "wps": False}
-    assert engine_cache_stub["saved"] == [{"office": True, "wps": False}]
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
-
-
-def test_ensure_verified_saves_result_after_dispatch(monkeypatch, engine_cache_stub):
-    """无持久缓存(首跑/过期)→ 兑现结果回写持久缓存,供后续进程采信。"""
-    EngineManager._cached_engines = {"office": True, "wps": False}
-    EngineManager._verified = False
-    engine_cache_stub["load"] = None
-    em = EngineManager()
-
-    monkeypatch.setattr(
-        EngineManager, "_try_detect", lambda prog_id, log: prog_id == "Word.Application"
-    )
-
-    em.ensure_verified()
-
-    assert engine_cache_stub["saved"] == [{"office": True, "wps": False}]
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
-
-
-def test_ensure_verified_save_failure_is_not_fatal(monkeypatch, engine_cache_stub):
-    """持久缓存写入失败 → 仅告警降级(本进程内缓存仍生效),不抛异常。"""
-    EngineManager._cached_engines = {"office": True, "wps": False}
-    EngineManager._verified = False
-    engine_cache_stub["load"] = None
-    em = EngineManager()
-    monkeypatch.setattr(engine_cache, "save", lambda *a, **k: False)
-    monkeypatch.setattr(EngineManager, "_try_detect", lambda prog_id, log: True)
-
-    em.ensure_verified()  # 不抛
-
-    assert EngineManager._verified is True
-    assert EngineManager._cached_engines == {"office": True, "wps": False}
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
-
-
-def test_ensure_verified_probes_registry_when_cache_empty(monkeypatch, engine_cache_stub):
-    """缓存未填充(未经启动探测直接生成)→ 先补注册表预筛,再按预筛结果兑现。"""
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
-    em = EngineManager()
-
-    probed = []
-    monkeypatch.setattr(
-        EngineManager, "_probe_registry", lambda prog_id: probed.append(prog_id) or True
-    )
-    detected = []
-    monkeypatch.setattr(
-        EngineManager, "_try_detect", lambda prog_id, log: detected.append(prog_id) or False
-    )
-
-    em.ensure_verified()
-
-    assert "Word.Application" in probed and "KWPS.Application" in probed
-    assert detected == ["Word.Application", "KWPS.Application"]  # 预筛可用 → 逐个兑现
-    assert EngineManager._cached_engines == {"office": False, "wps": False}
     assert engine_cache_stub["saved"] == [{"office": False, "wps": False}]
+    assert received == ["未检测到Office软件"]  # missing 来源 → 无后缀
+
+
+def test_engine_info_appends_suffix_on_cache_hit(monkeypatch, engine_cache_stub):
+    """持久记录与检测结果一致(hit)→ 文案含"（缓存已验证）"后缀。"""
     EngineManager._cached_engines = None
-    EngineManager._verified = False
-
-
-def test_ensure_verified_cross_process_roundtrip(tmp_path, monkeypatch):
-    """集成回归:首跑兑现并落盘 → 第二个"进程"(重置类状态)命中持久缓存,零 Dispatch。
-
-    在旧实现(仅进程内缓存)上本测试必败:第二个 ensure_verified 会再次触发
-    _try_detect → pytest.fail。走真实 engine_cache + settings 文件(chdir 隔离)。
-    """
-    monkeypatch.chdir(tmp_path)
-
-    # 第一个"进程":预筛 office 可用 → 真 Dispatch 兑现(此处 stub 成功)→ 落盘
-    EngineManager._cached_engines = {"office": True, "wps": False}
-    EngineManager._verified = False
-    monkeypatch.setattr(EngineManager, "_try_detect", lambda prog_id, log: True)
-    EngineManager().ensure_verified()
-    assert (tmp_path / ".file_toolbox" / "settings.json").is_file()
-
-    # 第二个"进程":重置进程内状态;注册表预筛得到相同结果
-    EngineManager._cached_engines = None
-    EngineManager._verified = False
+    em = EngineManager()
     monkeypatch.setattr(
         EngineManager, "_probe_registry", lambda prog_id: prog_id == "Word.Application"
     )
-    monkeypatch.setattr(
-        EngineManager, "_try_detect", lambda *a, **k: pytest.fail("持久缓存应命中,不应 Dispatch")
-    )
-    EngineManager().ensure_verified()
+    engine_cache_stub["load"] = {"office": True, "wps": False}
+    engine_cache_stub["reason"] = "hit"
 
-    assert EngineManager._verified is True
-    assert EngineManager._cached_engines == {"office": True, "wps": False}
+    received: list[str] = []
+    em._async_detect_body(callback=received.append)
+
+    assert "MS Office" in received[0]
+    assert "（缓存已验证）" in received[0]
+
+
+def test_engine_info_no_suffix_on_mismatch_or_missing(monkeypatch, engine_cache_stub):
+    """持久记录缺失(missing)或与检测结果不一致(mismatch)→ 文案无后缀。"""
     EngineManager._cached_engines = None
-    EngineManager._verified = False
+    em = EngineManager()
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda prog_id: prog_id == "Word.Application"
+    )
+
+    received: list[str] = []
+    em._async_detect_body(callback=received.append)
+    assert "（缓存已验证）" not in received[0]  # missing
+
+    # mismatch:有有效持久记录,但与本次注册表检测结果不一致(安装发生变化)
+    EngineManager._cached_engines = None
+    engine_cache_stub["load"] = {"office": False, "wps": False}
+    engine_cache_stub["reason"] = "hit"
+    received.clear()
+    em._async_detect_body(callback=received.append)
+    assert "（缓存已验证）" not in received[0]
 
 
-def test_async_detect_body_uses_registry_probe_not_dispatch(monkeypatch):
+def test_async_detect_body_reports_failure_as_terminal_state(monkeypatch):
+    """探测抛异常 → callback 恰好收到一次"引擎检测失败: ..."终态文案。
+
+    旧实现 except 只记 warning 不回调(页面停在"正在检测"收不到终态),此测试必红。
+    """
+
+    def raise_boom(**kwargs):
+        raise RuntimeError("boom")
+
+    em = EngineManager()
+    monkeypatch.setattr(em, "_detect_available_engines", raise_boom)
+
+    received: list[str] = []
+    result = em._async_detect_body(callback=received.append)
+
+    assert received == ["引擎检测失败: boom"]
+    assert result == "引擎检测失败: boom"
+
+
+def test_detect_engines_async_single_flight_merges_concurrent_requests(
+    monkeypatch, engine_cache_stub
+):
+    """single-flight:并发两次 detect_engines_async 只探测一次,两订阅者同获结果。
+
+    旧实现(每请求各开 daemon 线程、各自探测)此测试必红:探测会发生两次。
+    回调在锁外执行:回调内能立即获取飞行锁即证明投递未持锁(GUI 不等锁)。
+    """
+    EngineManager._cached_engines = None
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    probe_calls: list[bool] = []
+
+    def blocking_detect(self, force_refresh=False):
+        probe_calls.append(force_refresh)
+        probe_started.set()
+        assert release_probe.wait(timeout=5), "探测阻塞超过 5s,测试自身失败"
+        return {"office": True, "wps": False}
+
+    monkeypatch.setattr(EngineManager, "_detect_available_engines", blocking_detect)
+
+    lock_free_during_callback: list[bool] = []
+    results: list[str] = []
+
+    def subscriber(info: str) -> None:
+        # 回调在锁外:能立即拿到飞行锁说明投递时未持锁
+        if EngineManager._flight_lock.acquire(timeout=2):
+            EngineManager._flight_lock.release()
+            lock_free_during_callback.append(True)
+        results.append(info)
+
+    em = EngineManager()
+    em.detect_engines_async(callback=subscriber)
+    assert probe_started.wait(timeout=5)  # 首个 flight 的探测已进入阻塞点
+    em.detect_engines_async(callback=subscriber)  # 并发第二订阅 → 合并进同一 flight
+
+    release_probe.set()
+
+    deadline = time.time() + 5
+    while len(results) < 2 and time.time() < deadline:
+        time.sleep(0.01)
+    assert probe_calls == [False]  # 恰好一次探测,且为注册表路径(force_refresh=False)
+    assert len(results) == 2 and results[0] is results[1]  # 同一结果对象广播
+    assert lock_free_during_callback == [True, True]
+
+
+def test_serve_flight_isolates_failing_subscriber(monkeypatch):
+    """_serve_flight:结果广播在锁外;单个订阅者抛异常不影响其余订阅者收到结果。"""
+    em = EngineManager()
+    monkeypatch.setattr(EngineManager, "_async_detect_body", lambda self, callback=None: "探测文案")
+
+    def bad_subscriber(info: str) -> None:
+        raise RuntimeError("subscriber boom")
+
+    received: list[str] = []
+    with EngineManager._flight_lock:
+        EngineManager._flight_subscribers = [bad_subscriber, received.append]
+
+    em._serve_flight()
+
+    assert received == ["探测文案"]
+    assert EngineManager._flight_subscribers is None  # 飞行已解除
+
+
+def test_async_detect_body_memo_fast_path(monkeypatch, engine_cache_stub):
+    """memo 快速路径:_cached_engines 已填充 → 再次检测直接返回,不重复探测注册表。"""
+    EngineManager._cached_engines = None
+    em = EngineManager()
+    probed: list[str] = []
+    monkeypatch.setattr(
+        EngineManager, "_probe_registry", lambda prog_id: probed.append(prog_id) or True
+    )
+
+    em._async_detect_body()
+    assert len(probed) == 2  # 首次探测 Word + KWPS
+    em._async_detect_body()
+    assert len(probed) == 2  # memo 命中,未重探注册表
+
+
+def test_async_detect_body_uses_registry_probe_not_dispatch(monkeypatch, engine_cache_stub):
     """回归:启动异步检测必须走注册表(force_refresh=False),不应触发真 Dispatch。
 
     此前 detect_engines_async 的 worker 以 force_refresh=True 调用,每次打开对话框都
     Dispatch Word/WPS,违背注册表快速探测的设计目标。worker 体已抽到
     _async_detect_body,可直接同步断言。
+    适配说明(Issue #123):检测体新增缓存来源回显,故补 engine_cache_stub 隔离
+    持久缓存读写。
     """
     EngineManager._cached_engines = None  # 清缓存避免直接命中
     em = EngineManager()
@@ -580,10 +617,11 @@ def _stub_dispatch(monkeypatch, *, return_value=None, side_effect=None):
     return dispatch
 
 
-def test_init_office_app_success_and_cache(monkeypatch):
+def test_init_office_app_success_and_cache(monkeypatch, engine_cache_stub):
     """_init_office_app 首次 Dispatch 成功 → 缓存实例;同引擎再调 → 复用,不重复 Dispatch。
 
     覆盖 engine_manager.py 行 246-247(缓存复用分支)。
+    适配说明(Issue #123):成功路径新增证据喂养(engine_cache_stub 隔离落盘)。
     """
     em = EngineManager()
     app = MagicMock()
@@ -602,10 +640,11 @@ def test_init_office_app_success_and_cache(monkeypatch):
     EngineManager._cached_engines = None
 
 
-def test_init_office_app_engine_switch_quits_old(monkeypatch):
+def test_init_office_app_engine_switch_quits_old(monkeypatch, engine_cache_stub):
     """引擎切换(已有实例 + 引擎变了)→ 旧实例 Quit 被调用,再 Dispatch 新的。
 
     覆盖 engine_manager.py 行 250-254(释放旧实例)。
+    适配说明(Issue #123):成功路径新增证据喂养(engine_cache_stub 隔离落盘)。
     """
     em = EngineManager()
     old_app = MagicMock()
@@ -641,10 +680,11 @@ def test_init_office_app_all_progid_fail_raises(monkeypatch):
     EngineManager._cached_engines = None
 
 
-def test_init_office_app_falls_back_to_wps(monkeypatch):
+def test_init_office_app_falls_back_to_wps(monkeypatch, engine_cache_stub):
     """ms_prog_id 失败 → 回退到 wps_prog_id 并成功。
 
     覆盖 engine_manager.py 行 259-269(ProgID 回退顺序)。
+    适配说明(Issue #123):成功路径新增证据喂养(engine_cache_stub 隔离落盘)。
     """
     em = EngineManager()
     wps_app = MagicMock()
@@ -740,23 +780,23 @@ def test_close_with_no_apps_does_nothing(monkeypatch):
 
 
 def test_detect_engines_async_starts_thread_and_invokes_callback(monkeypatch):
-    """detect_engines_async 启动 daemon 线程,最终调 callback(行 175-178)。
+    """detect_engines_async 启动 daemon 线程,经 single-flight 投递调 callback。
 
-    替换 _run_async_detect 让其直接同步调 callback,验证线程被启动且 callback 触发。
+    适配说明(Issue #123):投递改由 _serve_flight 负责,_run_async_detect 不再
+    逐请求携带 callback,故改为 mock 可测核心体 _async_detect_body(真实线程 +
+    真实投递路径)。
     """
     em = EngineManager()
     captured = {}
 
-    def fake_run(self, callback=None):
-        # 模拟异步检测完成
-        if callback:
-            callback("Word.Application")
-
-    monkeypatch.setattr(EngineManager, "_run_async_detect", fake_run)
+    monkeypatch.setattr(
+        EngineManager, "_async_detect_body", lambda self, callback=None: "Word.Application"
+    )
     em.detect_engines_async(callback=lambda info: captured.setdefault("info", info))
 
-    # 给线程一点时间执行
-    time.sleep(0.2)
+    deadline = time.time() + 5
+    while "info" not in captured and time.time() < deadline:
+        time.sleep(0.01)
     assert captured.get("info") == "Word.Application"
 
 

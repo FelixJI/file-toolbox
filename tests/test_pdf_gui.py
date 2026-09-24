@@ -671,14 +671,15 @@ def test_render_results_breaks_when_results_exceed_table_rows(dlg, tmp_path):
     assert tbl.rowCount() == 1  # 表行数未被扩
 
 
-# ---------- 引擎检测:非 NO_COM 路径(覆盖 180-189) ----------
+# ---------- 引擎检测:非 NO_COM 路径(信号桥回显) ----------
 
 
 def test_detect_engines_async_path_records_callback(dlg, monkeypatch):
     """非 NO_COM 形态:置"正在检测...",调 detect_engines_async(callback=...)。
 
     conftest 的 autouse fixture 设了 FILE_TOOLBOX_NO_COM_DETECT=1,这里 delenv 让
-    _init_engine_info 走 180-189 的异步分支;并 spy detect_engines_async 捕获 callback。
+    _init_engine_info 走异步分支;并 spy detect_engines_async 捕获 callback。
+    回调在 GUI 线程直接调用 → emit 信号 → 槽立即更新(同线程直连)。
     """
     monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
 
@@ -693,10 +694,164 @@ def test_detect_engines_async_path_records_callback(dlg, monkeypatch):
 
     assert dlg.ui.label_engine_info.text() == "正在检测可用引擎..."
     assert callable(captured.get("callback"))
-    # 回调内部走 QTimer.singleShot(0, ...) 设文本;调用后需 flush 事件循环才生效
+    # 回调内部 emit _engine_detected(同线程直连到槽),文本立即生效
     captured["callback"]("检测到: Office")
     QApplication.processEvents()
     assert dlg.ui.label_engine_info.text() == "检测到: Office"
+
+
+def test_engine_echo_stale_generation_token_ignored(dlg, monkeypatch):
+    """旧代次(token)的晚到结果不覆盖新状态:槽只接受最新请求。
+
+    连续两次 _init_engine_info 使 token 前进,再以旧 token emit → label 保持
+    最新请求状态,不被旧结果覆盖(AC5)。
+    """
+    monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
+    monkeypatch.setattr(dlg._svc, "detect_engines_async", lambda callback=None, **k: None)
+
+    dlg._init_engine_info()  # token=1
+    dlg._init_engine_info()  # token=2(最新)
+    dlg._engine_detected.emit(1, "旧结果: 已过期")  # 旧代次
+    QApplication.processEvents()
+    assert dlg.ui.label_engine_info.text() == "正在检测可用引擎..."
+
+    dlg._engine_detected.emit(2, "新结果: MS Office")
+    QApplication.processEvents()
+    assert dlg.ui.label_engine_info.text() == "新结果: MS Office"
+
+
+def test_engine_echo_error_terminal_state_delivered(dlg, monkeypatch):
+    """检测异常终态文案("引擎检测失败: ...")同样经信号桥回显,不停留"正在检测"。"""
+    monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
+
+    captured = {}
+
+    def fake_detect_engines_async(callback=None, **kwargs):
+        captured["callback"] = callback
+
+    monkeypatch.setattr(dlg._svc, "detect_engines_async", fake_detect_engines_async)
+    dlg._init_engine_info()
+
+    captured["callback"]("引擎检测失败: RuntimeError('probe boom')")
+    QApplication.processEvents()
+
+    assert dlg.ui.label_engine_info.text().startswith("引擎检测失败")
+
+
+# ---------- 引擎检测回显:真实后台线程 + 真实事件循环(AC1) ----------
+
+
+def _reset_engine_manager_class_state():
+    """EngineManager 检测状态是类级共享,跨用例必须复位(与 test_engine_manager 的
+    autouse fixture 同责,本文件按需内联)。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    EngineManager._cached_engines = None
+    EngineManager._cache_source = None
+    EngineManager._flight_subscribers = None
+
+
+def test_engine_echo_real_thread_reaches_label(app, monkeypatch, tmp_path):
+    """真实 daemon 线程探测 + 真实事件循环:label 必到达准确终态(旧实现必红)。
+
+    仅替换探测外部边界(_probe_registry),线程、single-flight、信号桥、事件循环
+    全部真实。旧实现经无 context 的 QTimer.singleShot 从 daemon 线程投递,在锁定
+    PySide6 6.11.2 上永不送达(见 Issue #123 WP-A 探针),label 停留"正在检测"。
+    """
+    import threading
+    import time
+
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    monkeypatch.chdir(tmp_path)  # 隔离数据根(engine_cache 落盘)
+    monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
+    _reset_engine_manager_class_state()
+
+    probe_started = threading.Event()
+    release = threading.Event()
+
+    def slow_probe(prog_id: str) -> bool:
+        # 探测阻塞至 release:期间事件循环持续旋转,证明检测中 GUI 线程不被冻结
+        probe_started.set()
+        release.wait(timeout=5)
+        return prog_id == "Word.Application"
+
+    monkeypatch.setattr(EngineManager, "_probe_registry", staticmethod(slow_probe))
+
+    dlg = PDFGeneratorDialog()
+    assert probe_started.wait(timeout=5), "探测线程未启动"
+    # 检测进行中:主线程可自由处理事件(未被探测阻塞)
+    spun = 0
+    deadline = time.monotonic() + 0.3
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.005)
+        spun += 1
+    assert spun >= 10, "检测期间 GUI 事件循环应持续运转"
+    assert dlg.ui.label_engine_info.text() == "正在检测可用引擎..."
+
+    release.set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        if dlg.ui.label_engine_info.text() != "正在检测可用引擎...":
+            break
+        time.sleep(0.005)
+
+    text = dlg.ui.label_engine_info.text()
+    assert text.startswith("可用引擎: MS Office"), f"回显未到达终态: {text!r}"
+    assert "WPS" not in text
+
+    dlg.close()
+    _reset_engine_manager_class_state()
+
+
+def test_engine_echo_survives_dialog_destroyed_mid_detection(app, monkeypatch, tmp_path):
+    """检测进行中销毁对话框:晚到结果 emit 到已销毁 receiver 安全丢弃,不崩(AC1/AC5)。
+
+    Qt 连接随 receiver 销毁自动断开;探测线程照常完成,投递无副作用。
+    """
+    import threading
+    import time
+
+    from PySide6.QtCore import QTimer
+
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FILE_TOOLBOX_NO_COM_DETECT", raising=False)
+    _reset_engine_manager_class_state()
+
+    release = threading.Event()
+
+    def blocked_probe(prog_id: str) -> bool:
+        release.wait(timeout=5)
+        return prog_id == "Word.Application"
+
+    monkeypatch.setattr(EngineManager, "_probe_registry", staticmethod(blocked_probe))
+
+    dlg = PDFGeneratorDialog()
+    dlg.close()
+    dlg.deleteLater()
+    QApplication.processEvents()
+    del dlg
+
+    release.set()  # 探测此刻才完成 → emit 到已销毁对话框
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        if EngineManager._flight_subscribers is None:
+            break
+        time.sleep(0.005)
+
+    assert EngineManager._flight_subscribers is None, "飞行订阅者应被正常消费清理"
+    # 再转若干轮事件循环,确认无延迟投递崩溃(崩溃会直接使测试进程失败)
+    for _ in range(20):
+        QApplication.processEvents()
+        time.sleep(0.005)
+    QTimer.singleShot(0, lambda: None)  # 事件系统仍健康
+    QApplication.processEvents()
+    _reset_engine_manager_class_state()
 
 
 def test_detect_engines_async_exception_falls_back_to_sync(dlg, monkeypatch):
