@@ -209,6 +209,7 @@ def win(app, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     manager = Manager()
     window = MainWindow(coordinator(manager))
+    window._tabs.setCurrentIndex(9)  # 下载只能从独立更新页发起(#129)
     window._pending_update = window._update_worker._coordinator.check()
     return window
 
@@ -253,10 +254,9 @@ def test_gui_late_cancel_announces_non_cancelable_apply(win, monkeypatch):
     request.begin_apply()
     win._on_download_cancel()
     assert win._download_request is request
-    assert win._update_dialog is not None
-    assert "已无法取消" in win._update_dialog.labelText()
+    assert "已无法取消" in win._update_tab._status_lbl.text()
+    assert win._update_tab.btn_cancel_update.isHidden() is True  # 取消按钮收起
     assert win._update_banner.isHidden()
-    win._update_dialog.close()
 
 
 def test_cancel_accepted_before_failed_result_is_reported_as_cancelled(app):
@@ -364,6 +364,7 @@ def test_gui_update_excludes_new_business_until_result(app, monkeypatch, tmp_pat
     manager = Manager()
     window = MainWindow(coordinator(manager))
     window._tabs.setCurrentIndex(6)
+    window._tabs.setCurrentIndex(9)  # 构造更新页:下载的唯一发起入口
     window._pending_update = window._update_worker._coordinator.check()
     entered, release = Event(), Event()
 
@@ -382,14 +383,17 @@ def test_gui_update_excludes_new_business_until_result(app, monkeypatch, tmp_pat
     try:
         window._start_download()
         assert entered.wait(5)
-        assert not window._tabs.isEnabled() and not window.btn_history.isEnabled()
+        # 容器保持可用(可切换查看),业务页被锁定且历史按钮禁用;更新页可操作
+        assert window._tabs.isEnabled()
+        assert not window._excel_merge_tab.isEnabled() and not window.btn_history.isEnabled()
+        assert window._update_tab.isEnabled()
         clicked = []
         window._excel_merge_tab.ui.btn_merge.clicked.connect(lambda: clicked.append(True))
         QTest.mouseClick(window._excel_merge_tab.ui.btn_merge, Qt.MouseButton.LeftButton)
         assert clicked == []
         if outcome in {"cancel", "closing-cancel"}:
             window._on_download_cancel()
-            assert not window._tabs.isEnabled(), "仅提出取消不能提前恢复业务入口"
+            assert not window._excel_merge_tab.isEnabled(), "仅提出取消不能提前恢复业务入口"
         if outcome == "closing-cancel":
             assert not window.close()
         release.set()
@@ -401,9 +405,12 @@ def test_gui_update_excludes_new_business_until_result(app, monkeypatch, tmp_pat
         loop.exec()
         assert window._download_request is None
         if outcome in {"apply", "closing-cancel"}:
+            # apply 后走关窗流程/取消期间关窗:整体禁用
             assert not window._tabs.isEnabled() and not window.btn_history.isEnabled()
         else:
+            window._tabs.setCurrentIndex(0)
             assert window._tabs.isEnabled() and window.btn_history.isEnabled()
+            assert window._excel_merge_tab.isEnabled()
         assert manager.downloads == 1
         assert manager.applies == (1 if outcome == "apply" else 0)
     finally:

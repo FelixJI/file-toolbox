@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
-    QProgressDialog,
     QStatusBar,
     QTabWidget,
     QToolButton,
@@ -50,11 +49,14 @@ if TYPE_CHECKING:
     from file_toolbox.gui.dialogs.plan_schedule_tab import PlanScheduleTab
     from file_toolbox.gui.dialogs.rename_tab import FileRenamerDialog
     from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
+    from file_toolbox.gui.dialogs.update_tab import UpdateTab
 
 _logger = logging.getLogger(__name__)
 
 # 窗口几何持久化 key(settings.json):base64(saveGeometry)。
 _GEOMETRY_KEY = "window/geometry"
+# 独立更新页在标签栏中的固定索引(9 个业务页之后、关于页之前)。
+_UPDATE_TAB_INDEX = 9
 
 
 def _make_rename_tab() -> FileRenamerDialog:
@@ -111,6 +113,12 @@ def _make_plan_schedule_tab() -> PlanScheduleTab:
     return PlanScheduleTab()
 
 
+def _make_update_tab() -> UpdateTab:
+    from file_toolbox.gui.dialogs.update_tab import UpdateTab
+
+    return UpdateTab()
+
+
 def _make_about_tab() -> AboutTab:
     from file_toolbox.gui.dialogs.about_tab import AboutTab
 
@@ -151,7 +159,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
-        # 9 个功能 Tab + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
+        # 9 个功能 Tab + 更新 + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
         # 均懒导入,首次构造某 Tab 时才 import;首屏只构造重命名 Tab。
         # 打包形态下真实平台主窗口构造可达 ~1.7s,大头是首个控件初始化链
         # 之后的各 Tab 陆续构造;懒掉非首屏 Tab 让首帧只付首 Tab 的成本。
@@ -168,6 +176,7 @@ class MainWindow(QMainWindow):
         self._excel_merge_tab: ExcelMergeTab | None = None
         self._pdf_sort_tab: PdfSortTab | None = None
         self._plan_schedule_tab: PlanScheduleTab | None = None
+        self._update_tab: UpdateTab | None = None
         self._about_tab: AboutTab | None = None
         # 懒构造登记:index -> (标签文本, Tab 工厂, 属性名);占位页被真实 Tab 原位替换。
         # 含首屏(重命名):由 __init__ 末尾的 _on_tab_changed 统一触发构造。
@@ -184,6 +193,7 @@ class MainWindow(QMainWindow):
                     ("Excel合并", _make_excel_merge_tab, "_excel_merge_tab"),
                     ("PDF排序", _make_pdf_sort_tab, "_pdf_sort_tab"),
                     ("计划排布", _make_plan_schedule_tab, "_plan_schedule_tab"),
+                    ("更新", _make_update_tab, "_update_tab"),
                     ("关于", _make_about_tab, "_about_tab"),
                 ]
             )
@@ -194,7 +204,7 @@ class MainWindow(QMainWindow):
         self._close_requested = False
         for label, _factory, _attr in self._lazy_specs.values():
             tabs.addTab(QWidget(), label)
-        # 各 Tab 对应的历史工具名;"关于"页无历史 → None(按钮禁用)
+        # 各 Tab 对应的历史工具名;"更新"/"关于"页无历史 → None(按钮禁用)
         self._tab_tools: list[str | None] = [
             "rename",
             "mkdir",
@@ -205,6 +215,7 @@ class MainWindow(QMainWindow):
             "excel_merge",
             "pdf_sort",
             "plan_schedule",
+            None,
             None,
         ]
         tabs.currentChanged.connect(self._on_tab_changed)
@@ -240,11 +251,13 @@ class MainWindow(QMainWindow):
         self._update_worker.progress.connect(self._on_update_progress)
         self._update_worker.applying.connect(self._on_update_applying)
         self._update_worker.applied.connect(self._on_update_applied)
-        self._update_banner.clicked.connect(self._start_download)
+        self._update_banner.clicked.connect(self._open_update_page)
         self._pending_update: UpdateCheckResult | None = None
         self._last_check: UpdateCheckResult | None = None
-        self._update_dialog: QProgressDialog | None = None
         self._download_request: UpdateRequest | None = None
+        self._last_progress: int = 0
+        self._startup_outcome = ""
+        self._business_tabs_locked = False
 
         self._update_worker.checked.connect(self._on_update_checked)
 
@@ -280,22 +293,39 @@ class MainWindow(QMainWindow):
             self._lazy_specs[index] = spec
             raise
         setattr(self, attr, tab)
+        if attr not in ("_update_tab", "_about_tab") and self._business_tabs_locked:
+            # 下载期间允许切页查看,但懒构造的业务页必须按锁状态禁用,
+            # 不能在下载中开始新的业务写入(#129 AC4)。
+            tab.setEnabled(False)
         current = self._tabs.currentIndex()
         self._tabs.blockSignals(True)
         self._tabs.removeTab(index)
         self._tabs.insertTab(index, tab, label)
         self._tabs.setCurrentIndex(current)
         self._tabs.blockSignals(False)
-        if attr == "_about_tab":
-            # 关于页手动检查/立即更新:AboutTab 请求 → 投递 worker → 结果回显/复用下载流程
-            about_tab = cast("AboutTab", tab)
-            about_tab.check_requested.connect(self._on_check_requested)
-            about_tab.download_requested.connect(self._on_download_requested)
-            # 自动检查先于用户打开关于页:回放最近一轮检查状态与下载中标志
+        if attr == "_update_tab":
+            # 更新页是唯一的更新主动作入口:请求信号接主窗口既有更新链
+            update_tab = cast("UpdateTab", tab)
+            update_tab.check_requested.connect(self._on_check_requested)
+            update_tab.download_requested.connect(self._start_download)
+            update_tab.cancel_requested.connect(self._on_download_cancel)
+            if self._business_tabs_locked:
+                update_tab.setEnabled(True)
+            # 页面可能晚于状态创建:回放启动对账、最近检查与进行中的下载
+            update_tab.set_startup_outcome(self._startup_outcome)
             if self._last_check is not None:
-                self._display_check_result_on_about(self._last_check)
-            if self._download_request is not None:
-                about_tab.set_update_downloading(True)
+                update_tab.display_check_result(self._last_check)
+            request = self._download_request
+            if request is not None:
+                version = self._pending_update.version if self._pending_update else ""
+                update_tab.begin_download(version)
+                update_tab.set_download_progress(self._last_progress)
+                if request.applying:
+                    update_tab.enter_apply_phase()
+        elif attr == "_about_tab":
+            # 关于页只保留"打开更新页面"导航,不再承载检查/下载动作
+            about_tab = cast("AboutTab", tab)
+            about_tab.open_update_page_requested.connect(self._open_update_page)
 
     def _materialize_all_tabs(self) -> None:
         """立即构造全部懒 Tab(测试与预热场景使用)。"""
@@ -346,14 +376,14 @@ class MainWindow(QMainWindow):
         )
 
     def _on_check_requested(self) -> None:
-        """关于页请求检查更新:确保 worker 运行并投递 do_check。"""
+        """更新页请求检查更新:确保 worker 运行并投递 do_check。"""
         if not self._update_worker.isRunning():
             # 非便携形态(pip/dev):按需启动 worker(自动检查不会启)
             self._update_worker.start()
         self._trigger_check()
 
     def _on_download_requested(self) -> None:
-        """关于页"立即更新":确保 worker 运行后复用与状态栏横幅一致的下载流程。"""
+        """确保 worker 运行后复用 _start_download(旧关于页入口移除后供测试直调)。"""
         if not self._update_worker.isRunning():
             self._update_worker.start()
         self._start_download()
@@ -372,27 +402,18 @@ class MainWindow(QMainWindow):
         else:
             self._pending_update = None
             self._update_banner.hide()
-        self._display_check_result_on_about(result)
+        if self._update_tab is not None:
+            self._update_tab.display_check_result(result)
 
-    def _display_check_result_on_about(self, result: UpdateCheckResult) -> None:
-        about = self._about_tab
-        if about is None:
-            return
-        if result.status is UpdateCheckStatus.AVAILABLE:
-            about.display_update_available(result)
-        elif result.status is UpdateCheckStatus.UNSUPPORTED:
-            about.display_check_result(
-                "failed", f"⚠ {result.message or '当前运行形态不支持应用内更新'}"
-            )
-        elif result.status is UpdateCheckStatus.FAILED:
-            about.display_check_result(
-                "failed", f"⚠ {result.message or '检查更新失败,请检查网络或代理设置'}"
-            )
-        else:  # latest
-            about.display_check_result("latest", f"✓ 当前为最新版本 v{runtime_version()}")
+    def _open_update_page(self) -> None:
+        """横幅/关于页入口统一导航到独立更新页,绝不直接启动下载。"""
+        self._tabs.setCurrentIndex(_UPDATE_TAB_INDEX)
 
     def _start_download(self) -> None:
-        """用户点击 banner/关于页"立即更新" → 弹进度对话框 + 向 worker 投递下载请求。"""
+        """更新页"下载并更新" → 确认后锁业务页并向 worker 投递下载请求。
+
+        进度、校验提示与取消都承载在更新页内(#129),不再弹独立进度对话框。
+        """
         if (
             self._pending_update is None
             or self._download_request is not None
@@ -420,7 +441,11 @@ class MainWindow(QMainWindow):
         if self._running_business_workers():
             QMessageBox.warning(self, "后台任务尚未结束", "请等待当前文件操作完成后再更新。")
             return
-        self._tabs.setEnabled(False)
+        update_tab = self._update_tab
+        if update_tab is None:
+            # 下载只能从更新页发起;防御懒构造态异常路径
+            return
+        self._set_business_tabs_locked(True)
         self.btn_history.setEnabled(False)
         self._update_banner.hide()
         # 先落对账记录再请求下载:apply 提交后跨启动才能比对目标版本;取消/
@@ -433,20 +458,8 @@ class MainWindow(QMainWindow):
             self._restore_retry_affordances()
             return
         self._download_request = request
-        label = f"正在下载 v{update.version}…"
-        dlg = QProgressDialog(label, "取消", 0, 100, self)
-        dlg.setWindowTitle(f"更新到 v{update.version}")
-        dlg.setMinimumDuration(0)
-        # 关闭 Qt 默认的 autoClose/autoReset:到 100% 后还要停留在
-        # "正在校验并准备更新…"直到 apply 结果到达;默认行为会在 setValue(100)
-        # 时立即隐藏对话框并重置数值,校验提示永远不可见且进度条回跳闪烁。
-        dlg.setAutoClose(False)
-        dlg.setAutoReset(False)
-        dlg.setValue(0)
-        dlg.canceled.connect(self._on_download_cancel)
-        self._update_dialog = dlg
-        dlg.show()
-        self._set_about_downloading(True)
+        self._last_progress = 0
+        update_tab.begin_download(update.version)
 
     def _on_download_cancel(self) -> None:
         """只有提交门接受取消才显示取消;等待该请求结束后开放重试。"""
@@ -455,11 +468,10 @@ class MainWindow(QMainWindow):
             return
         if self._update_worker.cancel_download(request):
             self.statusBar().showMessage("正在取消更新，请等待当前请求结束…")
-            self._update_dialog = None
+            if self._update_tab is not None:
+                self._update_tab.set_cancelling()
         elif request.applying:
             self._on_update_applying(request)
-            if self._update_dialog is not None:
-                self._update_dialog.show()
         else:
             self.statusBar().showMessage("更新请求已结束，正在确认结果…")
 
@@ -467,51 +479,63 @@ class MainWindow(QMainWindow):
         if request is not self._download_request:
             return
         self.statusBar().showMessage("正在应用更新，已无法取消；完成后将重启。")
-        if self._update_dialog is not None:
-            self._update_dialog.setCancelButton(None)
-            self._update_dialog.setLabelText("正在应用更新，已无法取消；完成后将重启。")
+        if self._update_tab is not None:
+            self._update_tab.enter_apply_phase()
 
     def _restore_retry_affordances(self) -> None:
-        """下载取消/失败后恢复重试入口(状态栏横幅 + 关于页按钮)。"""
+        """下载取消/失败后恢复重试入口(状态栏横幅 + 更新页/业务页)。"""
         if self._pending_update is not None:
             self._update_banner.show()
-        self._set_about_downloading(False)
         if not self._close_requested:
-            self._tabs.setEnabled(True)
+            self._set_business_tabs_locked(False)
             index = self._tabs.currentIndex()
             tool = self._tab_tools[index] if 0 <= index < len(self._tab_tools) else None
             self.btn_history.setEnabled(tool is not None)
+        if self._update_tab is not None:
+            self._update_tab.finish_download(restored=self._pending_update is not None)
 
-    def _set_about_downloading(self, downloading: bool) -> None:
-        """同步关于页"检查更新/立即更新"按钮的可用状态(未构造则跳过)。"""
-        about = self._about_tab
-        if about is not None:
-            about.set_update_downloading(downloading)
+    def _set_business_tabs_locked(self, locked: bool) -> None:
+        """下载期间锁定业务页(不能开始新的业务写入),更新/关于页保持可用。
+
+        不整体禁用 Tab 容器:页面可切换查看,更新页的进度与可取消阶段的取消
+        按钮必须保持可用。此后懒构造的业务页也按当前锁状态初始化。
+        """
+        self._business_tabs_locked = locked
+        for attr in self._tab_attrs:
+            if attr in ("_update_tab", "_about_tab"):
+                continue
+            tab = getattr(self, attr)
+            if tab is not None:
+                tab.setEnabled(not locked)
 
     def _on_update_progress(self, request: UpdateRequest, value: int) -> None:
-        if request is not self._download_request or self._update_dialog is None:
+        if request is not self._download_request:
             return
-        dialog = self._update_dialog
-        dialog.setValue(max(0, min(100, value)))
-        if request is self._download_request and dialog is self._update_dialog and value >= 100:
-            dialog.setLabelText("正在校验并准备更新…")
+        self._last_progress = value
+        if self._update_tab is not None:
+            self._update_tab.set_download_progress(value)
 
     def _on_update_applied(self, request: UpdateRequest, result: UpdateApplyResult) -> None:
         """只消费当前请求结果,旧结果不能关闭新请求或安排重复退出。"""
         if request is not self._download_request:
             return
         self._download_request = None
-        if self._update_dialog is not None:
-            self._update_dialog.close()
-            self._update_dialog = None
         if result.status is UpdateApplyStatus.CANCELLED:
             self._clear_pending_apply_record()
             self.statusBar().showMessage("更新已取消。")
+            if self._update_tab is not None:
+                self._update_tab.set_status_message("更新已取消,可重新下载。")
             self._restore_retry_affordances()
             return
         if result.status is UpdateApplyStatus.FAILED and request.applying:
             self._download_request = request
             self.statusBar().showMessage("更新应用结果不确定，请检查更新状态后重新启动应用。")
+            if self._update_tab is not None:
+                # 页面必须如实呈现"结果不确定":不复原重试入口(防重复提交),
+                # 也不能继续宣称"正在应用,完成后将重启"。
+                self._update_tab.set_uncertain(
+                    "更新应用结果不确定，请检查更新状态后重新启动应用；不要重复提交更新。"
+                )
             QMessageBox.warning(
                 self,
                 "更新应用结果不确定",
@@ -526,6 +550,8 @@ class MainWindow(QMainWindow):
                 "更新失败",
                 f"{result.message}\n\n原程序未受影响,可稍后重试。",
             )
+            if self._update_tab is not None:
+                self._update_tab.set_status_message(f"更新失败: {result.message}", "failed")
             self._restore_retry_affordances()
             return
         self._shutdown_for_restart()
@@ -585,11 +611,12 @@ class MainWindow(QMainWindow):
         elif target:
             message = (
                 f"上次更新未确认完成: 当前 v{current}，目标 v{target}；"
-                "如仍为旧版请在关于页重新检查更新"
+                "如仍为旧版请到“更新”页面重新检查更新"
             )
         else:
-            message = "上次更新结果未知，请在关于页检查更新确认当前版本"
+            message = "上次更新结果未知，请到“更新”页面检查更新确认当前版本"
         _logger.info("更新对账: %s (sdk_available=%s)", message, state.available)
+        self._startup_outcome = message
         self.statusBar().showMessage(message, 15000)
 
     def _shutdown_for_restart(self) -> None:

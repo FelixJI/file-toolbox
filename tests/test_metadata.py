@@ -3,6 +3,8 @@
 import tomllib
 from pathlib import Path
 
+import pytest
+
 import file_toolbox
 from file_toolbox.common import metadata
 
@@ -41,9 +43,47 @@ def test_python_requirement_matches_pyproject():
 
 
 def test_app_description_covers_all_capabilities():
-    """关于页简介必须覆盖 GUI 全部六个功能 Tab,新增功能时同步更新描述。"""
-    for keyword in ("重命名", "建文件夹", "PDF", "内容替换", "考勤汇总", "发票识别"):
-        assert keyword in metadata.APP_DESCRIPTION
+    """简介必须覆盖 GUI 全部业务 Tab:能力增删时漂移可被检测(#129 AC5)。
+
+    从主窗口真实标签栏派生业务页清单(排除"更新"/"关于"非业务页),逐项要求
+    出现在简介中——新增页面而忘记更新简介会在此失败,而非靠硬编码数量过关。
+    """
+    pytest.importorskip("PySide6.QtWidgets")
+    from PySide6.QtWidgets import QApplication
+
+    from file_toolbox.gui.main_window import MainWindow
+
+    QApplication.instance() or QApplication([])
+    win = MainWindow(_LatestCoordinator())
+
+    business_labels = [
+        win._tabs.tabText(i)
+        for i in range(win._tabs.count())
+        if win._tabs.tabText(i) not in ("更新", "关于")
+    ]
+    assert len(business_labels) == 9  # 当前九项业务能力的回归锚点
+    description = metadata.APP_DESCRIPTION.replace(" ", "")
+    for label in business_labels:
+        assert label.replace(" ", "") in description, f"简介未覆盖能力页 {label!r}"
+
+
+class _LatestCoordinator:
+    def check(self):
+        from file_toolbox.updater.models import UpdateCheckResult, UpdateCheckStatus
+
+        return UpdateCheckResult(UpdateCheckStatus.LATEST)
+
+    def download_and_apply(
+        self, progress=None, *, request=None, before_apply=None, expected_version=None
+    ):
+        raise AssertionError("metadata 测试不应触发下载")
+
+
+def test_tech_stack_splits_openpyxl_base_and_pdfplumber_optional():
+    """openpyxl 是基础依赖,pdfplumber 才是发票识别可选依赖(#129 AC5 准确区分)。"""
+    stack = dict(metadata.TECH_STACK)
+    assert stack.get("openpyxl") == "(Excel 读写,基础依赖)"
+    assert stack.get("pdfplumber") == "(发票识别,可选依赖)"
 
 
 def test_tech_stack_mentions_velopack_updater():

@@ -9,7 +9,10 @@ from pathlib import Path
 from file_toolbox import __version__
 
 APP_NAME = "File Toolbox"
-APP_DESCRIPTION = "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、考勤汇总、发票识别"
+APP_DESCRIPTION = (
+    "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、考勤汇总、"
+    "发票识别、Excel 合并、PDF 排序、计划排布"
+)
 VERSION = __version__
 REPO_URL = "https://github.com/FelixJI/file-toolbox"
 LICENSE = "MIT"
@@ -39,7 +42,8 @@ TECH_STACK: list[tuple[str, str]] = [
     ("typer", "(CLI 框架)"),
     ("pypdf + pypdfium2", "(PDF 处理)"),
     ("Pillow", "(图片处理)"),
-    ("pdfplumber + openpyxl", "(发票识别,可选)"),
+    ("openpyxl", "(Excel 读写,基础依赖)"),
+    ("pdfplumber", "(发票识别,可选依赖)"),
     ("pywin32", "(Windows COM 自动化,仅 Windows)"),
     ("velopack", "(应用内自动更新)"),
 ]

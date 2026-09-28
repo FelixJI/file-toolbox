@@ -1,8 +1,8 @@
-"""关于 Tab:展示软件名称/版本/开源地址/技术路线/更新日志 + 快捷方式管理。
+"""关于 Tab:应用名/版本/能力简介、仓库与许可证、运行信息、更新日志与快捷方式。
 
-第 6 个 Tab,嵌入主窗口。纯展示 QWidget + 4 个快捷方式按钮。
-只调用 common 层(metadata / shortcuts)返回值,不混入业务逻辑;
-更新相关的检查/下载动作通过信号交由主窗口执行。
+更新检查、下载与代理设置集中在独立"更新"页(见 update_tab.py);本页只保留
+"打开更新页面"导航,不再承载任何更新动作。技术路线与完整更新日志为次要长
+内容,默认折叠,需要时展开。
 """
 
 import platform
@@ -14,9 +14,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QTextBrowser,
@@ -24,31 +21,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from file_toolbox.common import metadata, settings, shortcuts
+from file_toolbox.common import metadata, shortcuts
 from file_toolbox.common.paths import get_log_dir
-from file_toolbox.updater.models import UpdateCheckResult
-from file_toolbox.updater.proxy import DEFAULT_PROXIES
-
-# 检查结果着色:available 与状态栏更新横幅同蓝,failed 用警示红;latest 用默认色。
-_RESULT_COLORS = {"available": "#0969da", "failed": "#d1242f"}
 
 
 class AboutTab(QWidget):
-    """关于界面 Tab。"""
+    """关于界面 Tab(纯展示 + 快捷方式管理 + 更新页导航)。"""
 
-    # 用户点检查更新时向主窗口请求(主窗口投递 worker 并回调结果)
-    check_requested = Signal()
-    # 用户点"立即更新"时向主窗口请求(主窗口走与状态栏横幅一致的下载流程)
-    download_requested = Signal()
+    # 用户点"打开更新页面"时请求主窗口切换到独立更新页(不触发任何更新动作)
+    open_update_page_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._build_ui()
 
     def _build_ui(self) -> None:
-        # 内容整体包进 QScrollArea:关于页是长竖排(标题+信息+代理+技术栈+日志+快捷方式),
-        # 不加滚动时 minimumSizeHint 高达 ~886px,会把主窗口最小高度钉到小屏放不下。
-        # 滚动容器把页最小尺寸压到滚动区级别,窗口可自由缩小、内容滚动查看。
+        # 内容整体包进 QScrollArea:关于页是长竖排,滚动容器把页最小尺寸压到
+        # 滚动区级别,窗口可自由缩小、内容滚动查看。
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea(self)
@@ -74,6 +63,7 @@ class AboutTab(QWidget):
 
         desc_lbl = QLabel(metadata.APP_DESCRIPTION)
         desc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_lbl.setWordWrap(True)
         root.addWidget(desc_lbl)
 
         # --- 基本信息组 ---
@@ -101,116 +91,52 @@ class AboutTab(QWidget):
         btn_logs.clicked.connect(self._open_log_directory)
         log_row.addWidget(btn_logs)
         info_layout.addLayout(log_row)
-
         root.addWidget(info_box)
 
-        # --- 更新与代理组(检查更新 + 新版详情 + 代理设置整合) ---
-        update_box = QGroupBox("更新与代理")
+        # --- 更新入口:仅导航 ---
+        update_box = QGroupBox("软件更新")
         update_layout = QVBoxLayout(update_box)
-
-        # 上半:检查更新 + 结果标签 + 立即更新按钮(发现新版时才显示)
-        check_row = QHBoxLayout()
-        self.btn_check_update = QPushButton("检查更新")
-        self.btn_check_update.clicked.connect(self._on_check_clicked)
-        check_row.addWidget(self.btn_check_update)
-        self._check_result_lbl = QLabel("")
-        self._check_result_lbl.setWordWrap(True)
-        check_row.addWidget(self._check_result_lbl, stretch=1)
-        self.btn_download_update = QPushButton("立即更新")
-        self.btn_download_update.setToolTip("下载新版本并在准备完成后自动重启")
-        self.btn_download_update.clicked.connect(self._on_download_clicked)
-        self.btn_download_update.hide()
-        check_row.addWidget(self.btn_download_update)
-        update_layout.addLayout(check_row)
-
-        # 中部:新版本更新内容(检查到新版且有 release notes 时才显示)
-        self._notes_lbl = QLabel("新版本更新内容:")
-        self._notes_lbl.hide()
-        update_layout.addWidget(self._notes_lbl)
-        self._notes_view = QTextBrowser()
-        self._notes_view.setOpenExternalLinks(True)
-        self._notes_view.setMaximumHeight(180)
-        self._notes_view.hide()
-        update_layout.addWidget(self._notes_view)
-
-        # 下半:代理设置
-        proxy_intro = QLabel(
-            "URL 加速前缀会拼在完整 GitHub feed 地址之前；检查更新时会并发探测所有勾选镜像"
-            "与直连，自动选用最快可用者（勾选顺序不影响速度）；全部失败才整体失败。"
-            "它不同于下方标准 forward proxy。"
-        )
-        proxy_intro.setWordWrap(True)
-        update_layout.addWidget(proxy_intro)
-
-        self._proxy_list = QListWidget()
-        # 限制代理列表高度,避免默认候选项把整个关于页撑得过高(其余空间留给更新日志)
-        self._proxy_list.setMaximumHeight(160)
-        update_layout.addWidget(self._proxy_list)
-
-        proxy_btn_row = QHBoxLayout()
-        self.btn_proxy_select_all = QPushButton("全选")
-        self.btn_proxy_select_all.clicked.connect(self._select_all_proxies)
-        proxy_btn_row.addWidget(self.btn_proxy_select_all)
-        self.btn_proxy_select_none = QPushButton("全不选")
-        self.btn_proxy_select_none.clicked.connect(self._select_no_proxies)
-        proxy_btn_row.addWidget(self.btn_proxy_select_none)
-        proxy_btn_row.addStretch(1)
-        update_layout.addLayout(proxy_btn_row)
-
-        add_row = QHBoxLayout()
-        add_row.addWidget(QLabel("自定义代理:"))
-        self._proxy_edit = QLineEdit()
-        self._proxy_edit.setPlaceholderText("如 https://your-proxy.example")
-        add_row.addWidget(self._proxy_edit, stretch=1)
-        self.btn_proxy_add = QPushButton("添加")
-        self.btn_proxy_add.clicked.connect(self._add_custom_proxy)
-        add_row.addWidget(self.btn_proxy_add)
-        self.btn_proxy_remove = QPushButton("移除选中")
-        self.btn_proxy_remove.clicked.connect(self._remove_selected_proxy)
-        add_row.addWidget(self.btn_proxy_remove)
-        update_layout.addLayout(add_row)
-
-        forward_row = QHBoxLayout()
-        forward_row.addWidget(QLabel("标准 forward proxy:"))
-        self._forward_proxy_edit = QLineEdit()
-        self._forward_proxy_edit.setPlaceholderText("如 http://127.0.0.1:7890（留空沿用系统环境）")
-        saved_forward_proxy = settings.get("forward_proxy", "")
-        if isinstance(saved_forward_proxy, str):
-            self._forward_proxy_edit.setText(saved_forward_proxy)
-        forward_row.addWidget(self._forward_proxy_edit, stretch=1)
-        update_layout.addLayout(forward_row)
-
-        save_row = QHBoxLayout()
-        self.btn_proxy_save = QPushButton("保存代理设置")
-        self.btn_proxy_save.clicked.connect(self._save_proxy)
-        save_row.addWidget(self.btn_proxy_save)
-        save_row.addStretch(1)
-        update_layout.addLayout(save_row)
-
-        self._proxy_status_lbl = QLabel("")
-        update_layout.addWidget(self._proxy_status_lbl)
+        update_hint = QLabel("检查更新、下载与进度、更新源与代理设置都在“更新”页面。")
+        update_hint.setWordWrap(True)
+        update_layout.addWidget(update_hint)
+        self.btn_open_update_page = QPushButton("打开更新页面")
+        self.btn_open_update_page.clicked.connect(self._on_open_update_page)
+        update_layout.addWidget(self.btn_open_update_page)
         root.addWidget(update_box)
 
-        # 填充代理列表(默认候选 + 已保存的自定义/勾选状态)
-        self._populate_proxy_list()
-
-        # --- 技术路线组 ---
-        tech_box = QGroupBox("技术路线")
+        # --- 技术路线组(次要长内容,默认折叠) ---
+        # checkable QGroupBox 未勾选时只禁用不隐藏子控件;用内容容器 +
+        # toggled→setVisible 实现真正的折叠/展开。
+        tech_box = QGroupBox("技术路线(点击展开)")
+        tech_box.setCheckable(True)
+        tech_box.setChecked(False)
         tech_layout = QVBoxLayout(tech_box)
+        tech_body = QWidget()
+        tech_body_layout = QVBoxLayout(tech_body)
+        tech_body_layout.setContentsMargins(0, 0, 0, 0)
         for name, note in metadata.TECH_STACK:
-            tech_layout.addWidget(QLabel(f"{name}    {note}"))
+            tech_body_layout.addWidget(QLabel(f"{name}    {note}"))
+        tech_layout.addWidget(tech_body)
+        tech_box.toggled.connect(tech_body.setVisible)
+        tech_body.hide()
         root.addWidget(tech_box)
 
-        # --- 更新日志组 ---
-        # QTextBrowser + setMarkdown:CHANGELOG.md 是 markdown 源文件,直接
-        # QPlainTextEdit 裸放等于让用户读源码;渲染后的标题/加粗/列表可读性好得多。
-        log_box = QGroupBox("更新日志")
+        # --- 更新日志组(次要长内容,默认折叠) ---
+        log_box = QGroupBox("更新日志(点击展开)")
+        log_box.setCheckable(True)
+        log_box.setChecked(False)
         log_layout = QVBoxLayout(log_box)
+        log_body = QWidget()
+        log_body_layout = QVBoxLayout(log_body)
+        log_body_layout.setContentsMargins(0, 0, 0, 0)
         self._changelog = QTextBrowser()
         self._changelog.setOpenExternalLinks(True)
         self._changelog.setMarkdown(metadata.get_changelog())
         self._changelog.setMinimumHeight(240)
-        log_layout.addWidget(self._changelog)
+        log_body_layout.addWidget(self._changelog)
+        log_layout.addWidget(log_body)
+        log_box.toggled.connect(log_body.setVisible)
+        log_body.hide()
         root.addWidget(log_box, stretch=1)
 
         # --- 快捷方式操作区 ---
@@ -252,6 +178,9 @@ class AboutTab(QWidget):
     def _open_log_directory() -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_log_dir())))
 
+    def _on_open_update_page(self) -> None:
+        self.open_update_page_requested.emit()
+
     def _add_desktop(self) -> None:
         r = shortcuts.create_desktop_shortcut()
         self._status_lbl.setText(r.message)
@@ -267,166 +196,3 @@ class AboutTab(QWidget):
     def _remove_start_menu(self) -> None:
         r = shortcuts.remove_start_menu_shortcut()
         self._status_lbl.setText(r.message)
-
-    # --- 检查更新 ---
-    def _on_check_clicked(self) -> None:
-        """点击检查更新:禁用按钮 + 清理上一轮新版提示 + 请求主窗口执行。"""
-        self.btn_check_update.setEnabled(False)
-        self._check_result_lbl.setStyleSheet("")
-        self._check_result_lbl.setText("检查中…")
-        self._hide_update_affordances()
-        self.check_requested.emit()
-
-    def _on_download_clicked(self) -> None:
-        self.download_requested.emit()
-
-    def _hide_update_affordances(self) -> None:
-        """隐藏"立即更新"按钮与新版更新内容区(新一轮检查时清理旧状态)。"""
-        self.btn_download_update.hide()
-        self._notes_lbl.hide()
-        self._notes_view.hide()
-
-    def display_check_result(self, kind: str, text: str) -> None:
-        """主窗口回调:显示检查结果并恢复按钮。
-
-        kind: "latest" | "available" | "failed"。latest/failed 会同时清掉
-        上一轮"立即更新"按钮(available 的完整展示走 display_update_available)。
-        text: 展示文本。
-        """
-        self.btn_check_update.setEnabled(True)
-        color = _RESULT_COLORS.get(kind)
-        self._check_result_lbl.setStyleSheet(f"color: {color}; font-weight: 600;" if color else "")
-        self._check_result_lbl.setText(text)
-        if kind != "available":
-            self._hide_update_affordances()
-
-    def display_update_available(self, result: UpdateCheckResult) -> None:
-        """主窗口回调:展示新版本(结果标签 + 更新内容 + 立即更新按钮)。"""
-        self.btn_check_update.setEnabled(True)
-        self._check_result_lbl.setStyleSheet(
-            f"color: {_RESULT_COLORS['available']}; font-weight: 600;"
-        )
-        self._check_result_lbl.setText(f"🆕 发现新版本 v{result.version},可立即更新")
-        notes = result.release_notes.strip()
-        if notes:
-            self._notes_view.setMarkdown(notes)
-            self._notes_lbl.show()
-            self._notes_view.show()
-        else:
-            self._notes_lbl.hide()
-            self._notes_view.hide()
-        self.btn_download_update.show()
-
-    def set_update_downloading(self, downloading: bool) -> None:
-        """下载进行中禁用检查/立即更新,防止重复触发;结束后恢复。"""
-        self.btn_check_update.setEnabled(not downloading)
-        self.btn_download_update.setEnabled(not downloading)
-
-    # --- GitHub 代理设置 ---
-    # 列表项数据:UserRole 存归一化代理 URL;UserRole+1 存是否默认项(True 不可移除)。
-    _ROLE_URL = Qt.ItemDataRole.UserRole
-    _ROLE_DEFAULT = Qt.ItemDataRole.UserRole + 1
-
-    def _populate_proxy_list(self) -> None:
-        """填充代理列表:默认候选 + 已保存的自定义项,并回显勾选状态。"""
-        self._proxy_list.clear()
-        from file_toolbox.updater.proxy import get_enabled_proxies
-
-        enabled = [p for p in get_enabled_proxies() if p]
-        enabled_set = set(enabled)
-
-        # 默认候选(标记为默认项,不可移除)
-        for proxy in DEFAULT_PROXIES:
-            item = QListWidgetItem(f"{proxy}    (默认)")
-            item.setData(self._ROLE_URL, proxy)
-            item.setData(self._ROLE_DEFAULT, True)
-            item.setCheckState(
-                Qt.CheckState.Checked if proxy in enabled_set else Qt.CheckState.Unchecked
-            )
-            self._proxy_list.addItem(item)
-
-        # 已保存但不在默认列表中的 → 自定义项
-        for proxy in enabled:
-            if proxy not in DEFAULT_PROXIES:
-                item = QListWidgetItem(proxy)
-                item.setData(self._ROLE_URL, proxy)
-                item.setData(self._ROLE_DEFAULT, False)
-                item.setCheckState(Qt.CheckState.Checked)
-                self._proxy_list.addItem(item)
-
-        # 若旧单值 gh_proxy 未迁移进列表(冗余兜底),忽略:已被 get_enabled_proxies 迁移。
-
-    def _select_all_proxies(self) -> None:
-        """全选:勾选列表中所有代理项。"""
-        for i in range(self._proxy_list.count()):
-            self._proxy_list.item(i).setCheckState(Qt.CheckState.Checked)
-
-    def _select_no_proxies(self) -> None:
-        """全不选:取消勾选所有代理项。"""
-        for i in range(self._proxy_list.count()):
-            self._proxy_list.item(i).setCheckState(Qt.CheckState.Unchecked)
-
-    def _add_custom_proxy(self) -> None:
-        """添加自定义代理到列表(归一化后追加,默认勾选,标记为非默认项可移除)。"""
-        from file_toolbox.updater.proxy import _normalize
-
-        raw = self._proxy_edit.text().strip()
-        if not raw:
-            self._proxy_status_lbl.setText("请输入代理地址")
-            return
-        proxy = _normalize(raw)
-        if not proxy:
-            self._proxy_status_lbl.setText("代理地址无效")
-            return
-        # 去重:已存在则不重复添加,仅勾选
-        for i in range(self._proxy_list.count()):
-            if self._proxy_list.item(i).data(self._ROLE_URL) == proxy:
-                self._proxy_list.item(i).setCheckState(Qt.CheckState.Checked)
-                self._proxy_edit.clear()
-                self._proxy_status_lbl.setText(f"已存在:{proxy}")
-                return
-        item = QListWidgetItem(proxy)
-        item.setData(self._ROLE_URL, proxy)
-        item.setData(self._ROLE_DEFAULT, False)
-        item.setCheckState(Qt.CheckState.Checked)
-        self._proxy_list.addItem(item)
-        self._proxy_edit.clear()
-        self._proxy_status_lbl.setText(f"已添加:{proxy}(记得保存)")
-
-    def _remove_selected_proxy(self) -> None:
-        """移除当前选中的自定义代理项(默认项不可移除,仅取消勾选)。"""
-        removed = 0
-        for item in self._proxy_list.selectedItems():
-            if item.data(self._ROLE_DEFAULT):
-                # 默认项:不可移除,仅取消勾选
-                item.setCheckState(Qt.CheckState.Unchecked)
-                continue
-            self._proxy_list.takeItem(self._proxy_list.row(item))
-            removed += 1
-        if removed:
-            self._proxy_status_lbl.setText(f"已移除 {removed} 个自定义代理(记得保存)")
-        else:
-            self._proxy_status_lbl.setText("无可移除的自定义项(默认项不可移除)")
-
-    def _save_proxy(self) -> None:
-        """分别保存 URL-prefix 候选与 standard forward proxy。"""
-        enabled: list[str] = []
-        for i in range(self._proxy_list.count()):
-            item = self._proxy_list.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                url = item.data(self._ROLE_URL)
-                if isinstance(url, str) and url:
-                    enabled.append(url)
-        # 去重保序(防重复勾选)
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for p in enabled:
-            if p not in seen:
-                seen.add(p)
-                deduped.append(p)
-        settings.set("gh_proxies", deduped)
-        settings.set("forward_proxy", self._forward_proxy_edit.text().strip())
-        n = len(deduped)
-        self._proxy_status_lbl.setText(
-            f"已保存 {n} 个代理" if n else "已保存(无勾选 = 直连 GitHub)"
-        )
