@@ -142,15 +142,22 @@ def test_about_tab_has_no_update_actions(app):
 
 
 def test_about_tab_tech_and_changelog_collapsed_by_default(app):
-    """技术路线与完整更新日志为次要长内容,默认折叠。"""
-    from PySide6.QtWidgets import QGroupBox
+    """技术路线与完整更新日志为次要长内容,默认真折叠(内容隐藏)。"""
+    from PySide6.QtWidgets import QGroupBox, QWidget
 
     tab = AboutTab()
+    tab.show()
+    app.processEvents()
     boxes = {b.title(): b for b in tab.findChildren(QGroupBox)}
-    tech = next(t for t in boxes if t.startswith("技术路线"))
-    changelog = next(t for t in boxes if t.startswith("更新日志"))
-    assert boxes[tech].isChecked() is False
-    assert boxes[changelog].isChecked() is False
+    tech = boxes[next(t for t in boxes if t.startswith("技术路线"))]
+    changelog = boxes[next(t for t in boxes if t.startswith("更新日志"))]
+    assert tech.isChecked() is False and changelog.isChecked() is False
+    assert [c for c in tech.findChildren(QWidget) if c.isVisible()] == []
+    assert [c for c in changelog.findChildren(QWidget) if c.isVisible()] == []
+    # 展开恢复可见
+    changelog.setChecked(True)
+    app.processEvents()
+    assert [c for c in changelog.findChildren(QWidget) if c.isVisible()] != []
 
 
 # ---------------------------------------------------------------------------

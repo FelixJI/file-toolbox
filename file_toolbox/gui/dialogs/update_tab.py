@@ -101,15 +101,25 @@ class UpdateTab(QWidget):
         layout.addWidget(self._notes_view, stretch=1)
 
         # --- 高级:更新源与代理(默认折叠,不淹没版本与主动作) ---
+        # checkable QGroupBox 未勾选只禁用不隐藏;内容随 toggled 真正显隐,
+        # 构造末尾显式应用一次初始折叠态(toggled 只在变更时触发)。
         self._proxy_box = QGroupBox("高级:更新源与代理(点击展开)")
         self._proxy_box.setCheckable(True)
         self._proxy_box.setChecked(False)
         self._build_proxy_ui(self._proxy_box)
+        self._proxy_box.toggled.connect(self._on_proxy_box_toggled)
+        self._on_proxy_box_toggled(False)
         layout.addWidget(self._proxy_box)
 
     # --- 代理设置(自关于页迁移,语义不变) ---
     _ROLE_URL = Qt.ItemDataRole.UserRole
     _ROLE_DEFAULT = Qt.ItemDataRole.UserRole + 1
+
+    def _on_proxy_box_toggled(self, checked: bool) -> None:
+        """折叠组只保留标题行,内容随勾选真正显隐(不淹没主要动作)。"""
+        # 内容行多为嵌套布局(layout 项无 widget),按后代 widget 统一处理。
+        for widget in self._proxy_box.findChildren(QWidget):
+            widget.setVisible(checked)
 
     def _build_proxy_ui(self, box: QGroupBox) -> None:
         proxy_layout = QVBoxLayout(box)

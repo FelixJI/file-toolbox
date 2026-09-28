@@ -105,12 +105,20 @@ class AboutTab(QWidget):
         root.addWidget(update_box)
 
         # --- 技术路线组(次要长内容,默认折叠) ---
+        # checkable QGroupBox 未勾选时只禁用不隐藏子控件;用内容容器 +
+        # toggled→setVisible 实现真正的折叠/展开。
         tech_box = QGroupBox("技术路线(点击展开)")
         tech_box.setCheckable(True)
         tech_box.setChecked(False)
         tech_layout = QVBoxLayout(tech_box)
+        tech_body = QWidget()
+        tech_body_layout = QVBoxLayout(tech_body)
+        tech_body_layout.setContentsMargins(0, 0, 0, 0)
         for name, note in metadata.TECH_STACK:
-            tech_layout.addWidget(QLabel(f"{name}    {note}"))
+            tech_body_layout.addWidget(QLabel(f"{name}    {note}"))
+        tech_layout.addWidget(tech_body)
+        tech_box.toggled.connect(tech_body.setVisible)
+        tech_body.hide()
         root.addWidget(tech_box)
 
         # --- 更新日志组(次要长内容,默认折叠) ---
@@ -118,11 +126,17 @@ class AboutTab(QWidget):
         log_box.setCheckable(True)
         log_box.setChecked(False)
         log_layout = QVBoxLayout(log_box)
+        log_body = QWidget()
+        log_body_layout = QVBoxLayout(log_body)
+        log_body_layout.setContentsMargins(0, 0, 0, 0)
         self._changelog = QTextBrowser()
         self._changelog.setOpenExternalLinks(True)
         self._changelog.setMarkdown(metadata.get_changelog())
         self._changelog.setMinimumHeight(240)
-        log_layout.addWidget(self._changelog)
+        log_body_layout.addWidget(self._changelog)
+        log_layout.addWidget(log_body)
+        log_box.toggled.connect(log_body.setVisible)
+        log_body.hide()
         root.addWidget(log_box, stretch=1)
 
         # --- 快捷方式操作区 ---

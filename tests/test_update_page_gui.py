@@ -195,7 +195,17 @@ def test_finish_without_pending_collapses_action(app):
 
 
 def test_proxy_group_collapsed_by_default(app):
-    assert UpdateTab()._proxy_box.isChecked() is False
+    """折叠是真隐藏而非仅禁用:checkable QGroupBox 未勾选时内容仍会显示。"""
+    from PySide6.QtWidgets import QWidget
+
+    tab = UpdateTab()
+    tab.show()
+    app.processEvents()
+    visible = [c for c in tab._proxy_box.findChildren(QWidget) if c.isVisible()]
+    assert visible == []
+    tab._proxy_box.setChecked(True)
+    app.processEvents()
+    assert [c for c in tab._proxy_box.findChildren(QWidget) if c.isVisible()] != []
 
 
 def _expand_proxy(tab: UpdateTab) -> None:
