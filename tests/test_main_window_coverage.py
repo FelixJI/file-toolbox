@@ -65,12 +65,12 @@ def test_history_button_opens_current_tab_history(win, monkeypatch):
     assert opened == ["pdf"]
 
 
-def test_history_button_disabled_on_about_tab(win):
+def test_history_button_disabled_on_update_page(win):
     win._tabs.setCurrentIndex(9)
     assert win.btn_history.isEnabled() is False
 
 
-def test_history_button_noop_on_tab_without_history(win, monkeypatch):
+def test_history_button_noop_on_update_page(win, monkeypatch):
     dialog = MagicMock()
     monkeypatch.setattr("file_toolbox.gui.dialogs.history_dialog.HistoryDialog", dialog)
     win._tabs.setCurrentIndex(9)
@@ -729,11 +729,14 @@ def test_shutdown_survives_update_worker_close_failure(win, monkeypatch):
     assert quits == []  # 未能确认线程状态时不能直接退出
 
 
-def test_update_progress_without_dialog_is_noop(win):
-    win._update_dialog = None
-
+def test_update_progress_from_stale_request_is_noop(win):
+    """旧请求的进度不得触碰当前更新页展示。"""
+    page = _materialize_update_page(win)
     win._download_request = UpdateRequest()
-    win._on_update_progress(win._download_request, 80)  # 不应抛异常
+    stale = UpdateRequest()
+    win._on_update_progress(stale, 90)
+    assert page._progress.value() == -1  # Qt 进度条初值;未被旧请求触碰
+    assert "校验" not in page._status_lbl.text()
 
 
 def test_update_progress_partial_value_keeps_download_label(win):

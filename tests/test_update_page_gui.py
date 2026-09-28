@@ -510,3 +510,77 @@ def test_repeated_download_clicks_single_transaction(app, monkeypatch, tmp_path)
         coordinator.gate.set()
         win._update_worker.quit()
         win._update_worker.wait(2000)
+
+
+def test_lazy_constructed_business_tab_stays_locked_during_download(app, monkeypatch, tmp_path):
+    """下载期间懒构造的业务页必须按锁状态禁用(审阅修复回归,#129 AC4)。"""
+    monkeypatch.chdir(tmp_path)
+    coordinator = GatedCoordinator(_available("8.0.0"))
+    win = MainWindow(coordinator)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Apply)
+    win._update_worker.start()
+    try:
+        win._tabs.setCurrentIndex(9)
+        win._on_update_checked(_available("8.0.0"))
+        win._start_download()
+        _wait_until(lambda: coordinator.download_calls == 1)
+
+        assert win._mkdir_tab is None  # 尚未构造
+        win._tabs.setCurrentIndex(1)  # 下载中切到未打开过的业务页
+        app.processEvents()
+
+        assert win._mkdir_tab is not None
+        assert win._mkdir_tab.isEnabled() is False, "懒构造业务页在下载期间必须禁用"
+        assert win._update_tab.isEnabled() is True
+    finally:
+        coordinator.gate.set()
+        win._update_worker.quit()
+        win._update_worker.wait(2000)
+
+
+def test_uncertain_apply_result_shown_on_update_page(app, monkeypatch, tmp_path):
+    """apply 阶段失败(结果不确定):页面如实呈现且不复原重试入口(审阅修复回归)。"""
+    monkeypatch.chdir(tmp_path)
+    coordinator = GatedCoordinator(_available("8.0.0"))
+    win = MainWindow(coordinator)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Apply)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    win._update_worker.start()
+    try:
+        win._tabs.setCurrentIndex(9)
+        win._on_update_checked(_available("8.0.0"))
+        win._start_download()
+        request = win._download_request
+        assert request is not None
+        request.begin_apply()  # 已跨过不可取消边界
+        win._on_update_applied(request, UpdateApplyResult(UpdateApplyStatus.FAILED, "接管结果未知"))
+
+        assert "不确定" in win._update_tab._status_lbl.text()
+        assert win._update_tab.btn_cancel_update.isHidden() is True
+        # 不复原重试入口:防止重复提交
+        assert win._update_tab.btn_check_update.isEnabled() is False
+        assert win._update_tab.btn_download_update.isEnabled() is False
+    finally:
+        coordinator.gate.set()
+        win._update_worker.quit()
+        win._update_worker.wait(2000)
+
+
+def test_update_page_lazy_construction_replays_active_download(app, monkeypatch, tmp_path):
+    """页面晚于下载创建:构造后回放下载中状态与进度(AC3 覆盖缺口,审阅补测)。"""
+    monkeypatch.chdir(tmp_path)
+    win = MainWindow(CountingCoordinator(_available("8.0.0")))
+    request = UpdateRequest()
+    win._on_update_checked(_available("8.0.0"))
+    win._download_request = request
+    win._last_progress = 62
+    win._set_business_tabs_locked(True)
+
+    win._tabs.setCurrentIndex(9)
+    app.processEvents()
+
+    assert win._update_tab._progress.isHidden() is False
+    assert win._update_tab._progress.value() == 62
+    assert win._update_tab.btn_cancel_update.isHidden() is False
+    assert win._update_tab.btn_check_update.isEnabled() is False
+    win._set_business_tabs_locked(False)

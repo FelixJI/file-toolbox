@@ -361,6 +361,11 @@ class UpdateTab(QWidget):
         self.btn_cancel_update.hide()
         self._set_status("正在应用更新,已无法取消;完成后应用将自动重启。")
 
+    def set_uncertain(self, message: str) -> None:
+        """apply 提交后结果不确定:如实呈现,保持动作禁用以防重复提交。"""
+        self.btn_cancel_update.hide()
+        self._set_status(f"⚠ {message}", "failed")
+
     def finish_download(self, *, restored: bool) -> None:
         """下载事务结束(取消/失败);恢复可重试入口。"""
         self._progress.hide()

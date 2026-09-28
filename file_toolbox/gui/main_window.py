@@ -293,6 +293,10 @@ class MainWindow(QMainWindow):
             self._lazy_specs[index] = spec
             raise
         setattr(self, attr, tab)
+        if attr not in ("_update_tab", "_about_tab") and self._business_tabs_locked:
+            # 下载期间允许切页查看,但懒构造的业务页必须按锁状态禁用,
+            # 不能在下载中开始新的业务写入(#129 AC4)。
+            tab.setEnabled(False)
         current = self._tabs.currentIndex()
         self._tabs.blockSignals(True)
         self._tabs.removeTab(index)
@@ -372,14 +376,14 @@ class MainWindow(QMainWindow):
         )
 
     def _on_check_requested(self) -> None:
-        """关于页请求检查更新:确保 worker 运行并投递 do_check。"""
+        """更新页请求检查更新:确保 worker 运行并投递 do_check。"""
         if not self._update_worker.isRunning():
             # 非便携形态(pip/dev):按需启动 worker(自动检查不会启)
             self._update_worker.start()
         self._trigger_check()
 
     def _on_download_requested(self) -> None:
-        """关于页"立即更新":确保 worker 运行后复用与状态栏横幅一致的下载流程。"""
+        """确保 worker 运行后复用 _start_download(旧关于页入口移除后供测试直调)。"""
         if not self._update_worker.isRunning():
             self._update_worker.start()
         self._start_download()
@@ -406,7 +410,10 @@ class MainWindow(QMainWindow):
         self._tabs.setCurrentIndex(_UPDATE_TAB_INDEX)
 
     def _start_download(self) -> None:
-        """用户点击 banner/关于页"立即更新" → 弹进度对话框 + 向 worker 投递下载请求。"""
+        """更新页"下载并更新" → 确认后锁业务页并向 worker 投递下载请求。
+
+        进度、校验提示与取消都承载在更新页内(#129),不再弹独立进度对话框。
+        """
         if (
             self._pending_update is None
             or self._download_request is not None
@@ -523,6 +530,12 @@ class MainWindow(QMainWindow):
         if result.status is UpdateApplyStatus.FAILED and request.applying:
             self._download_request = request
             self.statusBar().showMessage("更新应用结果不确定，请检查更新状态后重新启动应用。")
+            if self._update_tab is not None:
+                # 页面必须如实呈现"结果不确定":不复原重试入口(防重复提交),
+                # 也不能继续宣称"正在应用,完成后将重启"。
+                self._update_tab.set_uncertain(
+                    "更新应用结果不确定，请检查更新状态后重新启动应用；不要重复提交更新。"
+                )
             QMessageBox.warning(
                 self,
                 "更新应用结果不确定",
@@ -598,10 +611,10 @@ class MainWindow(QMainWindow):
         elif target:
             message = (
                 f"上次更新未确认完成: 当前 v{current}，目标 v{target}；"
-                "如仍为旧版请在关于页重新检查更新"
+                "如仍为旧版请到“更新”页面重新检查更新"
             )
         else:
-            message = "上次更新结果未知，请在关于页检查更新确认当前版本"
+            message = "上次更新结果未知，请到“更新”页面检查更新确认当前版本"
         _logger.info("更新对账: %s (sdk_available=%s)", message, state.available)
         self._startup_outcome = message
         self.statusBar().showMessage(message, 15000)
