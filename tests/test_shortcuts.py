@@ -260,6 +260,37 @@ def test_gui_command():
     assert "-m" in args and "file_toolbox" in args and "gui" in args
 
 
+def test_gui_command_packaged_targets_root_stub(tmp_path, monkeypatch):
+    """打包形态:目标是 Velopack 根 stub exe,参数为空(#128 AC7)。
+
+    Nuitka 的 sys.executable 是合成的 <dist>/python.exe(0.3.5 实测文件不存
+    在),旧实现创建的快捷方式指向不存在的目标。
+    """
+    (tmp_path / "FileToolbox.exe").write_bytes(b"stub")
+    (tmp_path / "current").mkdir()
+    (tmp_path / "current" / "FileToolbox.exe").write_bytes(b"real")
+    monkeypatch.setattr(shortcuts.sys, "executable", str(tmp_path / "current" / "python.exe"))
+    monkeypatch.setattr("file_toolbox.common.runtime.is_packaged_runtime", lambda: True)
+
+    exe, args = _gui_command()
+
+    assert Path(exe) == tmp_path / "FileToolbox.exe"
+    assert args == []
+
+
+def test_gui_command_packaged_falls_back_to_current_exe(tmp_path, monkeypatch):
+    """根 stub 缺失时退回 current/ 下的真实 exe(路径同样跨升级稳定)。"""
+    (tmp_path / "current").mkdir()
+    (tmp_path / "current" / "FileToolbox.exe").write_bytes(b"real")
+    monkeypatch.setattr(shortcuts.sys, "executable", str(tmp_path / "current" / "python.exe"))
+    monkeypatch.setattr("file_toolbox.common.runtime.is_packaged_runtime", lambda: True)
+
+    exe, args = _gui_command()
+
+    assert Path(exe) == tmp_path / "current" / "FileToolbox.exe"
+    assert args == []
+
+
 # ---------------------------------------------------------------------------
 # _create_windows_lnk:COM 失败(行 99-101)
 # ---------------------------------------------------------------------------

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterable
-from queue import Queue
+from queue import Empty, Queue
 from threading import Event, Thread
 from typing import Protocol, cast
 
@@ -22,6 +23,11 @@ from file_toolbox.updater.transport import forward_proxy_environment
 _logger = logging.getLogger(__name__)
 _DEFAULT_FEED = "https://github.com/FelixJI/file-toolbox/releases/latest/download/"
 
+# 竞速检查中首个成功结果为 LATEST 时,再为其余候选保留的有限确认窗口:
+# 防止陈旧镜像抢先返回"已是最新"掩盖直连/其他镜像上的真实新版;窗口有界,
+# 不退回无界等待全部慢镜像(见 #128 AC3 契约)。
+_LATEST_GRACE_SECONDS = 2.0
+
 
 class _Asset(Protocol):
     Version: str
@@ -34,6 +40,8 @@ class _UpdateInfo(Protocol):
 
 class _Manager(Protocol):
     def check_for_updates(self) -> object | None: ...
+
+    def get_current_version(self) -> str: ...
 
     def download_updates(
         self, update: object, progress_callback: Callable[[int], None] | None = None
@@ -55,13 +63,35 @@ def _default_manager_factory(source: str) -> _Manager:
     return cast(_Manager, velopack.UpdateManager(velopack.HttpSource(source), options))
 
 
+def _is_layout_error(error: BaseException) -> bool:
+    """是否为"本机没有有效 Velopack 安装布局"错误(与网络失败区分)。
+
+    SDK 1.2.0 的错误文本 ``This application is not properly installed: Could not
+    auto-locate app manifest``;按特征片段匹配,避免绑定完整措辞。
+    """
+
+    text = str(error)
+    return "not properly installed" in text or "auto-locate app manifest" in text
+
+
+def _safe_current_version(manager: _Manager) -> str:
+    """读 SDK 本机当前版本;异常时返回空串,不让诊断信息破坏检查结果。"""
+
+    try:
+        return str(manager.get_current_version())
+    except Exception:  # noqa: BLE001 — locator 诊断读取失败不影响检查主流程
+        _logger.info("读取 SDK 当前版本失败", exc_info=True)
+        return ""
+
+
 class VelopackUpdateCoordinator:
     """选择单一 feed candidate，并把 SDK 对象封装在模块内。
 
-    多候选且未配置 forward proxy 时,check() 并发探测全部候选,最先成功者
-    (即最快可用者)被固定为该轮检查与下载的更新源;单候选或配置了 forward
-    proxy 时按候选顺序串行尝试(进程级代理环境变量受互斥锁保护,并发只会
-    退化成串行,不如直接走串行路径)。
+    多候选且未配置 forward proxy 时,check() 并发探测全部候选:先到的
+    AVAILABLE 立即胜出并固定为该轮检查与下载的更新源;首个 LATEST 只在
+    有界宽限窗口内让位给更晚的 AVAILABLE(防陈旧镜像)。单候选或配置了
+    forward proxy 时按候选顺序串行尝试(进程级代理环境变量受互斥锁保护,
+    并发只会退化成串行,不如直接走串行路径)。
     """
 
     def __init__(
@@ -86,17 +116,29 @@ class VelopackUpdateCoordinator:
             return self._check_racing()
         return self._check_sequential()
 
-    def _accept(self, manager: _Manager, update: object) -> UpdateCheckResult:
+    def _accept(self, manager: _Manager, update: object, source: str) -> UpdateCheckResult:
         """首个成功候选的结果映射(LATEST 不绑定 manager,下载需先 AVAILABLE)。"""
+
+        current_version = _safe_current_version(manager)
         if update is None:
-            return UpdateCheckResult(UpdateCheckStatus.LATEST)
-        info = cast(_UpdateInfo, update)
+            return UpdateCheckResult(
+                UpdateCheckStatus.LATEST, current_version=current_version, source=source
+            )
+        info = cast("_UpdateInfo", update)
         self._selected_manager = manager
         self._selected_update = update
+        _logger.info(
+            "更新检查选定候选 source=%s current=%s target=%s",
+            source,
+            current_version,
+            info.TargetFullRelease.Version,
+        )
         return UpdateCheckResult(
             UpdateCheckStatus.AVAILABLE,
             version=info.TargetFullRelease.Version,
             release_notes=info.TargetFullRelease.NotesMarkdown,
+            current_version=current_version,
+            source=source,
         )
 
     @staticmethod
@@ -104,6 +146,14 @@ class VelopackUpdateCoordinator:
         return UpdateCheckResult(
             UpdateCheckStatus.FAILED,
             message="无法连接更新源，请检查网络或代理设置",
+        )
+
+    @staticmethod
+    def _unsupported() -> UpdateCheckResult:
+        return UpdateCheckResult(
+            UpdateCheckStatus.UNSUPPORTED,
+            message="当前运行形态未检测到有效的 Velopack 安装布局，不支持应用内更新；"
+            "源码/开发运行请以便携发行包运行以获得自动更新",
         )
 
     def _probe(self, source: str, started: Event, outcomes: Queue[_ProbeOutcome]) -> None:
@@ -119,11 +169,12 @@ class VelopackUpdateCoordinator:
         outcomes.put((source, (manager, update)))
 
     def _check_racing(self) -> UpdateCheckResult:
-        """并发探测全部候选,先成功者胜出。
+        """并发探测全部候选:先到的 AVAILABLE 立即胜出。
 
+        首个成功结果为 LATEST 时,再等待其余候选至多 ``_LATEST_GRACE_SECONDS``
+        (或全部返回):期间出现任一 AVAILABLE 则改判该结果,避免陈旧镜像的
+        "已是最新"掩盖真实新版;超时仍无更新则维持 LATEST,不无界等待。
         线程为 daemon:落败线程任其自行超时退出,不阻塞 check() 返回与进程退出。
-        即使绑定层在阻塞网络调用期间不释放 GIL(未证实),也只是退化为按启动
-        顺序的串行尝试,语义仍是"先成功者胜",不会劣于旧实现。
         """
         started = Event()
         outcomes: Queue[_ProbeOutcome] = Queue()
@@ -134,13 +185,33 @@ class VelopackUpdateCoordinator:
         for thread in threads:
             thread.start()
         started.set()
-        for _ in threads:
-            source, payload = outcomes.get()
+        latest: tuple[_Manager, object, str] | None = None
+        remaining = len(threads)
+        grace_deadline: float | None = None
+        while remaining > 0:
+            timeout = (
+                None if grace_deadline is None else max(0.0, grace_deadline - time.monotonic())
+            )
+            try:
+                source, payload = outcomes.get(timeout=timeout)
+            except Empty:
+                break  # LATEST 宽限窗口耗尽,不再等待其余慢镜像
+            remaining -= 1
             if isinstance(payload, Exception):
+                if _is_layout_error(payload):
+                    # 安装布局缺失对所有候选同样失败,重试网络无意义。
+                    return self._unsupported()
                 _logger.info("更新源不可用 source=%s: %s", source, payload)
                 continue
             manager, update = payload
-            return self._accept(manager, update)
+            if update is not None:
+                return self._accept(manager, update, source)
+            if latest is None:
+                latest = (manager, update, source)
+                grace_deadline = time.monotonic() + _LATEST_GRACE_SECONDS
+        if latest is not None:
+            manager, update, source = latest
+            return self._accept(manager, update, source)
         return self._all_failed()
 
     def _check_sequential(self) -> UpdateCheckResult:
@@ -150,9 +221,11 @@ class VelopackUpdateCoordinator:
                     manager = self._manager_factory(source)
                     update = manager.check_for_updates()
             except Exception as error:  # SDK/网络边界统一映射为项目结果
+                if _is_layout_error(error):
+                    return self._unsupported()
                 _logger.info("更新源不可用 source=%s: %s", source, error)
                 continue
-            return self._accept(manager, update)
+            return self._accept(manager, update, source)
         return self._all_failed()
 
     def download_and_apply(
@@ -161,11 +234,22 @@ class VelopackUpdateCoordinator:
         *,
         request: UpdateRequest | None = None,
         before_apply: Callable[[], None] | None = None,
+        expected_version: str | None = None,
     ) -> UpdateApplyResult:
-        """下载并交由 Velopack 安排 apply/restart。"""
+        """下载并交由 Velopack 安排 apply/restart。
+
+        ``expected_version``: 调用方确认下载时展示给用户的版本;与本轮实际
+        绑定的候选版本不一致时直接失败,防止过期 UI 状态触发错误目标的更新。
+        """
 
         if self._selected_manager is None or self._selected_update is None:
             return UpdateApplyResult(UpdateApplyStatus.FAILED, "请先检查更新")
+        bound_version = cast("_UpdateInfo", self._selected_update).TargetFullRelease.Version
+        if expected_version is not None and bound_version != expected_version:
+            return UpdateApplyResult(
+                UpdateApplyStatus.FAILED,
+                f"更新候选已变化（确认 v{expected_version}，当前绑定 v{bound_version}），请重新检查更新",
+            )
         request = request or UpdateRequest()
         manager, update = self._selected_manager, self._selected_update
 

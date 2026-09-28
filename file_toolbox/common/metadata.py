@@ -15,6 +15,22 @@ REPO_URL = "https://github.com/FelixJI/file-toolbox"
 LICENSE = "MIT"
 PYTHON_REQUIREMENT = ">=3.13"
 
+
+def runtime_version() -> str:
+    """当前运行的展示版本:打包态以 Velopack 安装清单为准,其余回落 importlib。
+
+    打包产物不携带 dist-info,importlib 在该形态会得到 ``0.0.0+unknown``;
+    Velopack locator 的 ``current/sq.version`` 才是更新器比对的真实身份。
+    """
+
+    from file_toolbox.updater.runtime_support import packaged_version
+
+    sdk_version = packaged_version()
+    if sdk_version:
+        return sdk_version
+    return VERSION
+
+
 # (组件名, 说明)元组列表 —— UI 控制格式化,数据不绑死呈现方式
 # 说明只写用途,不写版本(版本随依赖漂移,易过期;版本要求见"基本信息"区)
 TECH_STACK: list[tuple[str, str]] = [

@@ -148,7 +148,6 @@ def test_about_tab_check_signal_wired_after_lazy_construction(win, monkeypatch):
     assert win._about_tab is not None
     win._about_tab.check_requested.emit()
     assert starts == [1]
-    assert win._manual_check_pending is True
 
 
 def test_trigger_check_noop_when_worker_not_running(win, monkeypatch):
@@ -164,7 +163,6 @@ def test_on_check_requested_starts_worker(win, monkeypatch):
     monkeypatch.setattr(win, "_trigger_check", lambda: None)
     win._on_check_requested()
     assert starts == [1]
-    assert win._manual_check_pending is True
 
 
 def test_progress_clamps_to_percentage(win):
@@ -561,22 +559,17 @@ def _materialize_about(win):
     return win._about_tab
 
 
-def test_on_update_checked_ignores_auto_check_noise(win):
-    displayed: list[tuple] = []
+def test_on_update_checked_auto_result_reaches_about(win):
+    """自动/手动统一状态:自动检查结果同样回显已构造的关于页(#128 AC2)。"""
     about = _materialize_about(win)
-    win._manual_check_pending = False
 
-    import pytest as _pytest
+    win._on_update_checked(UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9"))
 
-    with _pytest.MonkeyPatch.context() as mp:
-        mp.setattr(about, "display_check_result", lambda *args: displayed.append(args))
-        win._on_update_checked(UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9"))
-
-    assert displayed == []
+    assert "9.9.9" in about._check_result_lbl.text()
+    assert about.btn_download_update.isHidden() is False
 
 
 def test_on_update_checked_requires_constructed_about_tab(win):
-    win._manual_check_pending = True
     win._about_tab = None
 
     win._on_update_checked(UpdateCheckResult(UpdateCheckStatus.LATEST))  # 防御路径不抛异常
@@ -594,7 +587,6 @@ def test_on_update_checked_displays_manual_results(win, status, version, expecte
     displayed: list[tuple] = []
     available_results: list[UpdateCheckResult] = []
     about = _materialize_about(win)
-    win._manual_check_pending = True
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(about, "display_check_result", lambda *args: displayed.append(args))
@@ -672,8 +664,8 @@ def test_on_download_requested_ensures_worker_and_starts_download(win, monkeypat
 
 def test_about_tab_lazy_construction_receives_pending_update(win):
     """自动检查先发现新版、用户之后才打开关于页 → 构造后补显新版提示。"""
-    win._pending_update = UpdateCheckResult(
-        UpdateCheckStatus.AVAILABLE, version="9.9.9", release_notes="- 新功能"
+    win._on_update_checked(
+        UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9", release_notes="- 新功能")
     )
     win._tabs.setCurrentIndex(9)
     about = win._about_tab

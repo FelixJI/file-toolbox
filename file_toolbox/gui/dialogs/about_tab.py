@@ -68,7 +68,7 @@ class AboutTab(QWidget):
         title.setFont(f)
         root.addWidget(title)
 
-        version_lbl = QLabel(f"版本 {metadata.VERSION}")
+        version_lbl = QLabel(f"版本 {metadata.runtime_version()}")
         version_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(version_lbl)
 

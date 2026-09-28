@@ -71,6 +71,16 @@ def current_data_root() -> Path:
     return _data_dir()
 
 
+def current_data_root_policy() -> DataRootPolicy:
+    """当前生效的数据根 policy(未设置时为 CLI cwd policy)。
+
+    供需要把 policy 传播到其他线程的调用方捕获快照:ContextVar 不随线程
+    继承,worker 线程内访问数据根前必须用捕获的 policy 重新进入上下文。
+    """
+
+    return _POLICY.get() or CliDataRootPolicy()
+
+
 def get_data_dir() -> Path:
     """获取(并创建)数据根目录。供模板等持久化文件落位。"""
     d = _data_dir()
