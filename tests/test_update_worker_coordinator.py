@@ -103,6 +103,23 @@ def test_worker_default_factory_reuses_injected_coordinator() -> None:
     assert coordinator.checked is True
 
 
+def test_factory_failure_maps_to_failed_result() -> None:
+    """工厂装配失败(settings IO 等)也 emit FAILED,关于页不卡在"检查中…"。"""
+
+    def broken_factory() -> FakeCoordinator:
+        raise OSError("settings 读取失败")
+
+    worker = UpdateWorker(FakeCoordinator(), coordinator_factory=broken_factory)
+    checked: list[UpdateCheckResult] = []
+    worker.checked.connect(checked.append, Qt.ConnectionType.DirectConnection)
+
+    worker.do_check()
+
+    assert len(checked) == 1
+    assert checked[0].status is UpdateCheckStatus.FAILED
+    assert "settings 读取失败" in checked[0].message
+
+
 class ExpectedVersionRecorder(FakeCoordinator):
     """记录 download_and_apply 收到的 expected_version(不传时为哨兵)。"""
 

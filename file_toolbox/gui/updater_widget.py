@@ -126,9 +126,11 @@ class UpdateWorker(QThread):
         QueuedConnection) 按名跨线程投递,PySide6 meta-object 系统只能识别
         被装饰为槽的方法;不加装饰器时投递事件会被静默丢弃,表现为"检查无反应"。
         """
-        coordinator = self._coordinator_factory()
-        self._check_coordinator = coordinator
+        # 工厂与 check 同在 try 内:装配失败(如 settings IO 异常)也必须 emit
+        # checked 映射为 FAILED,否则关于页停留在"检查中…"且按钮无法恢复。
         try:
+            coordinator = self._coordinator_factory()
+            self._check_coordinator = coordinator
             result = coordinator.check()
         except Exception as error:
             _logger.warning("检查更新失败", exc_info=True)
