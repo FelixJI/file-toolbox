@@ -15,6 +15,7 @@ parent(带 parent 的 QObject 禁止跨线程移动);否则投递的 do_check �
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from threading import Lock
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
@@ -84,16 +85,30 @@ class UpdateWorker(QThread):
     _download_requested = Signal(object)
     checked = Signal(object)  # UpdateCheckResult
 
-    def __init__(self, coordinator: UpdateCoordinator) -> None:
+    def __init__(
+        self,
+        coordinator: UpdateCoordinator,
+        *,
+        coordinator_factory: Callable[[], UpdateCoordinator] | None = None,
+    ) -> None:
         super().__init__()
-        self._coordinator = coordinator
+        self._coordinator_factory = coordinator_factory or (lambda: coordinator)
+        # 最近一轮检查使用的 coordinator;下载绑定它,不受后续新检查影响
+        # (工厂每轮生成新实例时,进行中的下载与新一轮检查天然隔离)。
+        self._check_coordinator: UpdateCoordinator = coordinator
         self._request_lock = Lock()
         self._active_request: UpdateRequest | None = None
+        self._active_expected_version: str | None = None
         self._download_requested.connect(
             self.do_download_and_apply, Qt.ConnectionType.QueuedConnection
         )
         # queued 投递按接收者亲和性派发;移入自身线程后 do_check 才在 worker 执行。
         self.moveToThread(self)
+
+    @property
+    def _coordinator(self) -> UpdateCoordinator:
+        """最近一轮检查的 coordinator(测试探针与预置候选使用)。"""
+        return self._check_coordinator
 
     def run(self) -> None:
         """启动事件循环,等待方法投递(do_check / do_download)。"""
@@ -103,15 +118,20 @@ class UpdateWorker(QThread):
     def do_check(self) -> None:
         """检查更新(在 worker 线程执行)。
 
-        始终 emit checked 反馈结果(供手动检查 UI);有新版额外 emit ready。
-        自动检查场景只消费 ready(忽略 checked),行为不变。
+        每轮经工厂重新装配 coordinator:代理/forward proxy 设置保存后,
+        下一轮检查即使用新快照,无需重启窗口。始终 emit checked 反馈结果;
+        有新版额外 emit ready。
 
         必须加 @Slot():主窗口用 QMetaObject.invokeMethod(worker, "do_check",
         QueuedConnection) 按名跨线程投递,PySide6 meta-object 系统只能识别
         被装饰为槽的方法;不加装饰器时投递事件会被静默丢弃,表现为"检查无反应"。
         """
+        # 工厂与 check 同在 try 内:装配失败(如 settings IO 异常)也必须 emit
+        # checked 映射为 FAILED,否则关于页停留在"检查中…"且按钮无法恢复。
         try:
-            result = self._coordinator.check()
+            coordinator = self._coordinator_factory()
+            self._check_coordinator = coordinator
+            result = coordinator.check()
         except Exception as error:
             _logger.warning("检查更新失败", exc_info=True)
             result = UpdateCheckResult(UpdateCheckStatus.FAILED, message=str(error))
@@ -119,13 +139,18 @@ class UpdateWorker(QThread):
         if result.status is UpdateCheckStatus.AVAILABLE:
             self.ready.emit(result)
 
-    def start_download(self) -> UpdateRequest | None:
-        """在调用线程保留请求后再投递;运行中与已安排 apply 时拒绝重复请求。"""
+    def start_download(self, expected_version: str | None = None) -> UpdateRequest | None:
+        """在调用线程保留请求后再投递;运行中与已安排 apply 时拒绝重复请求。
+
+        ``expected_version``: 用户确认下载时展示的版本;worker 把它传给
+        coordinator 做候选绑定校验,防止过期 UI 状态触发错误目标的更新。
+        """
         with self._request_lock:
             if self._active_request is not None:
                 return None
             request = UpdateRequest()
             self._active_request = request
+            self._active_expected_version = expected_version
         self._download_requested.emit(request)
         return request
 
@@ -135,6 +160,8 @@ class UpdateWorker(QThread):
         with self._request_lock:
             if request is not self._active_request or not request.claim():
                 return
+            coordinator = self._check_coordinator
+            expected_version = self._active_expected_version
 
         def report_progress(value: int) -> None:
             request.check_cancelled()
@@ -142,11 +169,21 @@ class UpdateWorker(QThread):
 
         try:
             request.check_cancelled()
-            result = self._coordinator.download_and_apply(
-                progress=report_progress,
-                request=request,
-                before_apply=lambda: self.applying.emit(request),
-            )
+            # expected_version 仅在有确认版本时传递:老版 coordinator/fake 的
+            # download_and_apply 没有该参数,None 时保持原调用形状。
+            if expected_version is None:
+                result = coordinator.download_and_apply(
+                    progress=report_progress,
+                    request=request,
+                    before_apply=lambda: self.applying.emit(request),
+                )
+            else:
+                result = coordinator.download_and_apply(
+                    progress=report_progress,
+                    request=request,
+                    before_apply=lambda: self.applying.emit(request),
+                    expected_version=expected_version,
+                )
         except UpdateCancelled:
             result = UpdateApplyResult(UpdateApplyStatus.CANCELLED)
         except Exception as error:
@@ -157,6 +194,7 @@ class UpdateWorker(QThread):
         with self._request_lock:
             if not request.applying and result.status is not UpdateApplyStatus.APPLY_STARTED:
                 self._active_request = None
+                self._active_expected_version = None
         self.applied.emit(request, result)
 
     def cancel_download(self, request: UpdateRequest) -> bool:

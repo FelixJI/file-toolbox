@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.common.logging_config import configure_logging
-from file_toolbox.common.metadata import VERSION
+from file_toolbox.common.metadata import runtime_version
+from file_toolbox.common.paths import current_data_root_policy, use_data_root_policy
 from file_toolbox.common.runtime import is_packaged_runtime
 from file_toolbox.gui.freeze_watchdog import FreezeWatchdog
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
@@ -217,18 +218,35 @@ class MainWindow(QMainWindow):
         # --- 自更新:状态栏 banner + 后台 worker(仅便携 exe 形态启用检查) ---
         self._update_banner = UpdateBanner()
         self.statusBar().addPermanentWidget(self._update_banner)
-        self._update_worker = UpdateWorker(coordinator or create_update_coordinator())
-        self._update_worker.ready.connect(self._on_update_ready)
+        # 每轮检查经工厂重读代理设置:保存代理后下一轮检查即生效,无需重启窗口。
+        # ContextVar 不随线程继承:工厂在 worker 线程执行,须用主线程捕获的
+        # 数据根 policy 重新进入上下文,否则会落到 cwd 的 CLI 数据根。
+        # 注入 coordinator(测试)时工厂复用注入实例,保持测试缝隙不变。
+        if coordinator is None:
+            data_root_policy = current_data_root_policy()
+
+            def _fresh_coordinator() -> UpdateCoordinator:
+                with use_data_root_policy(data_root_policy):
+                    return create_update_coordinator()
+
+            initial_coordinator = _fresh_coordinator()
+            coordinator_factory = _fresh_coordinator
+        else:
+            initial_coordinator = coordinator
+            coordinator_factory = lambda: coordinator  # noqa: E731 — 闭包绑定参数
+        self._update_worker = UpdateWorker(
+            initial_coordinator, coordinator_factory=coordinator_factory
+        )
         self._update_worker.progress.connect(self._on_update_progress)
         self._update_worker.applying.connect(self._on_update_applying)
         self._update_worker.applied.connect(self._on_update_applied)
         self._update_banner.clicked.connect(self._start_download)
         self._pending_update: UpdateCheckResult | None = None
+        self._last_check: UpdateCheckResult | None = None
         self._update_dialog: QProgressDialog | None = None
         self._download_request: UpdateRequest | None = None
 
         self._update_worker.checked.connect(self._on_update_checked)
-        self._manual_check_pending = False  # 区分手动 vs 自动检查(关于页懒构造后连接)
 
         if is_packaged_runtime():
             # 仅打包产物(Nuitka/Velopack)形态自动检查;开发态仍可从关于页手动检查。
@@ -236,6 +254,9 @@ class MainWindow(QMainWindow):
             # 被当成开发态,自动检查从未运行。
             self._update_worker.start()
             QTimer.singleShot(0, self._trigger_check)
+
+        # 上次 apply 的跨启动对账(成功/未完成的准确结果,见 #128 AC5)。
+        self._report_update_outcome()
 
         # 历史按钮初始状态跟随当前(首个)标签页
         self._on_tab_changed(self._tabs.currentIndex())
@@ -270,9 +291,11 @@ class MainWindow(QMainWindow):
             about_tab = cast("AboutTab", tab)
             about_tab.check_requested.connect(self._on_check_requested)
             about_tab.download_requested.connect(self._on_download_requested)
-            if self._pending_update is not None:
-                # 自动检查先于用户打开关于页:把已发现的新版本补显到刚构造的页面
-                about_tab.display_update_available(self._pending_update)
+            # 自动检查先于用户打开关于页:回放最近一轮检查状态与下载中标志
+            if self._last_check is not None:
+                self._display_check_result_on_about(self._last_check)
+            if self._download_request is not None:
+                about_tab.set_update_downloading(True)
 
     def _materialize_all_tabs(self) -> None:
         """立即构造全部懒 Tab(测试与预热场景使用)。"""
@@ -327,7 +350,6 @@ class MainWindow(QMainWindow):
         if not self._update_worker.isRunning():
             # 非便携形态(pip/dev):按需启动 worker(自动检查不会启)
             self._update_worker.start()
-        self._manual_check_pending = True
         self._trigger_check()
 
     def _on_download_requested(self) -> None:
@@ -337,29 +359,37 @@ class MainWindow(QMainWindow):
         self._start_download()
 
     def _on_update_checked(self, result: UpdateCheckResult) -> None:
-        """worker checked 信号:仅手动检查时回显结果到关于页。
+        """单一状态入口:任何检查结果(自动/手动)驱动横幅、候选与关于页同一状态。
 
-        自动检查场景(启动后台)忽略此回调(由 _on_update_ready 处理 banner)。
+        非 AVAILABLE 结果必须清掉旧候选并隐藏横幅:过期 banner 不能继续触发
+        旧更新(coordinator 每轮检查已重置绑定候选)。关于页已构造时实时回放,
+        未构造时由 _ensure_tab 用 _last_check 补放。
         """
-        if not self._manual_check_pending:
-            return
-        self._manual_check_pending = False
+        self._last_check = result
+        if result.status is UpdateCheckStatus.AVAILABLE:
+            self._pending_update = result
+            self._update_banner.show_result(result)
+        else:
+            self._pending_update = None
+            self._update_banner.hide()
+        self._display_check_result_on_about(result)
+
+    def _display_check_result_on_about(self, result: UpdateCheckResult) -> None:
         about = self._about_tab
         if about is None:
-            return  # 手动检查必经关于页,理论上已构造;防御懒构造态异常路径
+            return
         if result.status is UpdateCheckStatus.AVAILABLE:
             about.display_update_available(result)
+        elif result.status is UpdateCheckStatus.UNSUPPORTED:
+            about.display_check_result(
+                "failed", f"⚠ {result.message or '当前运行形态不支持应用内更新'}"
+            )
         elif result.status is UpdateCheckStatus.FAILED:
             about.display_check_result(
                 "failed", f"⚠ {result.message or '检查更新失败,请检查网络或代理设置'}"
             )
         else:  # latest
-            about.display_check_result("latest", f"✓ 当前为最新版本 v{VERSION}")
-
-    def _on_update_ready(self, result: UpdateCheckResult) -> None:
-        """检查到新版 → 状态栏 banner 提示。"""
-        self._pending_update = result
-        self._update_banner.show_result(result)
+            about.display_check_result("latest", f"✓ 当前为最新版本 v{runtime_version()}")
 
     def _start_download(self) -> None:
         """用户点击 banner/关于页"立即更新" → 弹进度对话框 + 向 worker 投递下载请求。"""
@@ -393,8 +423,13 @@ class MainWindow(QMainWindow):
         self._tabs.setEnabled(False)
         self.btn_history.setEnabled(False)
         self._update_banner.hide()
-        request = self._update_worker.start_download()
+        # 先落对账记录再请求下载:apply 提交后跨启动才能比对目标版本;取消/
+        # 未进入 apply 的失败在 _on_update_applied 清除,apply 阶段的不确定结果
+        # 保留给下次启动对账。
+        self._record_pending_apply(update.version)
+        request = self._update_worker.start_download(expected_version=update.version)
         if request is None:
+            self._clear_pending_apply_record()
             self._restore_retry_affordances()
             return
         self._download_request = request
@@ -470,6 +505,7 @@ class MainWindow(QMainWindow):
             self._update_dialog.close()
             self._update_dialog = None
         if result.status is UpdateApplyStatus.CANCELLED:
+            self._clear_pending_apply_record()
             self.statusBar().showMessage("更新已取消。")
             self._restore_retry_affordances()
             return
@@ -484,6 +520,7 @@ class MainWindow(QMainWindow):
             )
             return
         if result.status is UpdateApplyStatus.FAILED:
+            self._clear_pending_apply_record()
             QMessageBox.warning(
                 self,
                 "更新失败",
@@ -492,6 +529,68 @@ class MainWindow(QMainWindow):
             self._restore_retry_affordances()
             return
         self._shutdown_for_restart()
+
+    # --- 跨启动更新对账(#128 AC5) ---
+
+    _PENDING_APPLY_KEY = "update/pending_apply"
+
+    def _record_pending_apply(self, version: str) -> None:
+        """用户确认更新后写入预期目标版本(仅用于下次启动对账,非第二真相源)。"""
+        from datetime import UTC, datetime
+
+        from file_toolbox.common import settings
+
+        try:
+            settings.set(
+                self._PENDING_APPLY_KEY,
+                {
+                    "target_version": version,
+                    "written_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        except Exception:
+            # 记录失败不阻断更新:下次启动只是无法对账,降级为不提示。
+            _logger.exception("写入更新对账记录失败 target=%s", version)
+
+    def _clear_pending_apply_record(self) -> None:
+        """取消/未提交 apply 的失败:清除对账记录。"""
+        from file_toolbox.common import settings
+
+        try:
+            settings.set(self._PENDING_APPLY_KEY, None)
+        except Exception:
+            _logger.exception("清除更新对账记录失败")
+
+    def _report_update_outcome(self) -> None:
+        """启动时对账上次 apply:以真实运行版本给出准确结果,而非依赖上次的显示状态。
+
+        APPLY_STARTED/窗口重新出现都不代表更新成功;只有"当前运行版本 ==
+        预期目标"才报成功,其余给出准确的未完成/不确定提示。记录一次性消费,
+        不无限重试或重复 apply。
+        """
+        from file_toolbox.common import settings
+        from file_toolbox.updater.runtime_support import probe_update_runtime
+
+        record = settings.get(self._PENDING_APPLY_KEY)
+        if not isinstance(record, dict):
+            return
+        target = str(record.get("target_version") or "")
+        current = runtime_version()
+        state = probe_update_runtime()
+        self._clear_pending_apply_record()
+        if target and current == target:
+            message = f"已成功更新到 v{target}"
+        elif state.available and state.pending_restart_version:
+            message = f"更新已下载待应用: 当前 v{current}，待应用 v{state.pending_restart_version}"
+        elif target:
+            message = (
+                f"上次更新未确认完成: 当前 v{current}，目标 v{target}；"
+                "如仍为旧版请在关于页重新检查更新"
+            )
+        else:
+            message = "上次更新结果未知，请在关于页检查更新确认当前版本"
+        _logger.info("更新对账: %s (sdk_available=%s)", message, state.available)
+        self.statusBar().showMessage(message, 15000)
 
     def _shutdown_for_restart(self) -> None:
         """更新已交给 Velopack;仍须经过与普通关闭相同的业务收尾。"""
@@ -636,6 +735,14 @@ def run_gui() -> None:
 
     log_file = configure_logging(mode="gui")
     _logger.info("GUI 初始化")
+    # 版本身份双记录:importlib(打包态为 Nuitka 内嵌元数据)与 Velopack 安装
+    # 清单(更新器比对的真实身份)。二者不一致即可从日志定位"仍旧版"故障层。
+    from file_toolbox.common.metadata import VERSION
+    from file_toolbox.updater.runtime_support import packaged_version
+
+    _logger.info(
+        "版本身份 importlib=%s velopack=%s exe=%s", VERSION, packaged_version(), sys.executable
+    )
     watchdog = FreezeWatchdog(log_file)
     t0 = time.perf_counter()
     app = QApplication.instance() or QApplication(sys.argv)

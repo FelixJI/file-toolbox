@@ -74,8 +74,25 @@ def start_menu_dir() -> Path:
     return _linux_start_menu()
 
 
+_APP_EXE_NAME = "FileToolbox.exe"  # 与 scripts/build_exe.py 的 --mainExe 一致
+
+
 def _gui_command() -> tuple[str, list[str]]:
-    """启动 GUI 的命令:python 解释器 + -m file_toolbox gui。"""
+    """启动 GUI 的命令。
+
+    源码/开发运行:python 解释器 + ``-m file_toolbox gui``。
+    打包形态:Nuitka 的 ``sys.executable`` 是合成的 ``<dist>/python.exe``
+    (文件不存在,0.3.5 实测),不能作快捷方式目标;应指向 Velopack 安装根的
+    stub exe —— 它跨升级稳定(更新只替换 ``current/``,根 stub 路径不变)。
+    根 stub 缺失时退回 ``current/`` 下的真实 exe(路径同样跨升级稳定)。
+    """
+    from file_toolbox.common.runtime import is_packaged_runtime
+
+    if is_packaged_runtime():
+        exe_dir = Path(sys.executable).resolve().parent
+        for candidate in (exe_dir.parent / _APP_EXE_NAME, exe_dir / _APP_EXE_NAME):
+            if candidate.is_file():
+                return (str(candidate), [])
     return (sys.executable, ["-m", "file_toolbox", "gui"])
 
 

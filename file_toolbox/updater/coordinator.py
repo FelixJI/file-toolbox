@@ -75,4 +75,5 @@ class UpdateCoordinator(Protocol):
         *,
         request: UpdateRequest | None = None,
         before_apply: Callable[[], None] | None = None,
+        expected_version: str | None = None,
     ) -> UpdateApplyResult: ...
