@@ -45,7 +45,7 @@ class UpdateBanner(QPushButton):
         self.setFlat(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("下载并安装新版本")
+        self.setToolTip("打开更新页面")
         self.setStyleSheet(
             "QPushButton { color: #0969da; padding: 2px 8px; border: none; "
             "background: transparent; text-decoration: underline; }"
@@ -53,7 +53,7 @@ class UpdateBanner(QPushButton):
         self.hide()
 
     def show_result(self, result: UpdateCheckResult) -> None:
-        self.setText(f"🆕 发现新版本 {result.version} · 点击更新")
+        self.setText(f"🆕 发现新版本 {result.version} · 查看更新")
         self.show()
 
 

@@ -171,22 +171,21 @@ class TestUpdateWorker:
 
 
 class TestMainWindowIntegration:
-    def test_available_check_updates_about_and_banner(self, app):
+    def test_available_check_updates_page_and_banner(self, app):
         win = MainWindow(FakeCoordinator(_available("8.0.0")))
-        win._tabs.setCurrentIndex(9)  # 检查结果回显到关于页(懒构造 Tab)
+        win._tabs.setCurrentIndex(9)  # 独立更新页(懒构造 Tab)
         win._update_worker.do_check()
         app.processEvents()
-        assert "8.0.0" in win._about_tab._check_result_lbl.text()
+        assert "8.0.0" in win._update_tab._status_lbl.text()
         assert win._update_banner.isHidden() is False
-        # 关于页就地提供"立即更新"入口,不再要求用户去窗口底部找状态栏横幅
-        assert win._about_tab.btn_download_update.isHidden() is False
+        assert win._update_tab.btn_download_update.isHidden() is False
 
-    def test_latest_check_updates_about_without_banner(self, app):
+    def test_latest_check_updates_page_without_banner(self, app):
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
         win._tabs.setCurrentIndex(9)
         win._update_worker.do_check()
         app.processEvents()
-        assert "最新" in win._about_tab._check_result_lbl.text()
+        assert "最新" in win._update_tab._status_lbl.text()
         assert win._update_banner.isHidden() is True
 
     def test_later_check_clears_stale_pending_and_banner(self, app):
@@ -216,28 +215,28 @@ class TestMainWindowIntegration:
         assert win._update_banner.isHidden() is True
         assert win._pending_update is None
 
-    def test_auto_result_reaches_already_open_about_tab(self, app):
-        """自动检查结果到达时,已打开的关于页实时回放(不再只服务手动检查)。"""
+    def test_auto_result_reaches_already_open_update_page(self, app):
+        """自动检查结果到达时,已打开的更新页实时回放(不再只服务手动检查)。"""
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
-        win._tabs.setCurrentIndex(9)  # 关于页已构造
-        assert win._about_tab is not None
+        win._tabs.setCurrentIndex(9)  # 更新页已构造
+        assert win._update_tab is not None
 
         win._on_update_checked(_available("8.0.0"))
 
-        assert "8.0.0" in win._about_tab._check_result_lbl.text()
-        assert win._about_tab.btn_download_update.isHidden() is False
+        assert "8.0.0" in win._update_tab._status_lbl.text()
+        assert win._update_tab.btn_download_update.isHidden() is False
 
-    def test_about_lazy_construction_replays_latest_state(self, app):
-        """自动检查先于关于页构造:任何最终状态(含 LATEST/FAILED)都可回放。"""
+    def test_update_page_lazy_construction_replays_latest_state(self, app):
+        """自动检查先于页面构造:任何最终状态(含 LATEST/FAILED)都可回放。"""
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
         win._on_update_checked(UpdateCheckResult(UpdateCheckStatus.LATEST))
 
-        win._tabs.setCurrentIndex(9)  # 懒构造关于页
+        win._tabs.setCurrentIndex(9)  # 懒构造更新页
 
-        assert "最新" in win._about_tab._check_result_lbl.text()
+        assert "最新" in win._update_tab._status_lbl.text()
 
-    def test_unsupported_check_result_shown_on_about(self, app):
-        """UNSUPPORTED 形态(源码/开发运行)在关于页给出准确原因与横幅隐藏。"""
+    def test_unsupported_check_result_shown_on_update_page(self, app):
+        """UNSUPPORTED 形态(源码/开发运行)在更新页给出准确原因与横幅隐藏。"""
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
         win._tabs.setCurrentIndex(9)
         win._on_update_checked(_available("8.0.0"))
@@ -249,7 +248,7 @@ class TestMainWindowIntegration:
             )
         )
 
-        assert "安装布局" in win._about_tab._check_result_lbl.text()
+        assert "安装布局" in win._update_tab._status_lbl.text()
         assert win._update_banner.isHidden() is True
         assert win._pending_update is None
 
@@ -289,6 +288,7 @@ class TestUpdateOutcomeReconciliation:
             _available("8.0.0"), apply_result or UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
         )
         win = MainWindow(coordinator)
+        win._tabs.setCurrentIndex(9)  # 下载只能从更新页发起
         monkeypatch.setattr(
             QMessageBox,
             "question",

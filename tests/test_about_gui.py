@@ -18,10 +18,6 @@ from PySide6.QtWidgets import (  # noqa: E402
 from file_toolbox import __version__  # noqa: E402
 from file_toolbox.common import metadata  # noqa: E402
 from file_toolbox.gui.dialogs.about_tab import AboutTab  # noqa: E402
-from file_toolbox.updater.models import (  # noqa: E402
-    UpdateCheckResult,
-    UpdateCheckStatus,
-)
 
 
 @pytest.fixture(scope="module")
@@ -117,326 +113,44 @@ def test_about_tab_opens_log_directory(app, monkeypatch, tmp_path):
     assert opened[0].toLocalFile().endswith(".file_toolbox/logs")
 
 
-from PySide6.QtWidgets import QLineEdit  # noqa: E402
+# ---------------------------------------------------------------------------
+# 更新入口:仅"打开更新页面"导航(检查/下载/代理已迁移至独立更新页)
+# ---------------------------------------------------------------------------
 
 
-def test_about_tab_has_check_update_button(app):
+def test_about_tab_has_open_update_page_button(app):
     tab = AboutTab()
-    buttons = tab.findChildren(QPushButton)
-    texts = [b.text() for b in buttons]
-    assert any("检查更新" in t for t in texts)
+    assert tab.btn_open_update_page.text() == "打开更新页面"
 
 
-def test_about_tab_emits_check_requested(app):
-    """点检查更新按钮 → emit check_requested。"""
+def test_about_tab_open_update_page_emits_signal(app):
     tab = AboutTab()
     received: list = []
-    tab.check_requested.connect(lambda: received.append(1))
-    # 找到检查更新按钮并点击
-    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
-    btn.click()
+    tab.open_update_page_requested.connect(lambda: received.append(1))
+    tab.btn_open_update_page.click()
     assert received == [1]
 
 
-def test_about_tab_check_button_disables_during_check(app):
-    """点击后按钮立即禁用 + 结果标签显示检查中。"""
+def test_about_tab_has_no_update_actions(app):
+    """关于页不再承载更新动作:无检查/下载按钮,也无代理输入控件。"""
+    from PySide6.QtWidgets import QLineEdit
+
     tab = AboutTab()
-    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
-    btn.click()
-    assert btn.isEnabled() is False
-    assert "检查中" in tab._check_result_lbl.text()
+    buttons = [b.text() for b in tab.findChildren(QPushButton)]
+    assert not any(("检查更新" in t or "立即更新" in t or "下载并更新" in t) for t in buttons)
+    assert tab.findChild(QLineEdit) is None
 
 
-def test_about_tab_display_check_result_latest(app):
-    tab = AboutTab()
-    # 先触发检查(禁用按钮),再回调结果
-    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
-    btn.click()
-    tab.display_check_result("latest", "✓ 当前为最新版本 v0.1.11")
-    assert btn.isEnabled() is True
-    assert "最新" in tab._check_result_lbl.text()
-
-
-def test_about_tab_display_check_result_available(app):
-    tab = AboutTab()
-    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
-    btn.click()
-    tab.display_check_result("available", "🆕 发现新版本 v9.9.9")
-    assert btn.isEnabled() is True
-    assert "9.9.9" in tab._check_result_lbl.text()
-
-
-def test_about_tab_display_check_result_failed(app):
-    tab = AboutTab()
-    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
-    btn.click()
-    tab.display_check_result("failed", "⚠ 检查失败")
-    assert btn.isEnabled() is True
-    assert "检查失败" in tab._check_result_lbl.text()
-
-
-# ---------------------------------------------------------------------------
-# 更新交互:新版展示 / 立即更新按钮 / 结果着色 / 下载期间状态
-# ---------------------------------------------------------------------------
-
-
-def _available_result(version: str = "9.9.9", notes: str = "") -> UpdateCheckResult:
-    return UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version=version, release_notes=notes)
-
-
-def test_about_tab_default_hides_update_affordances(app):
-    """初始态:立即更新按钮与新版更新内容区隐藏。"""
-    tab = AboutTab()
-    assert tab.btn_download_update.isHidden() is True
-    assert tab._notes_lbl.isHidden() is True
-    assert tab._notes_view.isHidden() is True
-
-
-def test_about_tab_display_update_available_shows_button_and_notes(app):
-    """发现新版 → 结果标签着色 + 更新内容 markdown 渲染 + 立即更新按钮可见。"""
-    tab = AboutTab()
-    tab.display_update_available(_available_result("9.9.9", notes="## 9.9.9\n\n- 新功能 A"))
-    assert "9.9.9" in tab._check_result_lbl.text()
-    assert "#0969da" in tab._check_result_lbl.styleSheet()
-    assert tab.btn_download_update.isHidden() is False
-    assert tab._notes_lbl.isHidden() is False
-    assert tab._notes_view.isHidden() is False
-    assert "新功能 A" in tab._notes_view.toPlainText()
-    assert tab.btn_check_update.isEnabled() is True
-
-
-def test_about_tab_display_update_available_without_notes_hides_notes(app):
-    """新版无 release notes → 只显示按钮,不显示空的更新内容区。"""
-    tab = AboutTab()
-    tab.display_update_available(_available_result("9.9.9", notes=""))
-    assert tab.btn_download_update.isHidden() is False
-    assert tab._notes_lbl.isHidden() is True
-    assert tab._notes_view.isHidden() is True
-
-
-def test_about_tab_check_again_clears_previous_update_state(app):
-    """再次点击检查更新 → 上一轮的按钮/更新内容区被清理。"""
-    tab = AboutTab()
-    tab.display_update_available(_available_result("9.9.9", notes="- 新功能"))
-    btn = next(b for b in tab.findChildren(QPushButton) if "检查更新" in b.text())
-    btn.click()
-    assert tab.btn_download_update.isHidden() is True
-    assert tab._notes_view.isHidden() is True
-    assert "检查中" in tab._check_result_lbl.text()
-
-
-def test_about_tab_display_check_result_colors_by_kind(app):
-    """latest/failed 结果分别用默认色/警示红,并隐藏立即更新按钮。"""
-    tab = AboutTab()
-    tab.display_update_available(_available_result("9.9.9"))
-    tab.display_check_result("failed", "⚠ 检查失败")
-    assert "#d1242f" in tab._check_result_lbl.styleSheet()
-    assert tab.btn_download_update.isHidden() is True
-    tab.display_check_result("latest", "✓ 已是最新")
-    assert tab._check_result_lbl.styleSheet() == ""
-
-
-def test_about_tab_download_button_emits_signal(app):
-    """点击立即更新 → emit download_requested。"""
-    tab = AboutTab()
-    received: list = []
-    tab.download_requested.connect(lambda: received.append(1))
-    tab.btn_download_update.click()
-    assert received == [1]
-
-
-def test_about_tab_set_update_downloading_toggles_buttons(app):
-    """下载进行中禁用检查/立即更新;结束后恢复。"""
-    tab = AboutTab()
-    tab.display_update_available(_available_result("9.9.9"))
-    tab.set_update_downloading(True)
-    assert tab.btn_check_update.isEnabled() is False
-    assert tab.btn_download_update.isEnabled() is False
-    tab.set_update_downloading(False)
-    assert tab.btn_check_update.isEnabled() is True
-    assert tab.btn_download_update.isEnabled() is True
-
-
-def test_about_tab_has_proxy_edit(app):
-    tab = AboutTab()
-    assert isinstance(tab._proxy_edit, QLineEdit)
-
-
-def test_about_tab_saves_standard_forward_proxy_separately(app, tmp_path, monkeypatch):
-    """standard forward proxy 不与 URL-prefix 候选混为同一设置。"""
-    from file_toolbox.common import settings
-
-    monkeypatch.chdir(tmp_path)
-    tab = AboutTab()
-    tab._forward_proxy_edit.setText("http://127.0.0.1:8899")
-
-    tab.btn_proxy_save.click()
-
-    assert settings.get("forward_proxy") == "http://127.0.0.1:8899"
-
-
-# ---------------------------------------------------------------------------
-# 更新与代理整合分组 + 默认候选 / 全选 / 自定义添加 / 保存
-# ---------------------------------------------------------------------------
-
-
-def test_about_tab_has_update_and_proxy_group(app):
-    """关于 Tab 应含'更新与代理'分组(整合检查更新与代理设置)。"""
+def test_about_tab_tech_and_changelog_collapsed_by_default(app):
+    """技术路线与完整更新日志为次要长内容,默认折叠。"""
     from PySide6.QtWidgets import QGroupBox
 
     tab = AboutTab()
-    boxes = [b.title() for b in tab.findChildren(QGroupBox)]
-    assert any("更新与代理" in t for t in boxes)
-
-
-def test_about_tab_proxy_list_has_defaults(app):
-    """代理列表应列出 DEFAULT_PROXIES(默认项)。"""
-    from PySide6.QtWidgets import QListWidget
-
-    from file_toolbox.updater.proxy import DEFAULT_PROXIES
-
-    tab = AboutTab()
-    lst = tab.findChild(QListWidget)
-    assert lst is not None
-    texts = [lst.item(i).text() for i in range(lst.count())]
-    # 每个默认代理出现在某条目文本中(默认项带"(默认)"后缀)
-    for p in DEFAULT_PROXIES:
-        assert any(p in t for t in texts), f"默认代理 {p} 未出现在列表"
-
-
-def test_about_tab_proxy_select_all(app):
-    """全选按钮 → 列表所有项 checked。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidget
-
-    tab = AboutTab()
-    tab.btn_proxy_select_none.click()  # 先全不选
-    tab.btn_proxy_select_all.click()
-    lst = tab.findChild(QListWidget)
-    for i in range(lst.count()):
-        assert lst.item(i).checkState() == Qt.CheckState.Checked
-
-
-def test_about_tab_proxy_select_none(app):
-    """全不选按钮 → 列表所有项 unchecked。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidget
-
-    tab = AboutTab()
-    tab.btn_proxy_select_all.click()  # 先全选
-    tab.btn_proxy_select_none.click()
-    lst = tab.findChild(QListWidget)
-    for i in range(lst.count()):
-        assert lst.item(i).checkState() == Qt.CheckState.Unchecked
-
-
-def test_about_tab_add_custom_proxy(app):
-    """添加自定义代理 → 列表新增一项且默认勾选。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidget
-
-    tab = AboutTab()
-    custom = "https://my-proxy.example"
-    tab._proxy_edit.setText(custom)
-    tab.btn_proxy_add.click()
-    lst = tab.findChild(QListWidget)
-    urls = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    # 用 count 精确判定成员(避免 CodeQL 的 URL 子串 sanitization 启发式误报)
-    assert urls.count(custom) == 1
-    # 新增项默认勾选
-    idx = urls.index(custom)
-    assert lst.item(idx).checkState() == Qt.CheckState.Checked
-    # 输入框被清空
-    assert tab._proxy_edit.text() == ""
-
-
-def test_about_tab_add_duplicate_proxy_no_dup(app):
-    """添加已存在的代理 → 不重复添加,仅勾选已存在项。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidget
-
-    from file_toolbox.updater.proxy import DEFAULT_PROXIES
-
-    tab = AboutTab()
-    tab._proxy_edit.setText(DEFAULT_PROXIES[0])  # 与默认项重复
-    tab.btn_proxy_add.click()
-    lst = tab.findChild(QListWidget)
-    urls = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    assert urls.count(DEFAULT_PROXIES[0]) == 1  # 仍只有一项
-
-
-def test_about_tab_save_writes_checked_proxies(app, monkeypatch, tmp_path):
-    """保存按钮 → settings['gh_proxies'] = 列表中所有已勾选项。"""
-    monkeypatch.chdir(tmp_path)
-    from file_toolbox.common import settings
-
-    tab = AboutTab()
-    tab.btn_proxy_select_none.click()  # 先全不选
-    # 手动勾选第一个默认项
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidget
-
-    lst = tab.findChild(QListWidget)
-    first_url = lst.item(0).data(Qt.ItemDataRole.UserRole)
-    lst.item(0).setCheckState(Qt.CheckState.Checked)
-    tab.btn_proxy_save.click()
-    assert settings.get("gh_proxies") == [first_url]
-
-
-def test_about_tab_save_none_means_direct(app, monkeypatch, tmp_path):
-    """全不选保存 → settings['gh_proxies'] 为空列表(= 直连)。"""
-    monkeypatch.chdir(tmp_path)
-    from file_toolbox.common import settings
-
-    tab = AboutTab()
-    tab.btn_proxy_select_none.click()
-    tab.btn_proxy_save.click()
-    assert settings.get("gh_proxies") == []
-
-
-def test_about_tab_remove_custom_proxy(app):
-    """移除选中 → 自定义项被移除;默认项不可移除(仅取消勾选)。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidget
-
-    tab = AboutTab()
-    custom = "https://removable.example"
-    # 添加一个自定义项
-    tab._proxy_edit.setText(custom)
-    tab.btn_proxy_add.click()
-    lst = tab.findChild(QListWidget)
-    # 找到自定义项并选中
-    custom_row = None
-    for i in range(lst.count()):
-        if lst.item(i).data(Qt.ItemDataRole.UserRole) == custom:
-            custom_row = i
-            break
-    assert custom_row is not None
-    lst.setCurrentRow(custom_row)
-    urls_before = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    # 用 count 精确判定成员(避免 CodeQL 的 URL 子串 sanitization 启发式误报)
-    assert urls_before.count(custom) == 1
-    tab.btn_proxy_remove.click()
-    urls_after = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    assert urls_after.count(custom) == 0
-
-
-def test_about_tab_default_items_not_removable(app):
-    """移除默认项 → 不删除,仅取消勾选。"""
-    from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QListWidget
-
-    tab = AboutTab()
-    lst = tab.findChild(QListWidget)
-    # 选中第一个(默认)项并尝试移除
-    lst.setCurrentRow(0)
-    first_url = lst.item(0).data(Qt.ItemDataRole.UserRole)
-    count_before = lst.count()
-    tab.btn_proxy_remove.click()
-    # 默认项仍在(数量不变),只是被取消勾选
-    urls = [lst.item(i).data(Qt.ItemDataRole.UserRole) for i in range(lst.count())]
-    assert first_url in urls
-    assert lst.count() == count_before
+    boxes = {b.title(): b for b in tab.findChildren(QGroupBox)}
+    tech = next(t for t in boxes if t.startswith("技术路线"))
+    changelog = next(t for t in boxes if t.startswith("更新日志"))
+    assert boxes[tech].isChecked() is False
+    assert boxes[changelog].isChecked() is False
 
 
 # ---------------------------------------------------------------------------
