@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.6
+
+### Features
+
+- **gui:** 独立更新页统一更新入口并优化关于页 (#132) (de00d08)
+
+### Bug Fixes
+
+- **updater:** 修复更新状态分离与版本身份并闭环重启确认 (#131) (b4cf126)
+
 ## 0.3.5
 
 ### Performance
