@@ -1,5 +1,6 @@
 """考勤 Tab 的配置、方案、预览门禁与另存编排测试。"""
 
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -9,7 +10,7 @@ import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
-from PySide6.QtCore import Qt, QThread  # noqa: E402
+from PySide6.QtCore import Qt, QThread, Signal  # noqa: E402
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
@@ -53,6 +54,31 @@ def tab(app, tmp_path):
     widget.ui.spin_year.setValue(2026)
     widget.ui.spin_month.setValue(7)
     return widget
+
+
+def _pump_until(app: QApplication, cond, timeout_s: float = 5.0) -> bool:
+    """主线程泵送事件直到 cond() 为真;超时返回 False(不抛,由断言给出信息)。"""
+    deadline = time.monotonic() + timeout_s
+    while not cond():
+        if time.monotonic() > deadline:
+            return False
+        app.processEvents()
+        time.sleep(0.01)
+    return True
+
+
+class _AttendanceWorkerStub(QThread):
+    """带真实信号、未启动线程的考勤 worker 桩:驱动 failed/finished 独立到达。"""
+
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_called = False
+
+    def cancel(self) -> None:
+        self.cancel_called = True
 
 
 def test_defaults_match_given_workbooks(tab):
@@ -251,11 +277,13 @@ def test_roster_preview_errors_block_generation(tab, tmp_path):
     assert tab.ui.table_group_preview.rowCount() == 1
 
 
-def test_preview_success_enables_generation(tab):
-    preview = AttendancePreview(3, 31, 0, 1, {"√": 90, "空白": 3}, ())
+def test_preview_success_enables_generation(tab, app):
+    """预览通过:结果渲染即时,生成按钮只在真实 finished 后恢复。"""
+    tab._service.preview.return_value = AttendancePreview(3, 31, 0, 1, {"√": 90, "空白": 3}, ())
 
-    tab._on_preview_ok(preview)
+    tab._start_worker(tab._build_request(), "preview")
 
+    assert _pump_until(app, lambda: tab._worker is None), "真实 finished 应释放线程"
     assert tab.ui.btn_generate.isEnabled() is True
     assert tab._preview_request == tab._build_request()
     assert "员工 3 人" in tab.ui.lbl_preview.text()
@@ -473,28 +501,26 @@ def test_delete_plan_write_failure_is_reported(tab, monkeypatch):
 
 
 def test_close_timeout_keeps_running_worker_until_finished(tab, monkeypatch):
-    worker = MagicMock()
-    worker.isRunning.return_value = True
-    worker.wait.return_value = False
-    tab._worker = worker
+    """关闭等待:协作取消后拒绝关闭,不 quit/wait;真实 finished 后释放并重关。"""
+    worker = _AttendanceWorkerStub()
+    tab._task.track(worker)
+    worker.finished.connect(tab._on_worker_finished)
     event = QCloseEvent()
 
     tab.closeEvent(event)
 
     assert event.isAccepted() is False
     assert tab._worker is worker
-    assert tab._close_pending is True
-    worker.cancel.assert_called_once_with()
-    worker.quit.assert_called_once_with()
-    worker.wait.assert_called_once()
+    assert tab.close_pending is True
+    assert worker.cancel_called, "关闭等待应请求协作取消"
 
     owner = MagicMock()
     monkeypatch.setattr(tab, "window", lambda: owner)
     monkeypatch.setattr(
-        "file_toolbox.gui.dialogs.attendance_tab.QTimer.singleShot",
+        "file_toolbox.gui.task_lifecycle.QTimer.singleShot",
         lambda _delay, callback: callback(),
     )
-    tab._on_worker_finished()
+    worker.finished.emit()
 
     assert tab._worker is None
     owner.close.assert_called_once_with()
@@ -502,22 +528,27 @@ def test_close_timeout_keeps_running_worker_until_finished(tab, monkeypatch):
 
 def test_worker_finished_cleanup_runs_on_gui_thread(tab, app, monkeypatch):
     """真实 QThread.finished 必须投递到 AttendanceTab 所在的 GUI 线程。"""
-    tab._service.preview.return_value = AttendancePreview(1, 31, 0, 1, {"√": 31}, ())
+    release = threading.Event()
+
+    def blocked_preview(*args, **kwargs):
+        release.wait(5)
+        return AttendancePreview(1, 31, 0, 1, {"√": 31}, ())
+
+    tab._service.preview.side_effect = blocked_preview
     callback_threads = []
     monkeypatch.setattr(
-        "file_toolbox.gui.dialogs.attendance_tab.QTimer.singleShot",
+        "file_toolbox.gui.task_lifecycle.QTimer.singleShot",
         lambda _delay, _callback: callback_threads.append(QThread.currentThread()),
     )
-    tab._close_pending = True
 
     tab._start_worker(tab._build_request(), "preview")
-    deadline = time.monotonic() + 3
-    while tab._worker is not None and time.monotonic() < deadline:
-        app.processEvents()
+    assert tab._worker is not None, "无延迟关闭挂起时任务应正常启动"
+    tab._task.close_pending = True  # worker 运行中进入关闭等待
+    release.set()
 
-    assert tab._worker is None
+    assert _pump_until(app, lambda: tab._worker is None)
     assert callback_threads == [app.thread()]
-    tab._close_pending = False
+    tab._task.close_pending = False
 
 
 def test_output_picker_selects_directory_and_generates_editable_filename(

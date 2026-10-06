@@ -8,7 +8,7 @@ UI 布局由 generated/ui_pdf_sort_dialog.py 的 Ui_PdfSortDialog(setupUi)构建
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
 
@@ -24,6 +24,7 @@ from file_toolbox.core.pdf_sort import (
 )
 from file_toolbox.gui.controllers.pdf_sort_controller import PdfSortController
 from file_toolbox.gui.generated.ui_pdf_sort_dialog import Ui_PdfSortDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.pdf_sort_worker import PdfSortWorker
 
 _FAIL_COLOR = QColor(255, 242, 204)  # 浅黄(失败行)
@@ -37,6 +38,8 @@ class PdfSortTab(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 生命周期句柄:单一事实保存当前任务与延迟关闭,只在真实 finished 释放
+        self._task = TaskLifecycle(self)
         self.ui = Ui_PdfSortDialog()
         self.ui.setupUi(self)
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
@@ -44,13 +47,22 @@ class PdfSortTab(QWidget):
         self._svc = PdfSortService(history_store=self._history)
         self._controller = PdfSortController()
         self._files: list[Path] = []
-        self._worker: PdfSortWorker | None = None
-        self._close_pending = False
         self._connect()
+
+    # 兼容旧 _worker 字段:读写均转发 TaskLifecycle;只有真实
+    # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
+    @property
+    def _worker(self) -> QThread | None:
+        return self._task.worker
+
+    @_worker.setter
+    def _worker(self, value: QThread | None) -> None:
+        self._task.worker = value
 
     @property
     def close_pending(self) -> bool:
-        return self._close_pending
+        """是否正等待排序 worker 安全退出后重试关闭。"""
+        return self._task.close_pending
 
     def _connect(self) -> None:
         self.ui.btn_add_files.clicked.connect(self._add_files)
@@ -147,8 +159,9 @@ class PdfSortTab(QWidget):
         except ValueError as e:
             QMessageBox.warning(self, "匹配格式无效", str(e))
             return
-        # 避免重复启动(重复点击不泄漏多个 worker)
-        if self._worker is not None or self._close_pending:
+        # 避免重复启动(重复点击不泄漏多个 worker):任务未释放或延迟关闭中一律拒绝,
+        # 不以 isRunning() 为准——排队的 finished 尚未消费时同样不能开下一轮
+        if self._task.busy:
             return
         outdir = self._resolve_outdir()
         # 单文件:输出文件;多文件:输出目录(命名策略由 service 决定)
@@ -162,18 +175,18 @@ class PdfSortTab(QWidget):
         worker.failed.connect(self._on_sort_failed)
         worker.warning.connect(self._on_history_warning)
         worker.finished.connect(self._on_worker_finished)
-        self._worker = worker  # 持有引用防 GC
+        self._task.track(worker)  # 持有引用防 GC;在 start 前登记
         self.ui.btn_sort.setEnabled(False)
         self.ui.lbl_status.setText("排序中…")
         worker.start()
 
     def _on_progress(self, current: int, total: int, msg: str) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
     def _on_sort_ok(self, result: SortResult) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
         self._populate_table(result)
         summary = self._controller.summarize(result)
@@ -186,7 +199,7 @@ class PdfSortTab(QWidget):
             except Exception as error:
                 _logger.warning("PDF 排序输出目录偏好保存失败: %s", error)
                 preference_warning = f"输出文件已保留,但未能记住上次输出目录: {error}"
-        if self._close_pending:
+        if self._task.close_pending:
             return
         if result.cancelled:
             details = "\n".join(str(path) for path in outputs)
@@ -198,20 +211,20 @@ class PdfSortTab(QWidget):
         else:
             QMessageBox.warning(self, "未生成输出", summary + "\n\n源文件均未被修改。")
 
-        if preference_warning and not self._close_pending:
+        if preference_warning and not self._task.close_pending:
             QMessageBox.warning(self, "偏好保存失败", preference_warning)
 
     def _on_history_warning(self, msg: str) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
-        if not self._close_pending:
+        if not self._task.close_pending:
             QMessageBox.warning(self, "历史保存失败", msg)
 
     def _on_sort_failed(self, msg: str) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
         self.ui.lbl_status.setText("排序失败")
-        if not self._close_pending:
+        if not self._task.close_pending:
             QMessageBox.critical(self, "排序失败", msg)
 
     def _populate_table(self, result: SortResult) -> None:
@@ -235,24 +248,14 @@ class PdfSortTab(QWidget):
                 self.ui.table.setItem(r, c, item)
 
     def _on_worker_finished(self) -> None:
-        """结果不释放线程;只消费当前 worker 的真实 finished。"""
-        worker = self._worker
-        if worker is None or self.sender() is not worker:
+        """结果不释放线程;只消费当前 worker 的真实 finished,恢复按钮/续接关闭。"""
+        if not self._task.finish(self.sender()):
             return
-        self._worker = None
-        worker.deleteLater()
         self.ui.btn_sort.setEnabled(True)
-        if self._close_pending:
-            self._close_pending = False
-            QTimer.singleShot(0, self.window().close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """协作取消后异步等待 finished,保留窗口及正在写入的线程。"""
-        if self._worker is not None:
-            if not self._close_pending:
-                self._worker.cancel()
-            self._close_pending = True
+        if self._task.defer_close(event):
             self.ui.lbl_status.setText("正在等待排序安全结束,完成后自动关闭…")
-            event.ignore()
             return
         super().closeEvent(event)

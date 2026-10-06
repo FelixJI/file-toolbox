@@ -6,9 +6,9 @@ import re
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
@@ -39,13 +39,8 @@ from file_toolbox.core.attendance import (
     default_rules,
 )
 from file_toolbox.gui.generated.ui_attendance_dialog import Ui_AttendanceDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
 
-if TYPE_CHECKING:
-    # 仅类型引用:运行时在 _start_worker 内按需导入,避免考勤页首切连带
-    # gui.workers 聚合链(Issue #124;本模块顶部已 from __future__ import annotations)。
-    from file_toolbox.gui.workers import AttendanceWorker
-
-_WORKER_CLOSE_WAIT_MS = 5000
 _INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _MAPPING_DETAIL_ROLE = "detail"
 _MAPPING_SUMMARY_ROLE = "summary"
@@ -67,8 +62,12 @@ class AttendanceTab(QWidget):
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
         self._service = service or AttendanceService(history_store=JsonHistoryStore())
         self._plans = plan_store or AttendancePlanStore()
-        self._worker: AttendanceWorker | None = None
-        self._close_pending = False
+        # 生命周期句柄:单一事实保存当前任务与延迟关闭,只在真实 finished 释放。
+        # _next_status/_preview_can_generate 记录结果槽的终态,真实 finished 后
+        # 用于恢复控件(结果信号不恢复启动按钮,仍忙至真实结束)。
+        self._task = TaskLifecycle(self)
+        self._next_status = "就绪"
+        self._preview_can_generate = False
         self._preview_request: AttendanceRequest | None = None
         self._employee_group_overrides: tuple[EmployeeGroupOverride, ...] = ()
         self._group_sheet_configs: tuple[GroupSheetConfig, ...] = ()
@@ -78,6 +77,16 @@ class AttendanceTab(QWidget):
         self._set_defaults()
         self._connect()
         self._refresh_plans()
+
+    # 兼容旧 _worker 字段:读写均转发 TaskLifecycle;只有真实
+    # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
+    @property
+    def _worker(self) -> QThread | None:
+        return self._task.worker
+
+    @_worker.setter
+    def _worker(self, value: QThread | None) -> None:
+        self._task.worker = value
 
     def _setup_tables(self) -> None:
         for table in (
@@ -97,7 +106,7 @@ class AttendanceTab(QWidget):
     @property
     def close_pending(self) -> bool:
         """是否正等待 COM worker 安全退出后重试关闭主窗口。"""
-        return self._close_pending
+        return self._task.close_pending
 
     def _set_defaults(self) -> None:
         today = date.today()
@@ -777,7 +786,8 @@ class AttendanceTab(QWidget):
     def _start_worker(
         self, request: AttendanceRequest, mode: Literal["preview", "generate"]
     ) -> None:
-        if self._worker is not None:
+        # 任务未在真实 finished 中释放(或延迟关闭中)时拒绝,不以 isRunning() 为准
+        if self._task.busy:
             return
         # 按需导入:worker 真正启动才拉起其依赖链,页面构造/首切不预付(Issue #124)。
         from file_toolbox.gui.workers import AttendanceWorker
@@ -788,7 +798,7 @@ class AttendanceTab(QWidget):
         )
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_worker_finished)
-        self._worker = worker
+        self._task.track(worker)
         self._set_busy(True, "正在预览并校验…" if mode == "preview" else "正在生成结果…")
         worker.start()
 
@@ -812,6 +822,9 @@ class AttendanceTab(QWidget):
         self.ui.lbl_status.setText(status)
 
     def _on_preview_ok(self, result: object) -> None:
+        """结果槽:渲染预览与状态;控件恢复等真实 finished(仍忙至真实结束)。"""
+        if not self._task.accepts(self.sender()):
+            return
         if not isinstance(result, AttendancePreview):
             self._on_failed("预览返回了无效结果")
             return
@@ -827,8 +840,10 @@ class AttendanceTab(QWidget):
             status = "存在名单或配置错误"
         else:
             status = "存在未匹配记录"
-        self._set_busy(False, status)
-        self.ui.btn_generate.setEnabled(result.can_generate)
+        # 状态文案即时反馈;_set_busy(False)/启动按钮恢复延后到真实 finished
+        self._next_status = status
+        self._preview_can_generate = result.can_generate
+        self.ui.lbl_status.setText(status)
         self.ui.config_tabs.setCurrentWidget(self.ui.tab_preview)
 
     def _show_preview(self, result: AttendancePreview) -> None:
@@ -960,25 +975,35 @@ class AttendanceTab(QWidget):
         )
 
     def _on_generate_ok(self, result: object) -> None:
+        """结果槽:展示生成结果;控件恢复等真实 finished(仍忙至真实结束)。"""
+        if not self._task.accepts(self.sender()):
+            return
         if not isinstance(result, AttendanceResult):
             self._on_failed("生成返回了无效结果")
             return
         self._preview_request = None
-        self._set_busy(False, "生成完成")
-        self.ui.btn_generate.setEnabled(False)
+        self._preview_can_generate = False
+        self._next_status = "生成完成"
+        self.ui.lbl_status.setText("生成完成")
         warning_text = ""
         if result.warnings:
             warning_text = "\n\n注意：" + "；".join(result.warnings)
-        QMessageBox.information(
-            self,
-            "生成完成",
-            f"已另存结果：\n{result.output_path}\n\n员工 {result.employee_count} 人，"
-            f"{result.day_count} 天。{warning_text}",
-        )
+        if not self._task.close_pending:
+            QMessageBox.information(
+                self,
+                "生成完成",
+                f"已另存结果：\n{result.output_path}\n\n员工 {result.employee_count} 人，"
+                f"{result.day_count} 天。{warning_text}",
+            )
 
     def _on_failed(self, message: str) -> None:
+        """结果槽/内部失败路径:反馈状态;控件恢复等真实 finished。"""
+        if not self._task.accepts(self.sender()):
+            return
         self._preview_request = None
-        self._set_busy(False, "操作失败")
+        self._preview_can_generate = False
+        self._next_status = "操作失败"
+        self.ui.lbl_status.setText("操作失败")
         self.ui.btn_generate.setEnabled(False)
         self.ui.btn_apply_adjustments.setEnabled(
             self.ui.chk_split_groups.isChecked()
@@ -987,27 +1012,25 @@ class AttendanceTab(QWidget):
                 or self.ui.table_employee_preview.rowCount() > 0
             )
         )
-        QMessageBox.critical(self, "考勤处理失败", message)
+        if not self._task.close_pending:
+            QMessageBox.critical(self, "考勤处理失败", message)
 
     def _on_worker_finished(self) -> None:
-        """bound slot 固定在 GUI 线程处理 worker 最终释放与延迟关闭。"""
-        worker = self._worker
-        if worker is None:
+        """真实 finished 后释放线程并恢复控件;延迟关闭由 TaskLifecycle 续接。"""
+        if not self._task.finish(self.sender()):
             return
-        self._worker = None
-        worker.deleteLater()
-        if self._close_pending:
-            self._close_pending = False
-            QTimer.singleShot(0, self.window().close)
+        self._set_busy(False, self._next_status)
+        if self._preview_request is not None:
+            self.ui.btn_generate.setEnabled(self._preview_can_generate)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        worker = self._worker
-        if worker is not None and worker.isRunning():
-            worker.cancel()
-            worker.quit()
-            if not worker.wait(_WORKER_CLOSE_WAIT_MS):
-                self._close_pending = True
-                self.ui.lbl_status.setText("正在等待 Excel 安全退出，完成后将自动关闭…")
-                event.ignore()
-                return
+        """任务未结束时延迟关闭:协作取消后等真实 finished 异步重关。
+
+        旧实现在超时分支才延迟,且先同步 cancel + quit + wait(5000)——等待冻结
+        关闭,wait 超时后清引用仍可能撞上运行中的 COM 线程。引用释放/重新关闭
+        现在全部由 TaskLifecycle 在真实 finished 消费时完成。
+        """
+        if self._task.defer_close(event):
+            self.ui.lbl_status.setText("正在等待 Excel 安全退出，完成后将自动关闭…")
+            return
         super().closeEvent(event)

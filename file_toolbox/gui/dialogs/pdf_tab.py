@@ -4,7 +4,7 @@ import contextlib
 import logging
 from typing import Any
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -36,6 +36,7 @@ from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.pdf_controller import PDFConfigState, PDFController
 from file_toolbox.gui.generated.ui_pdf_dialog import Ui_PDFGeneratorDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
 
 # 下拉框显示文本 -> 服务层期望的常量值
 _PAPER_AUTO = "自动"
@@ -81,6 +82,8 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 生命周期句柄先建:_init_batch_dialog 里 self.worker = None 经下方属性转发写入 task
+        self._task = TaskLifecycle(self)
         self._init_batch_dialog()
         self.ui = Ui_PDFGeneratorDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
@@ -101,6 +104,16 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self._engine_echo_token = 0
         self._engine_detected.connect(self._on_engine_detected)
         self._init_engine_info()
+
+    # 兼容旧 worker 字段:单一事实在 TaskLifecycle,读写均转发;只有真实
+    # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
+    @property
+    def worker(self) -> QThread | None:
+        return self._task.worker
+
+    @worker.setter
+    def worker(self, value: QThread | None) -> None:
+        self._task.worker = value
 
     # ---------- 初始化 ----------
 
@@ -302,8 +315,9 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if not self.selected_files:
             QMessageBox.information(self, "提示", "请先选择文件。")
             return
-        # 避免重复启动
-        if self.worker is not None and self.worker.isRunning():
+        # 避免重复启动:任务尚未在真实 finished 中释放(或正在延迟关闭)时一律拒绝,
+        # 不以 isRunning() 为准——排队的 finished 尚未消费时同样不能开下一轮
+        if self._task.busy:
             return
 
         config = self._build_config()
@@ -319,16 +333,22 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         worker.progress.connect(self._on_progress)
         worker.finished_ok.connect(self._on_generate_ok)
         worker.failed.connect(self._on_generate_failed)
-        self.worker = worker
+        worker.finished.connect(self._on_worker_finished)
+        self._task.track(worker)
         self._set_ui_enabled(False)
         worker.start()
 
     def _on_progress(self, cur: int, total: int, msg: str) -> None:
+        if not self._task.accepts(self.sender()):
+            return
         self.ui.label_progress.setText(self._controller.format_progress(cur, total, msg))
         pct = int(cur / total * 100) if total else 0
         self.ui.progress_bar.setValue(pct)
 
     def _on_generate_ok(self, results: list[dict[str, Any]]) -> None:
+        """结果槽:只渲染结果;引用释放与控件恢复等真实 finished。"""
+        if not self._task.accepts(self.sender()):
+            return
         self._render_results(results)
         ok, fail = self._controller.summarize_results(results)
         self.ui.label_progress.setText(f"完成: 成功 {ok}, 失败 {fail}")
@@ -336,46 +356,26 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         # 在 worker 线程内由 JsonHistoryStore 的锁保护写入)
         # 兑现已完成(若含 Office 文档),刷新引擎信息反映真实状态。
         self._refresh_engine_info_label()
-        self._set_ui_enabled(True)
-        self.worker = None
-        if fail:
+        if fail and not self._task.close_pending:
             QMessageBox.warning(self, "部分失败", f"{fail} 个文件转换失败,详见预览表。")
 
     def _on_generate_failed(self, msg: str) -> None:
+        if not self._task.accepts(self.sender()):
+            return
         self.ui.label_progress.setText("生成失败")
         self._refresh_engine_info_label()
+        if not self._task.close_pending:
+            QMessageBox.critical(self, "生成失败", msg)
+
+    def _on_worker_finished(self) -> None:
+        """真实 finished 后释放线程并恢复控件;延迟关闭由 TaskLifecycle 续接。"""
+        if not self._task.finish(self.sender()):
+            return
         self._set_ui_enabled(True)
-        self.worker = None
-        QMessageBox.critical(self, "生成失败", msg)
 
     def _on_cancel(self) -> None:
-        if self.worker is not None and hasattr(self.worker, "cancel"):
-            self.worker.cancel()
+        self._task.cancel()
         self.ui.label_progress.setText("正在取消...")
-
-    def _stop_worker(self, timeout_ms: int = 30000) -> None:
-        """停止 PDF worker —— 协作式取消 + 较长等待,绝不强制 terminate。
-
-        覆盖 BatchDialogMixin._stop_worker:PDF worker 持有 COM 对象,强制 terminate
-        (QThread.terminate)会在线程仍处于 win32com/Word 调用中途时杀掉它,可能泄漏
-        Office 进程、留下未初始化 COM、甚至死锁。quit() 对无事件循环的 worker 是
-        no-op,cancel() 仅在文件间生效,故大文件转换(>3s)会让基类的 wait(3000) 超时
-        进而触发 terminate —— 必须禁用。改用 30s 宽限等待,超时仅记日志。
-
-        closeEvent → _cleanup_batch_dialog → _stop_worker 自动受益于此覆盖。
-        """
-        if self.worker and self.worker.isRunning():
-            if hasattr(self.worker, "cancel"):
-                self.worker.cancel()
-            # quit() 对无事件循环的 worker 无效,但仍调用以保持一致
-            self.worker.quit()
-            if not self.worker.wait(timeout_ms):
-                self._module_logger.warning(
-                    f"{self.__class__.__name__}: PDF worker 未能在 {timeout_ms}ms 内停止"
-                    "(可能仍在转换大文件);不强制 terminate 以避免 COM 泄漏"
-                )
-            # 不调用 self.worker.terminate() —— COM 线程强终止不安全
-        self.worker = None
 
     # ---------- 预览 ----------
 
@@ -446,7 +446,17 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.label_status.setText(f"已选择 {len(self.selected_files)} 个文件")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        """任务未结束时延迟关闭:协作取消后等真实 finished 异步重关。
+
+        不再 wait/terminate 后假定线程结束——worker 持 COM 对象,同步等待会冻结
+        关闭、强杀会泄漏 Office 进程;清空引用/恢复控件/重新关闭全部由
+        TaskLifecycle 在真实 finished 消费时完成。
+        """
+        if self._task.defer_close(event):
+            self.ui.label_progress.setText("正在等待转换安全结束,完成后自动关闭…")
+            return
         self._cleanup_batch_dialog()
+        # svc.close 只在 worker 线程已退出(run() 的 finally 已先行关闭)后执行
         with contextlib.suppress(Exception):
             self._svc.close()
         super().closeEvent(event)

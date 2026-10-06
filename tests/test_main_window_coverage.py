@@ -268,11 +268,11 @@ def test_close_event_respects_attendance_pending_state(win, monkeypatch):
     ):
         monkeypatch.setattr(type(tab), "closeEvent", lambda self, event: None, raising=False)
     monkeypatch.setattr(type(win._attendance_tab), "closeEvent", lambda self, event: None)
-    win._attendance_tab._close_pending = True
+    win._attendance_tab._task.close_pending = True
     event = QCloseEvent()
     win.closeEvent(event)
     assert event.isAccepted() is False
-    win._attendance_tab._close_pending = False
+    win._attendance_tab._task.close_pending = False
 
 
 def test_main_window_import_stays_light():
