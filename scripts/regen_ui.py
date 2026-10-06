@@ -63,6 +63,10 @@ UI_SOURCES: list[UiMapping] = [
         ui_file="attendance_dialog.ui",
     ),
     UiMapping(
+        ui_module="ui_markdown_dialog.py",
+        ui_file="markdown_dialog.ui",
+    ),
+    UiMapping(
         ui_module="ui_mkdir_dialog.py",
         ui_file="batch_folder_creator_dialog.ui",
     ),

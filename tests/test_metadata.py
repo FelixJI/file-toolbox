@@ -61,7 +61,7 @@ def test_app_description_covers_all_capabilities():
         for i in range(win._tabs.count())
         if win._tabs.tabText(i) not in ("更新", "关于")
     ]
-    assert len(business_labels) == 9  # 当前九项业务能力的回归锚点
+    assert len(business_labels) == 10  # 当前十项业务能力的回归锚点
     description = metadata.APP_DESCRIPTION.replace(" ", "")
     for label in business_labels:
         assert label.replace(" ", "") in description, f"简介未覆盖能力页 {label!r}"

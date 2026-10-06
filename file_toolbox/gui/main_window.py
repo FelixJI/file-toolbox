@@ -1,4 +1,4 @@
-"""File Toolbox 主窗口：QMainWindow + 9 个功能 Tab。"""
+"""File Toolbox 主窗口：QMainWindow + 10 个功能 Tab。"""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab
     from file_toolbox.gui.dialogs.excel_merge_tab import ExcelMergeTab
     from file_toolbox.gui.dialogs.invoice_tab import InvoiceTab
+    from file_toolbox.gui.dialogs.markdown_tab import MarkdownConvertTab
     from file_toolbox.gui.dialogs.mkdir_tab import BatchFolderCreatorDialog
     from file_toolbox.gui.dialogs.pdf_sort_tab import PdfSortTab
     from file_toolbox.gui.dialogs.pdf_tab import PDFGeneratorDialog
@@ -55,8 +56,8 @@ _logger = logging.getLogger(__name__)
 
 # 窗口几何持久化 key(settings.json):base64(saveGeometry)。
 _GEOMETRY_KEY = "window/geometry"
-# 独立更新页在标签栏中的固定索引(9 个业务页之后、关于页之前)。
-_UPDATE_TAB_INDEX = 9
+# 独立更新页在标签栏中的固定索引(10 个业务页之后、关于页之前)。
+_UPDATE_TAB_INDEX = 10
 
 
 def _make_rename_tab() -> FileRenamerDialog:
@@ -113,6 +114,12 @@ def _make_plan_schedule_tab() -> PlanScheduleTab:
     return PlanScheduleTab()
 
 
+def _make_markdown_tab() -> MarkdownConvertTab:
+    from file_toolbox.gui.dialogs.markdown_tab import MarkdownConvertTab
+
+    return MarkdownConvertTab()
+
+
 def _make_update_tab() -> UpdateTab:
     from file_toolbox.gui.dialogs.update_tab import UpdateTab
 
@@ -134,7 +141,7 @@ def _construct_tab(factory: Callable[[], QWidget], name: str) -> QWidget:
 
 
 class MainWindow(QMainWindow):
-    """工具箱主窗口，9 个功能 Tab。"""
+    """工具箱主窗口，10 个功能 Tab。"""
 
     def __init__(self, coordinator: UpdateCoordinator | None = None) -> None:
         super().__init__()
@@ -159,7 +166,7 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_history)
         layout.addLayout(top)
 
-        # 9 个功能 Tab + 更新 + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
+        # 10 个功能 Tab + 更新 + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
         # 均懒导入,首次构造某 Tab 时才 import;首屏只构造重命名 Tab。
         # 打包形态下真实平台主窗口构造可达 ~1.7s,大头是首个控件初始化链
         # 之后的各 Tab 陆续构造;懒掉非首屏 Tab 让首帧只付首 Tab 的成本。
@@ -176,6 +183,7 @@ class MainWindow(QMainWindow):
         self._excel_merge_tab: ExcelMergeTab | None = None
         self._pdf_sort_tab: PdfSortTab | None = None
         self._plan_schedule_tab: PlanScheduleTab | None = None
+        self._markdown_tab: MarkdownConvertTab | None = None
         self._update_tab: UpdateTab | None = None
         self._about_tab: AboutTab | None = None
         # 懒构造登记:index -> (标签文本, Tab 工厂, 属性名);占位页被真实 Tab 原位替换。
@@ -193,6 +201,7 @@ class MainWindow(QMainWindow):
                     ("Excel合并", _make_excel_merge_tab, "_excel_merge_tab"),
                     ("PDF排序", _make_pdf_sort_tab, "_pdf_sort_tab"),
                     ("计划排布", _make_plan_schedule_tab, "_plan_schedule_tab"),
+                    ("Markdown转换", _make_markdown_tab, "_markdown_tab"),
                     ("更新", _make_update_tab, "_update_tab"),
                     ("关于", _make_about_tab, "_about_tab"),
                 ]
@@ -215,6 +224,7 @@ class MainWindow(QMainWindow):
             "excel_merge",
             "pdf_sort",
             "plan_schedule",
+            "markdown_convert",
             None,
             None,
         ]

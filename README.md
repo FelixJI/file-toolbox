@@ -14,8 +14,8 @@
 </div>
 
 File Toolbox 把批量重命名、批量建文件夹、生成 PDF、内容替换、考勤汇总、发票识别、
-Excel 合并、PDF 排序和计划排布集中到同一个 CLI 与 PySide6 桌面界面中。批量重命名、内容替换、
-发票识别、PDF 排序、Excel 合并、建文件夹、生成 PDF 和计划排布的 CLI 默认只预览，显式传入
+Excel 合并、PDF 排序、计划排布和 Markdown 转换集中到同一个 CLI 与 PySide6 桌面界面中。批量重命名、内容替换、
+发票识别、PDF 排序、Excel 合并、建文件夹、生成 PDF、计划排布和 Markdown 转换的 CLI 默认只预览，显式传入
 `--yes` 才会执行；生成 PDF 的预览只列输入与选项，执行时逐文件报告进度。
 
 > [!IMPORTANT]
@@ -36,6 +36,7 @@ Excel 合并、PDF 排序和计划排布集中到同一个 CLI 与 PySide6 桌�
 | Excel 合并 | ✓ | ✓ | 多个 xlsx/xlsm 的全部工作表合并为一个工作簿，保留值与样式，工作表名防冲突，输出永不覆盖已有文件 |
 | PDF 排序 | ✓ | ✓ | 按文字层正则匹配每页排序键（日期/流水号等）重排页面，适合单页单据扫描件归档；需含文字层，源文件不被修改 |
 | 计划排布 | ✓ | ✓ | 按项点名称与起止日期生成按月分块的排布表：标记周末、逐日并行项点数；日期格可切换"项点内第几天"或"项点名称（第x列/批次）"两种模式；输出永不覆盖已有文件 |
+| Markdown 转换 | ✓ | ✓ | 批量生成 Word 或 Excel；Excel 可选仅提取表格或包含正文；每个源文件单独输出，同名自动编号 |
 
 ## 下载与使用
 
@@ -73,6 +74,30 @@ uv run file-toolbox rename --dir ./samples --op "add_suffix:text=_done" --yes
 ```
 
 具体参数以 `uv run file-toolbox <command> --help` 为准。
+
+### Markdown 批量转 Word / Excel
+
+在 GUI 的“Markdown转换”页添加 `.md` / `.markdown` 文件或目录，选择目标格式后开始转换。
+CLI 默认只列出计划，添加 `--yes` 才写文件：
+
+```powershell
+uv run file-toolbox markdown-convert --dir ./notes --recursive --to docx
+uv run file-toolbox markdown-convert --dir ./notes --to docx --yes
+uv run file-toolbox markdown-convert --dir ./notes --to xlsx --excel-mode tables --yes
+uv run file-toolbox markdown-convert --dir ./notes --to xlsx --excel-mode document --output-dir ./output --yes
+```
+
+- **Word**：复用 [Pandoc](https://pandoc.org/)，保留标题、段落、列表、表格、代码、链接和公式。
+  转换在沙箱中运行，不加载图片等外部资源；含无法处理资源的文件会报告失败，不会静默丢失内容。
+- **Excel / 仅表格**：每个 Markdown 文件生成一个工作簿，每张表格一个工作表；没有表格时跳过。
+- **Excel / 包含正文**：另外生成正文工作表，按阅读顺序记录标题、段落、列表、代码和表格引用；纯正文也能导出。
+  单元格按文本写入，保留前导零，不执行内容中的 Excel 公式。富文本样式和图片不转换为 Excel 对象。
+- 输入使用 UTF-8（兼容 BOM）；输出默认放在各源文件旁，可统一指定输出目录。
+  已有文件永不覆盖；单个文件失败不影响后续文件，取消保留已经完成的输出。
+
+Word 转换使用 `pypandoc_binary` 提供的 Pandoc，Excel 使用 `markdown-it-py` 与 `openpyxl`，均无需安装 Office/WPS。
+Windows 便携版随包携带 Pandoc 程序及其 `pypandoc/files/COPYRIGHT.txt`，因此解压体积会增加约 221 MiB。
+Pandoc 的许可证及源代码见其[官方仓库](https://github.com/jgm/pandoc)；其他平台源码运行需使用该依赖支持的平台。
 
 ### 日志与故障排查
 

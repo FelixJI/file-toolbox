@@ -62,6 +62,8 @@ def _archive(directory: Path, version: str) -> None:
     portable = directory / f"FileToolbox-v{version}-win-x64.zip"
     with zipfile.ZipFile(portable, "w") as package:
         package.writestr("FileToolbox.exe", b"smoke")
+        package.writestr("pypandoc/files/pandoc.exe", b"pandoc")
+        package.writestr("pypandoc/files/COPYRIGHT.txt", b"license")
     full = directory / f"FileToolbox-{version}-full.nupkg"
     with zipfile.ZipFile(full, "w") as package:
         package.writestr("package/services/metadata/core-properties/test.psmdcp", b"metadata")

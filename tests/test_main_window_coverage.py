@@ -66,14 +66,14 @@ def test_history_button_opens_current_tab_history(win, monkeypatch):
 
 
 def test_history_button_disabled_on_update_page(win):
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     assert win.btn_history.isEnabled() is False
 
 
 def test_history_button_noop_on_update_page(win, monkeypatch):
     dialog = MagicMock()
     monkeypatch.setattr("file_toolbox.gui.dialogs.history_dialog.HistoryDialog", dialog)
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     win._open_history_for_current_tab()
     dialog.assert_not_called()
 
@@ -89,6 +89,7 @@ def test_tab_tools_mapping(win):
         "excel_merge",
         "pdf_sort",
         "plan_schedule",
+        "markdown_convert",
         None,
         None,
     ]
@@ -101,8 +102,8 @@ def test_only_first_tab_constructed_initially(win):
     assert win._replace_tab is None
     assert win._update_tab is None
     assert win._about_tab is None
-    assert win._tabs.count() == 11
-    assert [win._tabs.tabText(i) for i in range(11)] == [
+    assert win._tabs.count() == 12
+    assert [win._tabs.tabText(i) for i in range(12)] == [
         "重命名",
         "建文件夹",
         "生成PDF",
@@ -112,6 +113,7 @@ def test_only_first_tab_constructed_initially(win):
         "Excel合并",
         "PDF排序",
         "计划排布",
+        "Markdown转换",
         "更新",
         "关于",
     ]
@@ -122,7 +124,7 @@ def test_lazy_tab_materialized_on_switch(win):
 
     win._tabs.setCurrentIndex(3)
     assert isinstance(win._replace_tab, ContentReplaceDialog)
-    assert win._tabs.count() == 11
+    assert win._tabs.count() == 12
     assert win._tabs.tabText(3) == "内容替换"
     assert win._tabs.widget(3) is win._replace_tab
     assert win._tabs.currentIndex() == 3
@@ -147,7 +149,7 @@ def test_update_page_check_signal_wired_after_lazy_construction(win, monkeypatch
     starts: list[int] = []
     monkeypatch.setattr(win._update_worker, "start", lambda: starts.append(1))
     monkeypatch.setattr(win, "_trigger_check", lambda: None)
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     assert win._update_tab is not None
     win._update_tab.btn_check_update.click()
     assert starts == [1]
@@ -244,6 +246,7 @@ def test_close_event_stops_update_worker(win, monkeypatch):
         win._excel_merge_tab,
         win._pdf_sort_tab,
         win._plan_schedule_tab,
+        win._markdown_tab,
         win._about_tab,
     ):
         monkeypatch.setattr(type(tab), "closeEvent", lambda self, event: None, raising=False)
@@ -263,6 +266,7 @@ def test_close_event_respects_attendance_pending_state(win, monkeypatch):
         win._excel_merge_tab,
         win._pdf_sort_tab,
         win._plan_schedule_tab,
+        win._markdown_tab,
         win._invoice_tab,
         win._about_tab,
     ):
@@ -563,7 +567,7 @@ def _materialize_about(win):
 
 
 def _materialize_update_page(win):
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     assert win._update_tab is not None
     return win._update_tab
 

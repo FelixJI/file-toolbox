@@ -83,6 +83,9 @@ flowchart TD
 这条路线仅适合 Windows 环境。先找平台能力检测与适配器，再进入 COM 调用；测试应区分纯逻辑测试和
 需要真实 Microsoft Office 的集成验证。
 
+Markdown 转 Word / Excel 走 `core/markdown_convert.py`，使用内置 Pandoc 和
+`markdown-it-py` / `openpyxl`，不经过 COM。CLI 为 `markdown-convert`，GUI 为“Markdown转换”。
+
 ### 构建与发布
 
 按以下顺序阅读：

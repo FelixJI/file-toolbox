@@ -68,6 +68,13 @@ def _summary_label(tool: str, data: dict[str, Any]) -> str:
         outputs = data.get("outputs", [])
         order = data.get("order", "?")
         return f"{pages} 页 / {files} 文件 [{order}] → {len(outputs)} 个输出"
+    if tool == "markdown_convert":
+        ok = data.get("success", 0)
+        files = data.get("file_count", 0)
+        target = data.get("target", "?")
+        mode = data.get("excel_mode")
+        suffix = f" [{mode}]" if mode else ""
+        return f"{ok}/{files} 个文件{suffix} → {target}"
     if tool == "plan_schedule":
         items = data.get("item_count", 0)
         months = data.get("month_count", 0)
