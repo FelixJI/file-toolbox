@@ -16,7 +16,6 @@ worker 负责:
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +45,7 @@ class PdfGenerateWorker(QThread, LoggableMixin):
     progress = Signal(int, int, str)
     finished_ok = Signal(list)
     failed = Signal(str)
+    cleanup_warning = Signal(str)
 
     def __init__(
         self,
@@ -68,28 +68,29 @@ class PdfGenerateWorker(QThread, LoggableMixin):
         return self._cancel
 
     def run(self) -> None:  # noqa: D401 (QThread 命名)
-        """worker 入口(在后台线程执行)。"""
-        # COM:win32com 要求使用它的线程先 CoInitialize,否则进程退出抛致命异常。
-        # ComSession 负责本线程 CoInitialize/CoUninitialize 配对(非 Windows / 无 pywin32
-        # 时为 no-op)。__exit__ 在 with 体(含下方 finally)之后执行,故 svc.close() 仍在
-        # CoUninitialize 之前——与原手写顺序一致。
-        with ComSession():
-            try:
-                self.logger.info("PDF 生成 worker 开始 files=%d", len(self._files))
-                # 无引擎预检 Dispatch(Issue #123):注册表探测负责展示识别;真实
-                # Dispatch 成功由转换器 _init_office_app 就地喂养引擎缓存并精确
-                # 回写持久键。验证专用 COM 启动次数为 0,实际转换启动按需发生。
-                results = self._svc.batch_generate(
-                    self._files,
-                    self._config,
-                    progress_callback=lambda c, t, m: self.progress.emit(c, t, m),
-                    cancel_check=self._cancel_check,
-                )
-                self.logger.info("PDF 生成 worker 完成 files=%d", len(self._files))
-                self.finished_ok.emit(results)
-            except Exception as e:
-                self.logger.exception("PDF 生成 worker 异常 files=%d", len(self._files))
-                self.failed.emit(str(e))
-            finally:
-                with contextlib.suppress(Exception):
-                    self._svc.close()
+        """结果先投递；同线程严格清理之后才真正 finished。"""
+        outcome_emitted = False
+        try:
+            with ComSession():
+                try:
+                    self.logger.info("PDF 生成 worker 开始 files=%d", len(self._files))
+                    results = self._svc.batch_generate(
+                        self._files,
+                        self._config,
+                        progress_callback=lambda c, t, m: self.progress.emit(c, t, m),
+                        cancel_check=self._cancel_check,
+                    )
+                    outcome_emitted = True
+                    self.finished_ok.emit(results)
+                except Exception as error:
+                    self.logger.exception("PDF 生成 worker 异常 files=%d", len(self._files))
+                    outcome_emitted = True
+                    self.failed.emit(str(error))
+                finally:
+                    self._svc.close(strict=True)
+        except Exception as error:
+            self.logger.exception("PDF worker COM/资源释放失败")
+            if outcome_emitted:
+                self.cleanup_warning.emit(f"已完成的输出保留；资源清理失败: {error}")
+            else:
+                self.failed.emit(str(error))

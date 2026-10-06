@@ -47,7 +47,7 @@ def exercise(failure, closing):
                 raise ValueError("controlled failure")
             return []
 
-        def close(self):
+        def close(self, *, strict=False):
             entered.set()
             assert release.wait(10)
 

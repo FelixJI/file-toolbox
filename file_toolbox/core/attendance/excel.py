@@ -12,6 +12,7 @@ from file_toolbox.common.office_session import (
     ComSession,
     dispose_office_app,
     init_isolated_office_app,
+    open_office_document,
 )
 from file_toolbox.core.attendance.types import (
     AttendancePlan,
@@ -461,8 +462,10 @@ def _write_group(
 
 
 def _open_workbook(app: Any, path: Path, *, read_only: bool) -> Any:
-    return app.Workbooks.Open(
-        str(path.resolve()),
+    return open_office_document(
+        app,
+        "Workbooks",
+        path,
         UpdateLinks=0,
         ReadOnly=read_only,
         AddToMru=False,
@@ -485,6 +488,8 @@ def _excel_workbook(path: Path, *, read_only: bool) -> Iterator[tuple[Any, Any]]
             operation_error = exc
 
         cleanup_error = _release_excel(workbook, app)
+        workbook = None
+        app = None
         if operation_error is not None:
             if cleanup_error is not None:
                 raise RuntimeError(f"{operation_error}；{cleanup_error}") from operation_error
@@ -501,7 +506,7 @@ def _release_excel(workbook: Any | None, app: Any | None) -> RuntimeError | None
         except Exception as exc:
             errors.append(f"关闭工作簿失败: {exc}")
     try:
-        dispose_office_app(app, raise_on_error=True)
+        dispose_office_app(app, "Excel.Application", raise_on_error=True)
     except RuntimeError as exc:
         errors.append(str(exc))
     if errors:

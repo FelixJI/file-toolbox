@@ -932,3 +932,16 @@ def test_set_ui_enabled_toggles_cancel_button_visibility(dlg):
     dlg._set_ui_enabled(True)
     assert dlg.ui.btn_generate.isEnabled() is True
     assert dlg.ui.btn_cancel.isHidden() is True
+
+
+def test_cleanup_warning_keeps_completed_rows(dlg, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
+
+    dlg.ui.table_files.setRowCount(1)
+    dlg.ui.table_files.setItem(0, 3, QTableWidgetItem("成功"))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    dlg._on_cleanup_warning("已完成的输出保留；资源清理失败: controlled failure")
+    assert dlg.ui.table_files.item(0, 3).text() == "成功"
+    assert dlg.ui.label_progress.text() == "任务结果已保留，资源清理失败"
+    assert "controlled failure" in warnings[0]

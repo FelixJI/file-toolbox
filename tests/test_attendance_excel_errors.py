@@ -60,7 +60,10 @@ def _cell(*, value=None, formula="", merged=False):
 
 
 def _patch_excel(monkeypatch, workbook):
+    # Workbooks.Count = 0:Task142 后 Quit 由 dispose_office_app 门控,只有空集合的
+    # 专属应用才退出;fake 必须显式声明“本次工作簿已 Close、集合已清空”。
     app = MagicMock()
+    app.Workbooks.Count = 0
     app.Workbooks.Open.return_value = workbook
     monkeypatch.setattr(
         "file_toolbox.core.attendance.excel.init_isolated_office_app", lambda prog_id: app

@@ -42,7 +42,7 @@ class _FakeService:
                 progress_callback(i, total, f"处理 {i}")
         return self._results[: len(files)]  # 取消时可能截断
 
-    def close(self):
+    def close(self, *, strict=False):
         self.closed = True
 
 
@@ -147,6 +147,7 @@ def test_worker_no_engine_precheck_dispatch(app, monkeypatch):
 
     dispatch = MagicMock()
     monkeypatch.setattr(win32com.client, "Dispatch", dispatch)
+    monkeypatch.setattr(win32com.client, "DispatchEx", dispatch)
 
     results = [_make_result("a.docx")]
     svc = _FakeService(results)  # 假 service 不触发真实转换,Dispatch 只可能来自预检
@@ -256,3 +257,49 @@ def test_worker_run_com_inited_false_when_pythoncom_import_fails(app, monkeypatc
     assert captured.get("ok") == results
     assert "fail" not in captured
     assert svc.closed is True
+
+
+def test_cleanup_failure_keeps_completed_result_and_emits_warning(app):
+    results = [_make_result("controlled.docx")]
+    svc = _FakeService(results)
+    close_calls = []
+
+    def close(*, strict=False):
+        close_calls.append(strict)
+        raise RuntimeError("controlled cleanup failure")
+
+    svc.close = close
+    worker = PdfGenerateWorker(svc, [results[0]["source"]], {})
+    captured = []
+    failures = []
+    warnings = []
+    worker.finished_ok.connect(captured.append)
+    worker.failed.connect(failures.append)
+    worker.cleanup_warning.connect(warnings.append)
+    worker.run()
+    assert captured == [results]
+    assert not failures
+    assert close_calls == [True]
+    assert len(warnings) == 1
+    assert "输出保留" in warnings[0]
+    assert "controlled cleanup failure" in warnings[0]
+
+
+def test_generation_and_cleanup_failure_keep_distinct_signals(app):
+    svc = _FakeService([])
+
+    def generate(*args, **kwargs):
+        raise RuntimeError("controlled generation failure")
+
+    def close(*, strict=False):
+        raise RuntimeError("controlled cleanup failure")
+
+    svc.batch_generate = generate
+    svc.close = close
+    worker = PdfGenerateWorker(svc, [], {})
+    failures, warnings = [], []
+    worker.failed.connect(failures.append)
+    worker.cleanup_warning.connect(warnings.append)
+    worker.run()
+    assert failures == ["controlled generation failure"]
+    assert len(warnings) == 1 and "controlled cleanup failure" in warnings[0]

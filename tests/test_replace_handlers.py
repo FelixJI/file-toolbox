@@ -1,8 +1,8 @@
 """Word/Excel 替换处理器纯逻辑方法的单元测试。
 
 仅覆盖 `_count_matches_in_text`(纯字符串/正则处理,不依赖 COM)。
-通过 `Handler.__new__(Handler)` 绕过 `__init__`,避免触发 COM/Office 依赖
-(`__init__` 仅注入 PID 管理回调,本测试用不到)。
+Task142 后构造函数无参(不再注入 PID 回调),直接构造不触发任何 COM/
+Office 依赖。
 """
 
 from file_toolbox.core.batch_replace.handlers.excel_handler import ExcelHandler
@@ -14,13 +14,13 @@ REGEX = "regex_replace"
 
 
 def _word() -> WordHandler:
-    """构造一个不触发 __init__(无 COM)的 WordHandler 实例。"""
-    return WordHandler.__new__(WordHandler)
+    """构造 WordHandler(无参构造,无 COM 副作用)。"""
+    return WordHandler()
 
 
 def _excel() -> ExcelHandler:
-    """构造一个不触发 __init__(无 COM)的 ExcelHandler 实例。"""
-    return ExcelHandler.__new__(ExcelHandler)
+    """构造 ExcelHandler(无参构造,无 COM 副作用)。"""
+    return ExcelHandler()
 
 
 # ---------------------------------------------------------------------------
