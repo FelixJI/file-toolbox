@@ -7,9 +7,8 @@
   - 协作式取消(cancel → service 的 cancel_check,文件间生效)
   - 信号回主线程:preview_ok / execute_ok / progress / failed
 
-与 pdf_worker 的差异:**worker 不 close service**——ContentReplaceService 由
-对话框持有、closeEvent 统一关闭(close 含按 PID 快照清理 Office 进程,若每次
-预览/执行后都跑一遍会与 handler 批末清理重复)。
+Office 引用由 handler 在创建线程释放；service.close 仅清理本服务临时文件。
+取消在 COM 调用返回后的检查点生效，不能硬中断正在进行的调用。
 """
 
 from __future__ import annotations
@@ -49,23 +48,23 @@ class ReplacePreviewWorker(QThread, LoggableMixin):
         self._cancel = False
 
     def cancel(self) -> None:
-        """请求取消(下一个文件前生效,已进入 COM 调用的文件会做完)。"""
+        """请求取消；正在进行的 COM 调用返回后，在下一个检查点停止。"""
         self._cancel = True
 
     def run(self) -> None:  # noqa: D401 (QThread 命名)
         """worker 入口(在后台线程执行)。"""
         # COM:win32com 要求使用它的线程先 CoInitialize(非 Windows/无 pywin32 时 no-op)
-        with ComSession():
-            try:
+        try:
+            with ComSession():
                 self.logger.info("替换预览 worker 开始 files=%d", len(self._files))
                 result = self._svc.preview_replace(
                     self._files, self._operations, cancel_check=lambda: self._cancel
                 )
                 self.logger.info("替换预览 worker 完成 files=%d", len(self._files))
                 self.preview_ok.emit(result)
-            except Exception as e:
-                self.logger.exception("替换预览 worker 异常 files=%d", len(self._files))
-                self.failed.emit(str(e))
+        except Exception as e:
+            self.logger.exception("替换预览 worker 异常 files=%d", len(self._files))
+            self.failed.emit(str(e))
 
 
 class ReplaceExecuteWorker(QThread, LoggableMixin):
@@ -97,13 +96,13 @@ class ReplaceExecuteWorker(QThread, LoggableMixin):
         self._cancel = False
 
     def cancel(self) -> None:
-        """请求取消(下一个文件前生效,已进入 COM 调用的文件会做完)。"""
+        """请求取消；正在进行的 COM 调用返回后，在下一个检查点停止。"""
         self._cancel = True
 
     def run(self) -> None:  # noqa: D401 (QThread 命名)
         """worker 入口(在后台线程执行)。"""
-        with ComSession():
-            try:
+        try:
+            with ComSession():
                 self.logger.info("替换执行 worker 开始 files=%d", len(self._files))
                 success, total, errors = self._svc.execute_replace(
                     self._files,
@@ -116,6 +115,6 @@ class ReplaceExecuteWorker(QThread, LoggableMixin):
                     "替换执行 worker 完成 files=%d success=%d", len(self._files), success
                 )
                 self.execute_ok.emit(success, total, list(errors))
-            except Exception as e:
-                self.logger.exception("替换执行 worker 异常 files=%d", len(self._files))
-                self.failed.emit(str(e))
+        except Exception as e:
+            self.logger.exception("替换执行 worker 异常 files=%d", len(self._files))
+            self.failed.emit(str(e))

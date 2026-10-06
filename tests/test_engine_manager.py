@@ -1,6 +1,6 @@
 """EngineManager 注册表探测/证据喂养/single-flight 单元测试。
 
-不触发真实 COM Dispatch,仅用 monkeypatch 替换 winreg/Dispatch/engine_cache。
+不触发真实 COM Dispatch,仅用 monkeypatch 替换 winreg/DispatchEx/engine_cache。
 winreg 相关用例直接用真实模块对象做 monkeypatch,故仅在 Windows(winreg 存在)
 上有效;非 Windows 跳过(产品本身的 _probe_registry 已对 ImportError 做了回退
 处理)。
@@ -598,14 +598,15 @@ def test_init_ppt_raises_on_non_windows(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# COM 真路径(mock Dispatch):_init_office_app 缓存/切换/失败、_try_detect、close。
+# COM 真路径(mock DispatchEx):_init_office_app 缓存/切换/失败、_try_detect、close。
 # 本机 Windows(pywin32 已装)与 CI Windows runner 上 import win32com.client 成功,
-# Dispatch 被 monkeypatch 替换为 mock,不触发真实 Office。
+# DispatchEx 被 monkeypatch 替换为 mock,不触发真实 Office(Task142 后 init_office_app
+# 统一走 DispatchEx,且 Quit 由 dispose_office_app 按空集合门控)。
 # ---------------------------------------------------------------------------
 
 
 def _stub_dispatch(monkeypatch, *, return_value=None, side_effect=None):
-    """替换 win32com.client.Dispatch,返回 mock 便于断言调用次数与参数。"""
+    """替换 win32com.client.DispatchEx,返回 mock 便于断言调用次数与参数。"""
     import win32com.client
 
     dispatch = MagicMock()
@@ -613,7 +614,7 @@ def _stub_dispatch(monkeypatch, *, return_value=None, side_effect=None):
         dispatch.side_effect = side_effect
     elif return_value is not None:
         dispatch.return_value = return_value
-    monkeypatch.setattr(win32com.client, "Dispatch", dispatch)
+    monkeypatch.setattr(win32com.client, "DispatchEx", dispatch)
     return dispatch
 
 
@@ -648,6 +649,7 @@ def test_init_office_app_engine_switch_quits_old(monkeypatch, engine_cache_stub)
     """
     em = EngineManager()
     old_app = MagicMock()
+    old_app.Documents.Count = 0  # 专属应用 Quit 前置条件:集合已清空
     new_app = MagicMock()
     # 第一次 Dispatch 返回 old_app,第二次返回 new_app
     dispatch = _stub_dispatch(monkeypatch, side_effect=[old_app, new_app])
@@ -656,7 +658,7 @@ def test_init_office_app_engine_switch_quits_old(monkeypatch, engine_cache_stub)
     em.init_word(engine="office")  # ms_prog_id → Word.Application
     assert dispatch.call_count == 1
 
-    # 切换到 wps 引擎 → 旧 app.Quit 被调,再 Dispatch wps_prog_id
+    # 切换到 wps 引擎 → 旧实例经 dispose Quit(Count==0),再 Dispatch 新的
     em.init_word(engine="wps")
     old_app.Quit.assert_called_once()
     assert dispatch.call_count == 2
@@ -699,11 +701,13 @@ def test_init_office_app_falls_back_to_wps(monkeypatch, engine_cache_stub):
 
 
 def test_try_detect_success_returns_true_and_quits(monkeypatch):
-    """_try_detect:Dispatch 成功 → True 且 app.Quit 被调(即便 Quit 失败也不影响 True)。
+    """_try_detect:Dispatch 成功 → True 且空集合应用 Quit 被调。
 
-    覆盖 engine_manager.py 行 79-89(成功路径)。
+    覆盖 engine_manager.py 成功路径;Quit 由 dispose_office_app 执行,需显式
+    Documents.Count = 0 假件满足门控。
     """
     app = MagicMock()
+    app.Documents.Count = 0
     _stub_dispatch(monkeypatch, return_value=app)
 
     logs: list[str] = []
@@ -726,25 +730,29 @@ def test_try_detect_failure_returns_false_and_logs(monkeypatch):
 
 
 def test_try_detect_quit_failure_still_returns_true(monkeypatch):
-    """_try_detect:Dispatch 成功但 Quit 抛异常 → 仍返回 True(suppress 不影响判定)。
+    """_try_detect:Dispatch 成功但 Quit 抛异常 → 仍返回 True(非严格 dispose 吞掉)。
 
-    覆盖 engine_manager.py 行 81-82(with suppress)。
+    覆盖 _try_detect 的安全释放路径:探测性创建的应用释放失败不影响可用性判定。
     """
     app = MagicMock()
+    app.Documents.Count = 0  # 满足 Quit 门控,让 Quit 真正被调用并抛错
     app.Quit.side_effect = RuntimeError("quit failed")
     _stub_dispatch(monkeypatch, return_value=app)
 
     assert EngineManager._try_detect("Word.Application", lambda m: None) is True
+    app.Quit.assert_called_once()
 
 
 def test_close_quits_apps_and_clears(monkeypatch):
-    """close:有 app 时调 Quit、置 None;_from_del=False 时执行 gc.collect。
+    """close:有 app 时经 dispose Quit、置 None;_from_del=False 时执行 gc.collect。
 
-    覆盖 engine_manager.py 行 297-311。
+    Quit 门控要求 Documents/Workbooks.Count == 0(显式假件)。
     """
     em = EngineManager()
     word_app = MagicMock()
+    word_app.Documents.Count = 0
     excel_app = MagicMock()
+    excel_app.Workbooks.Count = 0
     em._word_app = word_app
     em._excel_app = excel_app
     em._current_word_engine = "Word.Application"
@@ -756,21 +764,28 @@ def test_close_quits_apps_and_clears(monkeypatch):
     assert em._word_app is None
     assert em._excel_app is None
     assert em._current_word_engine is None
+    assert em._current_excel_engine is None
 
 
 def test_close_skips_gc_when_from_del(monkeypatch):
-    """close(_from_del=True):跳过 gc.collect(__del__ 链中不再触发,防堆损坏)。
+    """close(_from_del=True):finalizer 路径不发任何 COM 调用,也不触发 gc.collect。
 
-    覆盖 engine_manager.py 行 309(if not _from_del 分支的 False 侧)。
+    __del__ 不保证处于创建线程,COM 释放必须走显式 close;此路径下既不 Quit
+    也不 gc.collect(防 0xc0000374 堆损坏)。
     """
     import gc
 
     em = EngineManager()
+    word_app = MagicMock()
+    word_app.Documents.Count = 0
+    em._word_app = word_app
+    em._current_word_engine = "Word.Application"
     gc_collect = MagicMock()
     monkeypatch.setattr(gc, "collect", gc_collect)
 
     em.close(_from_del=True)
     gc_collect.assert_not_called()
+    word_app.Quit.assert_not_called()  # 不发 COM 调用
 
 
 def test_close_with_no_apps_does_nothing(monkeypatch):
@@ -806,36 +821,84 @@ def test_detect_engines_async_starts_thread_and_invokes_callback(monkeypatch):
 
 
 def test_close_quit_exception_logged(monkeypatch):
-    """close 时 app.Quit 抛异常 → except 记日志,不中断(行 300-305)。"""
+    """close 时 app.Quit 抛异常 → except 记日志,不中断;app 被置 None(即使 Quit 失败)。"""
     em = EngineManager()
     bad_app = MagicMock()
+    bad_app.Documents.Count = 0  # 满足门控,让 Quit 被调用并抛错
     bad_app.Quit.side_effect = RuntimeError("quit boom")
     em._word_app = bad_app
     em._current_word_engine = "Word.Application"
 
-    # 不应抛异常
-    em.close(_from_del=True)  # from_del 跳过 gc
+    # 不应抛异常(非 strict 汇总为日志)
+    em.close()
 
-    # app 被置 None(即使 Quit 失败)
+    bad_app.Quit.assert_called_once()
     assert em._word_app is None
     assert em._current_word_engine is None
 
 
 def test_close_all_apps_quit_exception_continues(monkeypatch):
-    """多个 app,某个 Quit 抛异常 → 继续关闭其余(行 300-305)。"""
+    """多个 app,某个 Quit 抛异常 → 继续关闭其余(异常不中断循环)。"""
     em = EngineManager()
     bad_word = MagicMock()
+    bad_word.Documents.Count = 0
     bad_word.Quit.side_effect = RuntimeError("word quit boom")
     good_excel = MagicMock()
+    good_excel.Workbooks.Count = 0
     em._word_app = bad_word
     em._excel_app = good_excel
     em._current_word_engine = "Word.Application"
     em._current_excel_engine = "Excel.Application"
 
-    em.close(_from_del=True)
+    em.close()
 
     # 两个 Quit 都被调用(异常不中断循环)
     bad_word.Quit.assert_called_once()
     good_excel.Quit.assert_called_once()
     assert em._word_app is None
     assert em._excel_app is None
+
+
+def test_close_strict_aggregates_quit_failures(monkeypatch):
+    """close(strict=True):释放失败汇总为 ExceptionGroup,不静默丢弃任一错误。"""
+    em = EngineManager()
+    word_app = MagicMock()
+    word_app.Documents.Count = 0
+    word_app.Quit.side_effect = RuntimeError("word quit boom")
+    excel_app = MagicMock()
+    excel_app.Workbooks.Count = 0
+    excel_app.Quit.side_effect = RuntimeError("excel quit boom")
+    em._word_app = word_app
+    em._excel_app = excel_app
+    em._current_word_engine = "Word.Application"
+    em._current_excel_engine = "Excel.Application"
+
+    with pytest.raises(ExceptionGroup, match="Office 释放失败") as exc_info:
+        em.close(strict=True)
+
+    assert len(exc_info.value.exceptions) == 2  # 两个应用的失败都被汇总
+    assert em._word_app is None
+    assert em._excel_app is None
+
+
+# ---------------------------------------------------------------------------
+# 线程绑定:COM 会话属于创建线程,跨线程初始化/释放必须显式拒绝
+# ---------------------------------------------------------------------------
+
+
+def test_init_office_app_rejects_foreign_thread_session():
+    """会话属于其它线程时再 init → RuntimeError(不得跨线程复用 COM 引用)。"""
+    em = EngineManager()
+    em._office_thread = threading.get_ident() + 1  # 模拟另一线程创建的会话
+
+    with pytest.raises(RuntimeError, match="另一线程"):
+        em.init_word()
+
+
+def test_close_rejects_foreign_thread_release():
+    """非创建线程 close → RuntimeError(finalizer 路径除外,见 _from_del 测试)。"""
+    em = EngineManager()
+    em._office_thread = threading.get_ident() + 1
+
+    with pytest.raises(RuntimeError, match="创建线程"):
+        em.close()

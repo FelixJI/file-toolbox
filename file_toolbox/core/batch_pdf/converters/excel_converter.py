@@ -9,6 +9,8 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
+from file_toolbox.common.office_session import office_document
+
 from ..constants import (
     EXCEL_PAPER_MAP,
     ORIENTATION_AUTO_DETECT,
@@ -59,51 +61,49 @@ class ExcelConverter:
         try:
             engine = config.get("engine", "auto")
             excel = self._engine_manager.init_excel(engine)
-            wb = excel.Workbooks.Open(str(file_path.absolute()))
+            with office_document(excel, "Workbooks", file_path) as wb:
+                paper_size = config.get("paper_size", "auto")
+                orientation = config.get("orientation", "auto")
 
-            paper_size = config.get("paper_size", "auto")
-            orientation = config.get("orientation", "auto")
+                # 自动检测方向
+                if orientation == ORIENTATION_AUTO_DETECT:
+                    orientation = self._detect_orientation(wb)
 
-            # 自动检测方向
-            if orientation == ORIENTATION_AUTO_DETECT:
-                orientation = self._detect_orientation(wb)
+                # 检测并隐藏空表（避免在PDF中显示空白页）
+                hidden_sheets = []  # 记录被隐藏的工作表信息 (sheet, original_visibility)
 
-            # 检测并隐藏空表（避免在PDF中显示空白页）
-            hidden_sheets = []  # 记录被隐藏的工作表信息 (sheet, original_visibility)
-
-            for sheet in wb.Worksheets:
-                try:
-                    used_range = sheet.UsedRange
-                    if used_range is None:
-                        hidden_sheets.append((sheet, sheet.Visible))
-                        sheet.Visible = False
-                except Exception:
-                    pass
-
-            if paper_size != "auto":
                 for sheet in wb.Worksheets:
-                    if sheet.Visible:
-                        sheet.PageSetup.PaperSize = EXCEL_PAPER_MAP.get(paper_size, 9)
+                    try:
+                        used_range = sheet.UsedRange
+                        if used_range is None:
+                            hidden_sheets.append((sheet, sheet.Visible))
+                            sheet.Visible = False
+                    except Exception:
+                        pass
 
-            if orientation != "auto":
-                # xlPortrait = 1, xlLandscape = 2
-                orient_value = 2 if orientation == ORIENTATION_LANDSCAPE else 1
-                for sheet in wb.Worksheets:
-                    if sheet.Visible:
-                        sheet.PageSetup.Orientation = orient_value
+                if paper_size != "auto":
+                    for sheet in wb.Worksheets:
+                        if sheet.Visible:
+                            sheet.PageSetup.PaperSize = EXCEL_PAPER_MAP.get(paper_size, 9)
 
-            # 导出为PDF (xlTypePDF = 0)
-            wb.ExportAsFixedFormat(
-                0,  # xlTypePDF
-                str(output_path.absolute()),
-            )
+                if orientation != "auto":
+                    # xlPortrait = 1, xlLandscape = 2
+                    orient_value = 2 if orientation == ORIENTATION_LANDSCAPE else 1
+                    for sheet in wb.Worksheets:
+                        if sheet.Visible:
+                            sheet.PageSetup.Orientation = orient_value
 
-            # 恢复所有工作表的可见性（不修改原文件）
-            for sheet, original_visibility in hidden_sheets:
-                with contextlib.suppress(Exception):
-                    sheet.Visible = original_visibility
+                # 导出为PDF (xlTypePDF = 0)
+                wb.ExportAsFixedFormat(
+                    0,  # xlTypePDF
+                    str(output_path.absolute()),
+                )
 
-            wb.Close(False)
+                # 恢复所有工作表的可见性（不修改原文件）
+                for sheet, original_visibility in hidden_sheets:
+                    with contextlib.suppress(Exception):
+                        sheet.Visible = original_visibility
+
             return True, ""
 
         except Exception as e:

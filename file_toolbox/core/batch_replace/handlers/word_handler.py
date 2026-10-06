@@ -1,7 +1,6 @@
 """Word 文档内容替换处理器(.doc/.docx),使用 pywin32 COM 接口。"""
 
 import contextlib
-import gc
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -12,6 +11,7 @@ from file_toolbox.common.office_session import (
     ComSession,
     dispose_office_app,
     init_office_app,
+    open_office_document,
 )
 
 # 单个文件操作超时时间（秒）
@@ -21,29 +21,6 @@ FILE_OPERATION_TIMEOUT = 30
 
 class WordHandler(LoggableMixin):
     """Word 文档处理器"""
-
-    def __init__(
-        self,
-        get_office_pids: Callable[[str], list[int]],
-        kill_office_processes: Callable[[str, list[int]], None],
-    ) -> None:
-        """
-
-        初始化 Word 处理器
-
-
-
-        Args:
-
-            get_office_pids: 获取 Office 进程 PID 的函数
-
-            kill_office_processes: 清理 Office 进程的函数
-
-        """
-
-        self._get_office_pids = get_office_pids
-
-        self._kill_office_processes = kill_office_processes
 
     def read_content(self, file_path: Path) -> str:
         """
@@ -68,32 +45,29 @@ class WordHandler(LoggableMixin):
 
         doc = None
 
-        # ComSession 负责本线程 CoInitialize/CoUninitialize 配对(非 Windows no-op)。
-        # 原 com_initialized 标志 + 手写 CoUninitialize 由 ComSession.__exit__ 取代:
-        # CoInit 失败时 ComSession 为 no-op,后续 Dispatch 会抛异常被外层 except 捕获
-        # 返回 ""(与原行为等价:原 CoInit 失败也是异常传播至此 except 返回 "")。
         with ComSession():
             try:
                 word_app = init_office_app("Word.Application")
 
-                doc = word_app.Documents.Open(str(file_path.absolute()), ReadOnly=True)
+                doc = open_office_document(word_app, "Documents", file_path, ReadOnly=True)
 
                 return self._extract_all_text(doc)
 
             except Exception as e:
                 self.logger.error(f"读取Word文档失败: {file_path} - {e}")
 
-                return ""
+                raise
 
             finally:
-                if doc is not None:
-                    with contextlib.suppress(Exception):
+                try:
+                    if doc is not None:
                         doc.Close(False)
-
-                # dispose_office_app = Quit(suppress) + gc.collect,等价于原
-                # word_app.Quit(suppress) + gc.collect 的清理时序。
-                dispose_office_app(word_app)
-                word_app = None
+                finally:
+                    doc = None
+                    try:
+                        dispose_office_app(word_app, "Word.Application", raise_on_error=True)
+                    finally:
+                        word_app = None
 
     def _extract_all_text(self, doc: Any) -> str:  # pragma: no cover
         """提取文档全文:正文 + 页眉页脚 + 文本框/形状。
@@ -143,22 +117,20 @@ class WordHandler(LoggableMixin):
 
         """
 
-        import pythoncom
+        session = ComSession()
 
         result: dict[str, Any] = {"success_count": 0, "total_replacements": 0, "errors": []}
 
-        if not files:
+        if not files or (cancel_check and cancel_check()):
             return result
 
         word_app = None
 
         com_initialized = False
 
-        word_pids_before = self._get_office_pids("WINWORD.EXE")
-
         try:
             try:
-                pythoncom.CoInitialize()
+                session.__enter__()
 
                 com_initialized = True
 
@@ -188,17 +160,22 @@ class WordHandler(LoggableMixin):
 
                 doc = None
 
-                file_start_time = time.time()
+                file_start_time = time.monotonic()
+                file_replacements = 0
 
                 try:
 
                     def check_timeout(start_time: float = file_start_time) -> None:
-                        if time.time() - start_time > FILE_OPERATION_TIMEOUT:
-                            raise TimeoutError(f"文件操作超时 ({FILE_OPERATION_TIMEOUT}s)")
+                        if cancel_check and cancel_check():
+                            raise InterruptedError("已请求取消，当前 Office 调用返回后停止")
+                        if time.monotonic() - start_time > FILE_OPERATION_TIMEOUT:
+                            raise TimeoutError(
+                                f"Office 调用返回后超过 {FILE_OPERATION_TIMEOUT}s 协作时限，停止后续操作"
+                            )
 
                     # 先读取内容检查匹配数
 
-                    doc = word_app.Documents.Open(str(file_path.absolute()), ReadOnly=True)
+                    doc = open_office_document(word_app, "Documents", file_path, ReadOnly=True)
 
                     check_timeout()
 
@@ -217,7 +194,7 @@ class WordHandler(LoggableMixin):
 
                     # 打开文档进行替换
 
-                    doc = word_app.Documents.Open(str(file_path.absolute()))
+                    doc = open_office_document(word_app, "Documents", file_path)
 
                     check_timeout()
 
@@ -227,15 +204,17 @@ class WordHandler(LoggableMixin):
 
                             count = self._execute_operation(doc, operation)
 
-                            result["total_replacements"] += count
+                            file_replacements += count
 
-                        except TimeoutError:
+                        except (TimeoutError, InterruptedError):
                             raise
 
                         except Exception as op_error:
                             self.logger.error(f"Word替换操作失败: {op_error}")
 
                             continue
+
+                    check_timeout()
 
                     # 保存文档
 
@@ -245,6 +224,8 @@ class WordHandler(LoggableMixin):
                         new_path = file_path.with_suffix(".docx")
 
                         doc.SaveAs2(str(new_path.absolute()), FileFormat=16)
+                        result["success_count"] += 1
+                        result["total_replacements"] += file_replacements
 
                         doc.Close()
 
@@ -255,43 +236,24 @@ class WordHandler(LoggableMixin):
 
                     else:
                         doc.Save()
+                        result["success_count"] += 1
+                        result["total_replacements"] += file_replacements
 
                         doc.Close()
 
                         doc = None
 
-                    result["success_count"] += 1
+                    check_timeout()
 
-                except TimeoutError as te:
-                    result["errors"].append(f"{file_path.name}: {te!s}")
-
+                except (TimeoutError, InterruptedError) as error:
+                    result["errors"].append(f"{file_path.name}: {error}")
                     if doc is not None:
-                        with contextlib.suppress(Exception):
+                        try:
                             doc.Close(False)
+                        except Exception as cleanup_error:
+                            result["errors"].append(f"关闭文档失败: {cleanup_error}")
                         doc = None
-
-                    # 超时后尝试重启 Word
-                    try:
-                        word_app.Quit()
-
-                    except Exception as e:
-                        self.logger.warning(f"Word应用退出失败: {e}")
-
-                    word_app = None
-
-                    gc.collect()
-
-                    time.sleep(0.5)
-
-                    self._kill_office_processes("WINWORD.EXE", word_pids_before)
-
-                    time.sleep(0.5)
-
-                    try:
-                        word_app = init_office_app("Word.Application")
-
-                    except Exception:
-                        break
+                    break
 
                 except Exception as e:
                     result["errors"].append(f"{file_path.name}: {e!s}")
@@ -305,17 +267,16 @@ class WordHandler(LoggableMixin):
             result["errors"].append(f"Word批量处理失败: {e!s}")
 
         finally:
-            # dispose_office_app(word_app, gc_pause=0.3) 等价于原:
-            # if word_app is not None: suppress(word_app.Quit()); gc.collect();
-            # time.sleep(0.3)。kill 与 CoUninitialize 仍在此处保留(业务/配对语义)。
-            dispose_office_app(word_app, gc_pause=0.3)
+            try:
+                dispose_office_app(word_app, "Word.Application", raise_on_error=True)
+            except Exception as cleanup_error:
+                result["errors"].append(f"Word清理失败: {cleanup_error}")
             word_app = None
-
-            self._kill_office_processes("WINWORD.EXE", word_pids_before)
-
             if com_initialized:
-                with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+                try:
+                    session.__exit__(None, None, None)
+                except Exception as cleanup_error:
+                    result["errors"].append(f"COM释放失败: {cleanup_error}")
 
         return result
 

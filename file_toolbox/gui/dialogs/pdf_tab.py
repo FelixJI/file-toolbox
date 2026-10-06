@@ -333,6 +333,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         worker.progress.connect(self._on_progress)
         worker.finished_ok.connect(self._on_generate_ok)
         worker.failed.connect(self._on_generate_failed)
+        worker.cleanup_warning.connect(self._on_cleanup_warning)
         worker.finished.connect(self._on_worker_finished)
         self._task.track(worker)
         self._set_ui_enabled(False)
@@ -366,6 +367,13 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self._refresh_engine_info_label()
         if not self._task.close_pending:
             QMessageBox.critical(self, "生成失败", msg)
+
+    def _on_cleanup_warning(self, msg: str) -> None:
+        if not self._task.accepts(self.sender()):
+            return
+        self.ui.label_progress.setText("任务结果已保留，资源清理失败")
+        if not self._task.close_pending:
+            QMessageBox.warning(self, "资源清理警告", msg)
 
     def _on_worker_finished(self) -> None:
         """真实 finished 后释放线程并恢复控件;延迟关闭由 TaskLifecycle 续接。"""

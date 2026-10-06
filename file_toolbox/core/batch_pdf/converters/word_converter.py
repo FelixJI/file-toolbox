@@ -7,6 +7,8 @@ Word转PDF转换器
 from pathlib import Path
 from typing import Any
 
+from file_toolbox.common.office_session import office_document
+
 from ..constants import (
     ORIENTATION_AUTO_DETECT,
     ORIENTATION_LANDSCAPE,
@@ -63,44 +65,42 @@ class WordConverter:
         try:
             engine = config.get("engine", "auto")
             word = self._engine_manager.init_word(engine)
-            doc = word.Documents.Open(str(file_path.absolute()))
+            with office_document(word, "Documents", file_path) as doc:
+                paper_size = config.get("paper_size", "auto")
+                orientation = config.get("orientation", "auto")
 
-            paper_size = config.get("paper_size", "auto")
-            orientation = config.get("orientation", "auto")
+                # 自动检测方向
+                if orientation == ORIENTATION_AUTO_DETECT:
+                    orientation = self._detect_orientation(doc)
 
-            # 自动检测方向
-            if orientation == ORIENTATION_AUTO_DETECT:
-                orientation = self._detect_orientation(doc)
+                if paper_size != "auto":
+                    for section in doc.Sections:
+                        section.PageSetup.PaperSize = self._get_paper_size_word(paper_size)
 
-            if paper_size != "auto":
-                for section in doc.Sections:
-                    section.PageSetup.PaperSize = self._get_paper_size_word(paper_size)
+                if orientation != "auto":
+                    for section in doc.Sections:
+                        section.PageSetup.Orientation = self._get_orientation_word(orientation)
 
-            if orientation != "auto":
-                for section in doc.Sections:
-                    section.PageSetup.Orientation = self._get_orientation_word(orientation)
+                # 导出为PDF
+                # wdExportFormatPDF = 17
+                # wdExportOptimizeForPrint = 0 (高质量打印)
+                doc.ExportAsFixedFormat(
+                    OutputFileName=str(output_path.absolute()),
+                    ExportFormat=17,  # wdExportFormatPDF
+                    OpenAfterExport=False,
+                    OptimizeFor=0,  # wdExportOptimizeForPrint
+                    Range=0,  # wdExportAllDocument
+                    From=1,
+                    To=1,
+                    Item=0,  # wdExportDocumentContent
+                    IncludeDocProps=True,
+                    KeepIRM=True,
+                    CreateBookmarks=0,  # wdExportCreateNoBookmarks
+                    DocStructureTags=True,
+                    BitmapMissingFonts=True,
+                    UseISO19005_1=False,
+                )
 
-            # 导出为PDF
-            # wdExportFormatPDF = 17
-            # wdExportOptimizeForPrint = 0 (高质量打印)
-            doc.ExportAsFixedFormat(
-                OutputFileName=str(output_path.absolute()),
-                ExportFormat=17,  # wdExportFormatPDF
-                OpenAfterExport=False,
-                OptimizeFor=0,  # wdExportOptimizeForPrint
-                Range=0,  # wdExportAllDocument
-                From=1,
-                To=1,
-                Item=0,  # wdExportDocumentContent
-                IncludeDocProps=True,
-                KeepIRM=True,
-                CreateBookmarks=0,  # wdExportCreateNoBookmarks
-                DocStructureTags=True,
-                BitmapMissingFonts=True,
-                UseISO19005_1=False,
-            )
-
-            doc.Close(False)
             return True, ""
 
         except Exception as e:
