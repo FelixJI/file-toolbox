@@ -372,7 +372,7 @@ def test_stop_worker_none(app):
 
 
 def test_stop_worker_running_with_cancel(app):
-    """worker 运行中且有 cancel → cancel + quit + wait(行 184-187)。"""
+    """worker 运行中且有 cancel → 仅协作取消;不 quit/wait/terminate、不清引用。"""
     dlg = _TestDialog()
     worker = MagicMock()
     worker.isRunning.return_value = True
@@ -381,12 +381,14 @@ def test_stop_worker_running_with_cancel(app):
     dlg.worker = worker
     dlg._stop_worker()
     worker.cancel.assert_called_once()
-    worker.quit.assert_called_once()
-    assert dlg.worker is None
+    assert worker.quit.call_count == 0, "业务 worker 无事件循环,quit 是 no-op,不调用"
+    assert worker.wait.call_count == 0, "关闭清理不得同步等待 worker"
+    worker.terminate.assert_not_called()
+    assert dlg.worker is worker, "引用只能由真实 finished(task.finish)释放"
 
 
 def test_stop_worker_running_without_cancel(app):
-    """worker 运行中无 cancel 属性 → 仅 quit + wait。"""
+    """worker 运行中无 cancel 属性 → 无事可做:不 quit、不等待、不清引用。"""
     dlg = _TestDialog()
     worker = MagicMock(spec=QThread)
     worker.isRunning.return_value = True
@@ -394,28 +396,35 @@ def test_stop_worker_running_without_cancel(app):
     worker.wait.return_value = True
     dlg.worker = worker
     dlg._stop_worker()
-    worker.quit.assert_called_once()
+    worker.quit.assert_not_called()
+    worker.wait.assert_not_called()
+    assert dlg.worker is worker
 
 
 def test_stop_worker_not_running(app):
-    """worker 存在但未运行 → 直接置 None。"""
+    """worker 存在但未运行 → 不请求停止;引用仍留给真实 finished 消费。"""
     dlg = _TestDialog()
     worker = MagicMock(spec=QThread)
     worker.isRunning.return_value = False
     dlg.worker = worker
     dlg._stop_worker()
-    assert dlg.worker is None
+    worker.quit.assert_not_called()
+    worker.wait.assert_not_called()
+    assert dlg.worker is worker
 
 
-def test_stop_worker_terminate_on_timeout(app):
-    """wait 超时返回 False → terminate + 再 wait(行 188-193)。"""
+def test_stop_worker_never_terminates_or_waits_on_timeout(app):
+    """wait 会超时的 worker 也只被协作取消:不 quit/wait/terminate(COM 契约)。"""
     dlg = _TestDialog()
     worker = MagicMock(spec=QThread)
     worker.isRunning.return_value = True
-    worker.wait.return_value = False  # 超时
+    worker.wait.return_value = False  # 若实现错误地等待,这里模拟超时
     dlg.worker = worker
     dlg._stop_worker(timeout_ms=10)
-    worker.terminate.assert_called_once()
+    worker.quit.assert_not_called()
+    worker.wait.assert_not_called()
+    worker.terminate.assert_not_called()
+    assert dlg.worker is worker
 
 
 def test_set_ui_enabled_default_noop(app):

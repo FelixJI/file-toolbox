@@ -288,8 +288,9 @@ def test_preview_failure_shows_critical_and_restores(app, tmp_path, monkeypatch)
     )
 
     dlg._do_refresh_preview()
-    assert _pump_until(app, lambda: critical_calls), "失败应弹 critical 提示"
-    assert dlg.worker is None
+    assert _pump_until(app, lambda: bool(critical_calls) and dlg.worker is None), (
+        "失败应弹 critical 提示,且线程在真实 finished 后释放"
+    )
     assert dlg.ui.btn_execute.isEnabled()
     assert dlg.ui.progress_bar.isHidden()
     assert "已选择" in dlg.ui.label_status.text()
@@ -314,8 +315,82 @@ def test_cancel_requests_worker_cancel(app, tmp_path):
     assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1)
 
 
+def test_execute_ok_marks_pending_before_modal_finish_race(app, tmp_path, monkeypatch):
+    """模态完成框的嵌套事件循环先投递真实 finished:_preview_pending 必须已设置。
+
+    回归:若 information 之后才置 _preview_pending,嵌套循环内消费 finished 时
+    读不到标记,漏掉执行后的自动预览刷新,并污染下一任务的状态。
+    """
+    from PySide6.QtCore import QEventLoop, QTimer
+
+    block = threading.Event()
+    svc = _RecordingService(block=block)
+    dlg = _make_dlg(app, svc)
+    _arm(dlg, tmp_path)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    modal_ran = []
+
+    def information(*a, **k):
+        modal_ran.append(1)
+        # 模态框嵌套事件循环:消费已排队的真实 finished(_on_worker_finished)
+        loop = QEventLoop()
+        poll = QTimer()
+        poll.timeout.connect(lambda: loop.quit() if dlg.worker is None else None)
+        poll.start(1)
+        deadline = QTimer()
+        deadline.setSingleShot(True)
+        deadline.timeout.connect(loop.quit)
+        deadline.start(5000)
+        if dlg.worker is not None:
+            loop.exec()
+        assert dlg.worker is None, "模态循环必须等待真实 finished"
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "information", information)
+
+    dlg._execute()
+    block.set()  # worker 完成:execute_ok 与 finished 先后排队回主线程
+    assert _pump_until(app, lambda: bool(modal_ran)), "执行完成后应弹完成提示"
+    assert dlg.worker is None, "嵌套循环内消费的真实 finished 应已释放线程"
+    assert dlg._preview_pending is False, "标记应已在嵌套 finished 中被消费"
+    # 消费后的防抖重跑最终落到最新状态:预览自动执行一次
+    assert _pump_until(app, lambda: svc.preview_calls == 1), "应自动重跑预览"
+
+
+def test_execute_rechecks_busy_after_confirmation(app, tmp_path, monkeypatch):
+    """确认框等待期间防抖预览可启动:Yes 返回后不得再启动执行 worker。"""
+    block = threading.Event()
+    svc = _RecordingService(block=block)
+    dlg = _make_dlg(app, svc)
+    _arm(dlg, tmp_path)
+
+    def question(*a, **k):
+        # 模态等待期间防抖到点:预览 worker 启动(真实路径)
+        dlg._do_refresh_preview()
+        assert _pump_until(app, lambda: svc.preview_calls == 1)
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", question)
+    info_calls = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda *a, **k: info_calls.append(1) or QMessageBox.StandardButton.Ok,
+    )
+
+    dlg._execute()
+
+    assert svc.execute_calls == 0, "预览运行期间不得启动执行 worker"
+    preview_worker = dlg.worker
+    assert preview_worker is not None
+
+    block.set()
+    assert _pump_until(app, lambda: dlg.worker is None)
+    assert info_calls == []
+
+
 def test_stop_worker_cancels_without_terminate(app, tmp_path, monkeypatch):
-    """_stop_worker:协作式取消 + 超时仅告警,绝不 terminate(COM 线程强终止危险)。"""
+    """_stop_worker:只协作取消,不 wait/terminate,不清引用(真实 finished 释放)。"""
     block = threading.Event()
     svc = _RecordingService(block=block)
     dlg = _make_dlg(app, svc)
@@ -326,12 +401,15 @@ def test_stop_worker_cancels_without_terminate(app, tmp_path, monkeypatch):
     worker = dlg.worker
     assert worker is not None
     terminated: list[int] = []
+    waited: list[int] = []
     monkeypatch.setattr(worker, "terminate", lambda: terminated.append(1))
+    monkeypatch.setattr(worker, "wait", lambda *a: waited.append(1) or True)
 
-    dlg._stop_worker(150)  # block 未放行 → wait 超时,仅告警
+    dlg._stop_worker(150)  # block 未放行:旧实现会同步等待,这里必须立即返回
     assert terminated == [], "不得对 COM worker 调用 terminate"
+    assert waited == [], "关闭清理不得同步等待 worker"
     assert worker._cancel is True, "应先请求协作式取消"
-    assert dlg.worker is None
+    assert dlg.worker is worker, "线程引用只能由真实 finished 释放"
 
     block.set()
     assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1), (

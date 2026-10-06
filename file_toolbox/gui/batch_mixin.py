@@ -177,18 +177,20 @@ class BatchDialogMixin:
         pass
 
     def _stop_worker(self, timeout_ms: int = WORKER_STOP_TIMEOUT_MS) -> None:
-        """停止工作线程"""
-        if self.worker and self.worker.isRunning():
-            if hasattr(self.worker, "cancel"):
-                self.worker.cancel()
-            self.worker.quit()
-            if not self.worker.wait(timeout_ms):
-                self.logger.warning(
-                    f"{self.__class__.__name__}: Worker 未能在 {timeout_ms}ms 内停止，强制终止"
-                )
-                self.worker.terminate()
-                self.worker.wait(1000)
-        self.worker = None
+        """请求工作线程协作停止(cancel),不阻塞 GUI 线程、不强制终止。
+
+        线程引用的清空与 deleteLater 只由真实 finished(TaskLifecycle.finish)消费:
+        这里既不清引用,也不断开 worker 信号——清理期间线程可能仍在收尾(尤其持
+        COM 的 worker),断开信号会让 finished 无法投递回页面,terminate/同步 wait
+        则可能泄漏 Office 进程或冻结关闭。业务 worker 无事件循环,quit() 是 no-op,
+        不再调用。timeout_ms 仅保留兼容旧签名,不再等待。
+        """
+        worker = self.worker
+        if worker is None or not worker.isRunning():
+            return
+        cancel = getattr(worker, "cancel", None)
+        if callable(cancel):
+            cancel()
 
     def _set_ui_enabled(self, enabled: bool) -> None:
         """设置UI启用状态（子类可覆盖）"""

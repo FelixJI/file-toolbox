@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
 
@@ -18,6 +19,7 @@ from file_toolbox.core.invoice.service import InvoiceService
 from file_toolbox.core.invoice.types import ParseResult
 from file_toolbox.gui.controllers.invoice_controller import InvoiceController
 from file_toolbox.gui.generated.ui_invoice_dialog import Ui_InvoiceDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.invoice_worker import InvoiceParseWorker
 
 _DUP_COLOR = QColor(255, 242, 204)  # 浅黄(重复)
@@ -33,6 +35,8 @@ class InvoiceTab(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 生命周期句柄:单一事实保存当前任务,只在真实 finished(task.finish)释放
+        self._task = TaskLifecycle(self)
         self.ui = Ui_InvoiceDialog()
         self.ui.setupUi(self)
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
@@ -41,8 +45,17 @@ class InvoiceTab(QWidget):
         self._controller = InvoiceController()
         self._result: ParseResult | None = None
         self._files: list[Path] = []
-        self._parse_worker: InvoiceParseWorker | None = None
         self._connect()
+
+    # 兼容旧 _parse_worker 字段:读写均转发 TaskLifecycle;只有真实
+    # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
+    @property
+    def _parse_worker(self) -> QThread | None:
+        return self._task.worker
+
+    @_parse_worker.setter
+    def _parse_worker(self, value: QThread | None) -> None:
+        self._task.worker = value
 
     def _connect(self) -> None:
         self.ui.btn_add_files.clicked.connect(self._add_files)
@@ -111,15 +124,17 @@ class InvoiceTab(QWidget):
         if not self._files:
             QMessageBox.warning(self, "提示", "请先添加发票文件")
             return
-        # 避免重复启动(重复点击不泄漏多个 worker)
-        if self._parse_worker is not None and self._parse_worker.isRunning():
+        # 避免重复启动(重复点击不泄漏多个 worker):任务尚未在真实 finished 中释放
+        # (或正在延迟关闭)时一律拒绝,不以 isRunning() 为准
+        if self._task.busy:
             return
         strategy = self._dedupe_strategy()
         worker = InvoiceParseWorker(self._svc, list(self._files), strategy, parent=self)
         worker.progress.connect(self._on_parse_progress)
         worker.finished_ok.connect(self._on_parse_ok)
         worker.failed.connect(self._on_parse_failed)
-        self._parse_worker = worker  # 持有引用防 GC
+        worker.finished.connect(self._on_worker_finished)
+        self._task.track(worker)  # 持有引用防 GC;在 start 前登记
         # 解析期间禁用相关按钮
         self.ui.btn_parse.setEnabled(False)
         self.ui.btn_export.setEnabled(False)
@@ -127,12 +142,15 @@ class InvoiceTab(QWidget):
         worker.start()
 
     def _on_parse_progress(self, current: int, total: int) -> None:
+        if not self._task.accepts(self.sender()):
+            return
         self.ui.lbl_status.setText(f"解析中… {current}/{total}")
 
     def _on_parse_ok(self, result: Any) -> None:
+        """结果槽:只渲染结果;引用释放与启动按钮恢复等真实 finished。"""
+        if not self._task.accepts(self.sender()):
+            return
         self._result = result
-        self._parse_worker = None
-        self.ui.btn_parse.setEnabled(True)
         self._populate_table()
         self.ui.btn_export.setEnabled(bool(self._result.invoices))
         dup = sum(1 for i in self._result.invoices if i.is_duplicate)
@@ -146,27 +164,32 @@ class InvoiceTab(QWidget):
         )
 
     def _on_parse_failed(self, msg: str) -> None:
-        self._parse_worker = None
-        self.ui.btn_parse.setEnabled(True)
+        if not self._task.accepts(self.sender()):
+            return
         # 解析失败:按已有结果重置 btn_export(若曾解析成功则保留可导出状态)
         self.ui.btn_export.setEnabled(self._result is not None and bool(self._result.invoices))
         self.ui.lbl_status.setText("解析失败")
-        QMessageBox.warning(self, "解析失败", msg)
+        if not self._task.close_pending:
+            QMessageBox.warning(self, "解析失败", msg)
+
+    def _on_worker_finished(self) -> None:
+        """真实 finished 后释放线程并恢复启动按钮;延迟关闭由 TaskLifecycle 续接。"""
+        if not self._task.finish(self.sender()):
+            return
+        self.ui.btn_parse.setEnabled(True)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """关闭窗口时停止仍在运行的解析 worker,防泄漏。
+        """任务未结束时延迟关闭:协作取消后等真实 finished 异步重关。
 
         InvoiceParseWorker 是无事件循环的 QThread(quit() 无效),仅靠协作式 cancel()
-        在文件间停止。closeEvent 不存在时,解析中关闭窗口会让 worker 继续在后台跑
-        (持有 self 为 parent),进程退出可能崩溃/泄漏。这里显式 cancel + wait。
-        与 pdf_tab._stop_worker 同款,但不强制 terminate(解析无 COM,wait 足够)。
+        在文件间停止。旧实现在这里同步 cancel + wait(3000) 后假定线程结束——等待
+        冻结关闭,且 wait 超时后清理仍可能撞上仍在运行的线程(持有 self 为 parent,
+        进程退出可能崩溃/泄漏)。现在引用释放/重新关闭全部由 TaskLifecycle 在
+        真实 finished 消费时完成。
         """
-        worker = self._parse_worker
-        if worker is not None and worker.isRunning():
-            worker.cancel()
-            worker.quit()
-            worker.wait(3000)
-        self._parse_worker = None
+        if self._task.defer_close(event):
+            self.ui.lbl_status.setText("正在等待解析安全结束,完成后自动关闭…")
+            return
         super().closeEvent(event)
 
     def _populate_table(self) -> None:
