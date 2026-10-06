@@ -247,6 +247,8 @@ def _velopack_command(dotnet: str, product_dir: Path, version: str, output_dir: 
         f"vpk@{_VPK_VERSION}",
         "--",
         "pack",
+        "--runtime",
+        "win-x64",
         "--packId",
         _PRODUCT,
         "--packVersion",
