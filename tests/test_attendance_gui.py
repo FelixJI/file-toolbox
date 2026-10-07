@@ -113,8 +113,10 @@ def test_roster_defaults_and_plan_round_trip(tab, tmp_path):
     roster_path.write_bytes(b"roster")
     tab.ui.chk_roster_enabled.setChecked(True)
     tab.ui.edit_roster.setText(str(roster_path))
-    tab._excluded_employee_ids = ("wb002",)
-    tab._group_sheet_configs = (GroupSheetConfig("徐州中车", "出勤明细", "考勤汇总表", "正式"),)
+    tab._state.excluded_employee_ids = ("wb002",)
+    tab._state.group_sheet_configs = (
+        GroupSheetConfig("徐州中车", "出勤明细", "考勤汇总表", "正式"),
+    )
 
     original = tab._build_plan()
     tab._plans.save(original)
@@ -184,11 +186,15 @@ def test_roster_preview_captures_sheet_mapping_and_exclusions(tab, tmp_path, mon
 
     tab._on_preview_ok(preview)
 
-    assert tab.ui.table_group_preview.columnCount() == 5
-    assert tab.ui.table_group_preview.item(0, 1).text() == "正式"
-    assert tab.ui.table_employee_preview.columnCount() == 7
-    assert tab.ui.table_employee_preview.item(1, 1).text() == "wb002"
-    tab.ui.table_employee_preview.item(1, 0).setCheckState(Qt.CheckState.Unchecked)
+    assert tab._group_model.columnCount() == 5
+    assert tab._group_model.data(tab._group_model.index(0, 1)) == "正式"
+    assert tab._employee_model.columnCount() == 7
+    assert tab._employee_model.data(tab._employee_model.index(1, 1)) == "wb002"
+    assert tab._employee_model.setData(
+        tab._employee_model.index(1, 0),
+        Qt.CheckState.Unchecked,
+        Qt.ItemDataRole.CheckStateRole,
+    )
     calls = []
     monkeypatch.setattr(tab, "_preview", lambda: calls.append(True))
 
@@ -209,7 +215,7 @@ def test_roster_preview_keeps_mapping_for_fully_excluded_group(tab, tmp_path, mo
     roster_path.write_bytes(b"roster")
     tab.ui.chk_roster_enabled.setChecked(True)
     tab.ui.edit_roster.setText(str(roster_path))
-    tab._group_sheet_configs = (
+    tab._state.group_sheet_configs = (
         GroupSheetConfig("徐州中车", "出勤明细", "考勤汇总表", "正式"),
         GroupSheetConfig("盛世金源", "出勤明细-劳务", "考勤汇总表-劳务", "劳务"),
     )
@@ -236,9 +242,9 @@ def test_roster_preview_keeps_mapping_for_fully_excluded_group(tab, tmp_path, mo
 
     tab._on_preview_ok(preview)
 
-    assert tab.ui.table_group_preview.rowCount() == 2
-    assert tab.ui.table_group_preview.item(1, 2).text() == "0"
-    assert tab.ui.table_group_preview.item(1, 3).text() == "出勤明细-劳务"
+    assert tab._group_model.rowCount() == 2
+    assert tab._group_model.data(tab._group_model.index(1, 2)) == "0"
+    assert tab._group_model.data(tab._group_model.index(1, 3)) == "出勤明细-劳务"
     monkeypatch.setattr(tab, "_preview", lambda: None)
     tab._apply_preview_adjustments()
     assert tab._build_plan().group_sheet_configs == (
@@ -274,7 +280,7 @@ def test_roster_preview_errors_block_generation(tab, tmp_path):
 
     assert tab.ui.btn_generate.isEnabled() is False
     assert "缺少 Sheet 映射" in tab.ui.lbl_preview.text()
-    assert tab.ui.table_group_preview.rowCount() == 1
+    assert tab._group_model.rowCount() == 1
 
 
 def test_preview_success_enables_generation(tab, app):
@@ -313,10 +319,10 @@ def test_group_preview_shows_sheet_pairs(tab):
     tab._on_preview_ok(preview)
 
     assert "售后组 2 人→出勤明细-售后组/考勤汇总表-售后组" in tab.ui.lbl_preview.text()
-    assert tab.ui.table_group_preview.rowCount() == 2
-    assert tab.ui.table_group_preview.item(0, 2).text() == "出勤明细-售后组"
-    assert tab.ui.table_employee_preview.rowCount() == 3
-    assert tab.ui.table_employee_preview.item(0, 0).text() == "张三"
+    assert tab._group_model.rowCount() == 2
+    assert tab._group_model.data(tab._group_model.index(0, 2)) == "出勤明细-售后组"
+    assert tab._employee_model.rowCount() == 3
+    assert tab._employee_model.data(tab._employee_model.index(0, 0)) == "张三"
 
 
 def test_unmatched_preview_blocks_generation(tab):
@@ -335,9 +341,9 @@ def test_unmatched_preview_blocks_generation(tab):
     tab._on_preview_ok(preview)
 
     assert tab.ui.btn_generate.isEnabled() is False
-    assert tab.ui.table_employee_preview.item(0, 0).text() == "张三"
-    assert tab.ui.table_employee_preview.item(0, 2).text() == "售后组"
-    assert "2日: 特殊状态" in tab.ui.table_employee_preview.item(0, 3).text()
+    assert tab._employee_model.data(tab._employee_model.index(0, 0)) == "张三"
+    assert tab._employee_model.data(tab._employee_model.index(0, 2)) == "售后组"
+    assert "2日: 特殊状态" in tab._employee_model.data(tab._employee_model.index(0, 3))
 
 
 def test_unmatched_preview_shows_attendance_group(tab):
@@ -355,8 +361,8 @@ def test_unmatched_preview_shows_attendance_group(tab):
 
     tab._on_preview_ok(preview)
 
-    assert tab.ui.table_employee_preview.item(0, 1).text() == "原组"
-    assert tab.ui.table_employee_preview.item(0, 2).text() == "售后组"
+    assert tab._employee_model.data(tab._employee_model.index(0, 1)) == "原组"
+    assert tab._employee_model.data(tab._employee_model.index(0, 2)) == "售后组"
 
 
 def test_unmatched_preview_keeps_same_name_moves_separate(tab):
@@ -380,10 +386,10 @@ def test_unmatched_preview_keeps_same_name_moves_separate(tab):
 
     tab._on_preview_ok(preview)
 
-    assert "A组异常" in tab.ui.table_employee_preview.item(0, 3).text()
-    assert "B组异常" not in tab.ui.table_employee_preview.item(0, 3).text()
-    assert "B组异常" in tab.ui.table_employee_preview.item(1, 3).text()
-    assert "A组异常" not in tab.ui.table_employee_preview.item(1, 3).text()
+    assert "A组异常" in tab._employee_model.data(tab._employee_model.index(0, 3))
+    assert "B组异常" not in tab._employee_model.data(tab._employee_model.index(0, 3))
+    assert "B组异常" in tab._employee_model.data(tab._employee_model.index(1, 3))
+    assert "A组异常" not in tab._employee_model.data(tab._employee_model.index(1, 3))
 
 
 def test_preview_edits_apply_employee_move_and_sheet_names(tab, monkeypatch):
@@ -408,8 +414,8 @@ def test_preview_edits_apply_employee_move_and_sheet_names(tab, monkeypatch):
     calls = []
     monkeypatch.setattr(tab, "_preview", lambda: calls.append(True))
 
-    tab.ui.table_group_preview.item(0, 2).setText("自定义售后明细")
-    tab.ui.table_employee_preview.item(0, 2).setText("管理组")
+    assert tab._group_model.setData(tab._group_model.index(0, 2), "自定义售后明细")
+    assert tab._employee_model.setData(tab._employee_model.index(0, 2), "管理组")
 
     assert tab.ui.btn_generate.isEnabled() is False
     assert "请应用" in tab.ui.lbl_status.text()
@@ -435,7 +441,46 @@ def test_plan_load_restores_saved_preview_adjustments(tab):
     restored = tab._build_plan()
     assert restored.employee_group_overrides == original.employee_group_overrides
     assert restored.group_sheet_configs == original.group_sheet_configs
-    assert tab.ui.table_employee_preview.rowCount() == 0
+    assert tab._employee_model.rowCount() == 0
+
+
+def test_sorted_preview_view_keeps_person_identity(tab, monkeypatch):
+    """显示排序后，编辑/回收仍作用于数据行身份，不作用于视图行号。"""
+    preview = AttendancePreview(
+        2,
+        31,
+        0,
+        1,
+        {"√": 62},
+        (),
+        {"售后组": 1, "管理组": 1},
+        {
+            "售后组": ("售后明细", "售后汇总"),
+            "管理组": ("管理明细", "管理汇总"),
+        },
+        (
+            EmployeeGroupPreview("张三", "售后组", "售后组"),
+            EmployeeGroupPreview("李四", "管理组", "管理组"),
+        ),
+    )
+    tab._on_preview_ok(preview)
+
+    view = tab.ui.table_employee_preview
+    view.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+    proxy = view.model()
+    first_name = proxy.data(proxy.index(0, 0))
+    assert first_name == "张三"  # 张(U+5F20) < 李(U+674E)，排序稳定可断言
+
+    assert proxy.setData(proxy.index(0, 2), "管理组")
+    calls = []
+    monkeypatch.setattr(tab, "_preview", lambda: calls.append(True))
+
+    tab._apply_preview_adjustments()
+
+    plan = tab._build_plan()
+    assert calls == [True]
+    # 只有被编辑的人被调组；李四目标未变，不产生调整
+    assert plan.employee_group_overrides == (EmployeeGroupOverride("张三", "售后组", "管理组"),)
 
 
 def test_edit_after_preview_invalidates_generation(tab):
@@ -445,6 +490,34 @@ def test_edit_after_preview_invalidates_generation(tab):
 
     assert tab._preview_request is None
     assert tab.ui.btn_generate.isEnabled() is False
+
+
+def test_stale_preview_result_keeps_generation_invalidated(tab, app):
+    """预览运行中输入/映射变化后，旧结果到达不得解锁生成(AC3 事件同步)。"""
+    release = threading.Event()
+
+    def blocked_preview(request, cancel_check=None):
+        release.wait(5)
+        return AttendancePreview(1, 31, 0, 1, {"√": 31}, ())
+
+    tab._service.preview.side_effect = blocked_preview
+    tab._start_worker(tab._build_request(), "preview")
+    assert tab._worker is not None
+
+    # worker 运行中修改输入与映射 → 立即失效
+    tab.ui.edit_source_sheet.setText("其他")
+    tab._add_mapping()
+    tab.ui.table_mappings.item(0, 1).setText("C9")
+    assert tab.ui.btn_generate.isEnabled() is False
+    assert tab._preview_request is None
+
+    release.set()
+
+    assert _pump_until(app, lambda: tab._worker is None), "真实 finished 应释放线程"
+    assert tab._preview_request is None
+    assert tab.ui.btn_generate.isEnabled() is False
+    assert "重新预览" in tab.ui.lbl_status.text()
+    assert tab.ui.lbl_preview.text() == "配置已变化，请重新预览"
 
 
 def test_generate_uses_previewed_request(tab, monkeypatch):
