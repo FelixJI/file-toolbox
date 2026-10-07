@@ -1,10 +1,11 @@
 from pathlib import Path
-from unittest.mock import MagicMock
 
-# 适配说明(Issue #124):psutil/chardet 已改为被测模块内按需导入,测试直接
-# patch 其规范模块(sys.modules 中同一对象)。
+# 适配说明(Issue #124):chardet 已改为被测模块内按需导入,测试直接 patch 其
+# 规范模块(sys.modules 中同一对象)。Task142 起 ContentReplaceService 不再做任何
+# Office 进程扫描/强杀(无误杀边界回归见 test_office_ownership.py),相关旧用例删除;
+# 读取失败也不再双层吞异常伪装零匹配(handler/service 记日志后原样传播)。
 import chardet
-import psutil
+import pytest
 
 from file_toolbox.core.batch_replace.handlers.text_handler import TextHandler
 from file_toolbox.core.batch_replace.service import ContentReplaceService
@@ -146,37 +147,6 @@ def test_service_validate_bad_regex():
     svc = ContentReplaceService()
     ok, msg = svc._validate_params({"type": "regex_replace", "params": {"pattern": "("}}, 0)
     assert ok is False
-
-
-def test_get_office_pids_matches_process_name_case_insensitively(monkeypatch):
-    """psutil 枚举进程时按可执行文件名匹配，并忽略大小写。"""
-
-    class _Process:
-        def __init__(self, pid, name):
-            self.info = {"pid": pid, "name": name}
-
-    monkeypatch.setattr(
-        psutil,  # 适配说明(Issue #124)
-        "process_iter",
-        lambda attrs: [_Process(1234, "winword.exe"), _Process(5678, "EXCEL.EXE")],
-    )
-    svc = ContentReplaceService()
-    assert svc._get_office_pids("WINWORD.EXE") == [1234]
-
-
-def test_kill_office_processes_checks_name_before_kill(monkeypatch):
-    """清理新 PID 前再次核对进程名，避免 PID 复用时误杀其他进程。"""
-    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
-    process = MagicMock()
-    process.name.return_value = "WINWORD.EXE"
-
-    svc = ContentReplaceService()
-    monkeypatch.setattr(svc, "_get_office_pids", lambda name: [4321])
-    monkeypatch.setattr(psutil, "Process", lambda pid: process)
-    svc._kill_new_office_processes("WINWORD.EXE", [])
-
-    assert process.kill.called
-    process.wait.assert_called_once_with(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -525,51 +495,11 @@ def test_execute_replace_cancel_before_text(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 补充覆盖:_get_office_pids 枚举、_kill 路径、is_file_locked 异常分支、
-# preview/execute 异常路径、_read_file_content 边界、close() 早返回。
-# 均 Linux 可测(纯逻辑或 mock psutil/handler,不触发真实 COM)。
+# 补充覆盖:is_file_locked 异常分支、preview/execute 异常路径、
+# _read_file_content 边界、close() 只清理临时文件。
+# 均纯逻辑或 mock handler(不触发真实 COM;进程强杀已随 Task142 删除,
+# 无误杀边界由 test_office_ownership.py 回归锁定)。
 # ---------------------------------------------------------------------------
-
-
-def test_get_office_pids_collects_matching_processes(monkeypatch):
-    """_get_office_pids 提取 psutil 枚举结果中的匹配 PID。"""
-
-    class _Process:
-        def __init__(self, pid):
-            self.info = {"pid": pid, "name": "WINWORD.EXE"}
-
-    monkeypatch.setattr(
-        psutil, "process_iter", lambda attrs: [_Process(1234), _Process(5678)]
-    )  # 适配说明(Issue #124):psutil 改为按需导入,patch 规范模块
-    svc = ContentReplaceService()
-    pids = svc._get_office_pids("WINWORD.EXE")
-    assert pids == [1234, 5678]
-
-
-def test_get_office_pids_skips_disappeared_process(monkeypatch):
-    """进程在枚举期间消失时跳过，不向上抛。"""
-
-    class _Process:
-        @property
-        def info(self):
-            raise psutil.NoSuchProcess(1234)  # 适配说明(Issue #124)
-
-    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [_Process()])
-    svc = ContentReplaceService()
-    assert svc._get_office_pids("WINWORD.EXE") == []
-
-
-def test_kill_new_office_processes_calls_psutil_kill(monkeypatch):
-    """_kill_new_office_processes 对新 PID 调用 psutil kill/wait。"""
-    monkeypatch.setattr(psutil, "process_iter", lambda attrs: [])
-    process = MagicMock()
-    process.name.return_value = "WINWORD.EXE"
-    svc = ContentReplaceService()
-    monkeypatch.setattr(svc, "_get_office_pids", lambda name: [9999])
-    monkeypatch.setattr(psutil, "Process", lambda pid: process)
-    svc._kill_new_office_processes("WINWORD.EXE", [])
-    assert process.kill.called
-    process.wait.assert_called_once_with(timeout=5)
 
 
 def test_is_file_locked_permission_error(tmp_path, monkeypatch):
@@ -669,27 +599,54 @@ def test_count_matches_none_content_returns_zero(monkeypatch):
     )
 
 
-def test_read_file_content_handler_exception_returns_none(tmp_path, monkeypatch):
-    """_read_file_content 的 handler 抛异常 → 记日志返回 None。
+def test_read_file_content_handler_exception_propagates(tmp_path, monkeypatch):
+    """_read_file_content 的 handler 抛异常 → 记日志后原样传播(不再返 None 吞掉)。
 
-    覆盖 service.py 行 474-477。mock _text_handler.read_content 抛异常。
+    回归(Task142 错误呈现):旧双层吞异常(handler 返 "" + service 返 None)
+    把读取/清理失败伪装成零匹配;现在传播给 preview_replace 的逐文件 except
+    呈现 ❌。mock _text_handler.read_content 抛异常。
     """
     f = _write_text(tmp_path / "a.txt", "hello")
     svc = ContentReplaceService()
     monkeypatch.setattr(
         svc._text_handler, "read_content", lambda p: (_ for _ in ()).throw(ValueError("boom"))
     )
-    assert svc._read_file_content(f) is None
+    with pytest.raises(ValueError, match="boom"):
+        svc._read_file_content(f)
 
 
-def test_close_returns_early_when_interpreter_shutting_down():
-    """close() 在解释器关闭判定为真时早返回(不执行 kill)。
+def test_preview_replace_read_failure_is_error_not_zero_match(tmp_path, monkeypatch):
+    """预览读取失败 → ❌ 错误状态,不得伪装成 'ℹ️ 无匹配'/零匹配(Task142 回归)。
 
-    覆盖 service.py 行 488-489。sys.exitfunc 在 CPython 通常恒存在 → 直接走早返回。
-    确保调用不抛异常即可(此路径不执行进程清理)。
+    旧实现 handler read_content 吞 COM 错误返 ""、_read_file_content 再吞返 None,
+    预览对损坏/占用文件显示“无匹配”;现在异常传到逐文件 except 呈现 ❌。
+    """
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"fake")
+    svc = ContentReplaceService()
+    monkeypatch.setattr(
+        svc._word_handler,
+        "read_content",
+        lambda p: (_ for _ in ()).throw(RuntimeError("com boom")),
+    )
+
+    result = svc.preview_replace([f], [{"type": "simple_replace", "params": {"find": "x"}}])
+
+    assert result[f]["match_count"] == 0
+    assert "错误" in result[f]["status"]
+    assert "com boom" in result[f]["status"]
+    assert "无匹配" not in result[f]["status"]
+
+
+def test_close_only_cleans_temp_files():
+    """close() 只清理本服务临时文件(Task142 后不再做任何进程扫描/强杀),不抛。
+
+    无临时文件时普通与严格关闭均为无操作;误杀边界(不得 kill 任务开始后
+    出现的无关进程)由 test_office_ownership.py 回归锁定。
     """
     svc = ContentReplaceService()
-    svc.close()  # 不抛异常即通过
+    svc.close()
+    svc.close(strict=True)
 
 
 # ---------------------------------------------------------------------------

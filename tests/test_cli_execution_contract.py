@@ -217,9 +217,6 @@ def test_replace_closes_each_exit_path(phase, tmp_path, monkeypatch):
 def test_real_service_cleanup_failure_is_visible(command, tmp_path, monkeypatch, make_text_pdf):
     from file_toolbox.core.batch_pdf.engine_manager import EngineManager
     from file_toolbox.core.batch_replace.file_converter import FileConverterService
-    from file_toolbox.core.batch_replace.service import ContentReplaceService
-
-    monkeypatch.setattr(ContentReplaceService, "_get_office_pids", lambda *args: [])
 
     def fail(*args, **kwargs):
         raise RuntimeError("underlying cleanup failed")
@@ -250,9 +247,6 @@ def test_history_failure_retains_real_completed_result(
     command, tmp_path, monkeypatch, make_text_pdf, make_xlsx, ofd_sample
 ):
     from file_toolbox.common.history import JsonHistoryStore
-    from file_toolbox.core.batch_replace.service import ContentReplaceService
-
-    monkeypatch.setattr(ContentReplaceService, "_get_office_pids", lambda *args: [])
 
     def fail(*args, **kwargs):
         raise OSError("history disk full")
@@ -312,8 +306,12 @@ def test_engine_strict_close_attempts_all_apps(monkeypatch):
         calls.append("word")
         raise RuntimeError("Quit failed")
 
-    manager._word_app = SimpleNamespace(Quit=quit_word)
-    manager._excel_app = SimpleNamespace(Quit=lambda: calls.append("excel"))
+    manager._word_app = SimpleNamespace(Quit=quit_word, Documents=SimpleNamespace(Count=0))
+    manager._current_word_engine = "Word.Application"
+    manager._excel_app = SimpleNamespace(
+        Quit=lambda: calls.append("excel"), Workbooks=SimpleNamespace(Count=0)
+    )
+    manager._current_excel_engine = "Excel.Application"
     with pytest.raises(ExceptionGroup, match="Quit failed"):
         manager.close(strict=True)
     assert calls == ["word", "excel"]

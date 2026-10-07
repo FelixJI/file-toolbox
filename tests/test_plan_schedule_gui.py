@@ -17,6 +17,7 @@ import pytest
 # 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
@@ -347,44 +348,59 @@ def test_populate_table_items_and_invalid(tab):
 
 
 def test_generate_reentry_guard_while_running(tab, monkeypatch, make_xlsx, tmp_path):
-    """worker 运行中重复点击不重复启动。"""
+    """worker 运行中重复点击不重复启动;任务未释放(含延迟关闭)一律拒绝。"""
     src = _make_input(
         make_xlsx, tmp_path, [["项点名称", "起始日期", "终止日期"], ["A", "9-17", "9-21"]]
     )
     tab.ui.edit_input.setText(str(src))
-    running = MagicMock()
-    running.isRunning.return_value = True
-    tab._worker = running
+    running = _ScheduleWorkerStub()
+    tab._task.track(running)
 
     tab._generate()
 
     assert tab._worker is running  # 未被替换
 
 
+class _ScheduleWorkerStub(QThread):
+    """带真实信号、未启动线程的生成 worker 桩:驱动 failed/finished 独立到达。
+
+    计划排布 worker 无 cancel(同步写盘不可中断),与真实 PlanScheduleWorker 同形。
+    """
+
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+
 def test_on_generate_failed_shows_critical(tab, monkeypatch):
-    """worker 异常信号 → 严重错误框 + 状态生成失败,按钮恢复。"""
+    """worker 异常信号 → 严重错误框 + 状态生成失败;释放/恢复等真实 finished。"""
     criticals: list[str] = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: criticals.append("crit"))
-    worker = MagicMock()
-    tab._worker = worker
+    worker = _ScheduleWorkerStub()
+    tab._task.track(worker)
+    worker.failed.connect(tab._on_generate_failed)
+    worker.finished.connect(tab._on_worker_finished)
     tab.ui.btn_generate.setEnabled(False)
 
-    tab._on_generate_failed("boom")
+    worker.failed.emit("boom")
 
     assert criticals == ["crit"]
     assert tab.ui.lbl_status.text() == "生成失败"
-    assert not tab.ui.btn_generate.isEnabled()
-    assert tab._worker is worker
-    tab._on_worker_finished()
+    assert not tab.ui.btn_generate.isEnabled(), "结果信号不得恢复启动按钮"
+    assert tab._worker is worker, "结果信号不得提前释放线程引用"
+
+    worker.finished.emit()
+
     assert tab._worker is None
     assert tab.ui.btn_generate.isEnabled()
 
 
-def test_close_event_stops_running_worker(tab):
-    """关闭时保留 worker,真正结束后再释放。"""
-    worker = MagicMock()
-    worker.isRunning.return_value = True
-    tab._worker = worker
+def test_close_event_stops_running_worker(tab, monkeypatch):
+    """关闭时保留 worker,真正结束后再释放;无 cancel 的任务只等待。"""
+    from unittest.mock import MagicMock
+
+    worker = _ScheduleWorkerStub()
+    tab._task.track(worker)
+    worker.finished.connect(tab._on_worker_finished)
 
     event = QCloseEvent()
     tab.closeEvent(event)
@@ -392,9 +408,17 @@ def test_close_event_stops_running_worker(tab):
     assert not event.isAccepted()
     assert tab._worker is worker
     assert tab.close_pending
-    tab._on_worker_finished()
+
+    owner = MagicMock()
+    monkeypatch.setattr(tab, "window", lambda: owner)
+    monkeypatch.setattr(
+        "file_toolbox.gui.task_lifecycle.QTimer.singleShot",
+        lambda _delay, callback: callback(),
+    )
+    worker.finished.emit()
     assert tab._worker is None
     assert not tab.close_pending
+    owner.close.assert_called_once_with()
 
 
 def test_close_event_without_worker_is_noop(tab):

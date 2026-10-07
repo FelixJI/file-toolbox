@@ -5,9 +5,13 @@
 - 成功路径:调用正确的导出方法 + Close,返回 (True, "")
 - Open 失败 / 导出失败:被 except 捕获,返回 (False, "...失败: ..."),不崩溃
 
+PPT 导出签名锁定真实 Office 协议(真机验证):ExportAsFixedFormat 第二参数
+ppFixedFormatTypePDF=2,且 PrintRange 必须显式传 None——旧实参 SaveAsPDF=32
+或缺 PrintRange 会抛 "The Python instance can not be converted to a COM object"。
+
 局限(见 plan 风险提示):MagicMock 自动接受任意属性访问,本测试验证的是**控制流顺序
-与异常兜底**,不保证 ExportAsFixedFormat 的参数签名与真实 Office COM 一致——后者依赖
-本地真 Office 手测或 self-hosted runner。
+与异常兜底**;Word/Excel 的 ExportAsFixedFormat 参数签名与真实 Office COM 的一致性
+不在本测试范围——后者依赖本地真 Office 手测或 self-hosted runner。
 """
 
 from pathlib import Path
@@ -329,7 +333,11 @@ def test_excel_convert_restore_visibility_suppresses_exception(tmp_path):
 
 
 def test_ppt_convert_success(tmp_path):
-    """成功路径:init_ppt → Open → ExportAsFixedFormat → Close,返回 (True, "")。"""
+    """成功路径:init_ppt → Open → ExportAsFixedFormat(真实协议) → Close,返回 (True, "")。
+
+    导出契约锁定真机验证过的微软官方签名:第二参数 ppFixedFormatTypePDF=2,
+    PrintRange 必须显式为 None(缺省/传 32 会抛 COM 转换错误)。
+    """
     src = _src(tmp_path, "a.pptx")
     out = _out(tmp_path)
 
@@ -343,7 +351,9 @@ def test_ppt_convert_success(tmp_path):
     assert ok is True
     assert err == ""
     em.init_ppt.assert_called_once_with("auto")
-    presentation.ExportAsFixedFormat.assert_called_once()
+    presentation.ExportAsFixedFormat.assert_called_once_with(
+        str(out.absolute()), 2, PrintRange=None
+    )
     presentation.Close.assert_called_once()
 
 

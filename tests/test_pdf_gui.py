@@ -9,6 +9,7 @@ import pytest
 # 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from file_toolbox.core.batch_pdf.constants import (  # noqa: E402
@@ -301,7 +302,7 @@ def test_on_progress_updates_label_and_bar(dlg):
 
 
 def test_on_generate_ok_renders_results_and_restores_ui(dlg, tmp_path, monkeypatch):
-    """_on_generate_ok 填结果态 + 恢复 UI。"""
+    """_on_generate_ok 只填结果态;控件恢复与引用释放等真实 finished。"""
     from pathlib import Path
 
     # fail>0 时 _on_generate_ok 会弹 QMessageBox.warning,无事件循环会挂 → 打桩
@@ -314,6 +315,10 @@ def test_on_generate_ok_renders_results_and_restores_ui(dlg, tmp_path, monkeypat
         {"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""},
         {"source": Path("b.docx"), "output": Path("b.pdf"), "success": False, "error": "boom"},
     ]
+    worker = _SignalWorkerStub()
+    dlg._task.track(worker)
+    worker.finished_ok.connect(dlg._on_generate_ok)
+    worker.finished.connect(dlg._on_worker_finished)
     # 真实流程中 _generate 前 _do_refresh_preview 已填好预览行,这里同构预置
     dlg.selected_files = [Path("a.docx"), Path("b.docx")]
     dlg._do_refresh_preview()
@@ -321,29 +326,46 @@ def test_on_generate_ok_renders_results_and_restores_ui(dlg, tmp_path, monkeypat
     dlg.ui.btn_generate.setEnabled(False)
     dlg.ui.btn_cancel.setVisible(True)
 
-    dlg._on_generate_ok(results)
+    worker.finished_ok.emit(results)
 
     tbl = dlg.ui.table_files
     assert tbl.rowCount() == 2
     assert tbl.item(0, 3).text() == "成功"
     assert tbl.item(1, 3).text() == "失败: boom"
-    assert dlg.ui.btn_generate.isEnabled() is True  # 恢复
+    assert not dlg.ui.btn_generate.isEnabled(), "结果信号不得恢复启动按钮"
+    assert dlg.worker is worker, "结果信号不得提前释放线程引用"
+
+    worker.finished.emit()
+
+    assert dlg.worker is None
+    assert dlg.ui.btn_generate.isEnabled() is True  # 真实 finished 后恢复
     # 对话框未 show,用 isHidden() 反映 setVisible(False) 的真实意图
     assert dlg.ui.btn_cancel.isHidden() is True  # 取消按钮隐藏
 
 
 def test_on_generate_failed_restores_ui(dlg, monkeypatch):
-    """_on_generate_failed 恢复 UI。"""
+    """_on_generate_failed 显示失败;恢复控件/释放引用等真实 finished。"""
     # _on_generate_failed 会弹 QMessageBox.critical,无事件循环会挂 → 打桩
     monkeypatch.setattr(
         "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.critical",
         lambda *a, **k: None,
     )
+    worker = _SignalWorkerStub()
+    dlg._task.track(worker)
+    worker.failed.connect(dlg._on_generate_failed)
+    worker.finished.connect(dlg._on_worker_finished)
     dlg.ui.btn_generate.setEnabled(False)
     dlg.ui.btn_cancel.setVisible(True)
 
-    dlg._on_generate_failed("some error")
+    worker.failed.emit("some error")
 
+    assert dlg.ui.label_progress.text() == "生成失败"
+    assert not dlg.ui.btn_generate.isEnabled(), "结果信号不得恢复启动按钮"
+    assert dlg.worker is worker, "结果信号不得提前释放线程引用"
+
+    worker.finished.emit()
+
+    assert dlg.worker is None
     assert dlg.ui.btn_generate.isEnabled() is True
     assert dlg.ui.btn_cancel.isHidden() is True  # 取消按钮隐藏
 
@@ -401,42 +423,40 @@ class _FakeWorkerStub:
         self.terminate_called = True  # 不应被调用
 
 
-def test_stop_worker_does_not_terminate_com_worker(dlg):
-    """回归:PDF worker 持 COM,_stop_worker 必须协作式取消,绝不 terminate。
+def test_stop_worker_requests_cooperative_stop_without_blocking(dlg):
+    """回归:PDF worker 持 COM,_stop_worker 只协作取消,不 quit/wait/terminate、不清引用。
 
     验证对正在运行的 PDF worker:
       - cancel() 被调用(协作式取消);
-      - quit() 被调用(保持一致);
-      - terminate() 绝不被调用(避免 COM 泄漏/死锁)。
+      - quit() 不被调用(业务 worker 无事件循环,quit 是 no-op);
+      - wait() 绝不被调用(关闭清理不得同步阻塞 GUI 线程);
+      - terminate() 绝不被调用(避免 COM 泄漏/死锁);
+      - 引用不清空——线程释放只由真实 finished(task.finish)消费。
     """
-    worker = _FakeWorkerStub(wait_returns=True)  # 在超时内停止
+    worker = _FakeWorkerStub(wait_returns=True)
     dlg.worker = worker
 
     dlg._stop_worker(timeout_ms=2000)
 
     assert worker.cancel_called, "_stop_worker 应调用 cancel()"
-    assert worker.quit_called, "_stop_worker 应调用 quit()"
+    assert not worker.quit_called, "业务 worker 无事件循环,不应调用 quit()"
     assert not worker.terminate_called, "_stop_worker 绝不应调用 terminate()"
-    assert worker.wait_called_with == [2000]
-    assert dlg.worker is None
+    assert worker.wait_called_with == [], "关闭清理不得同步等待运行中的 COM worker"
+    assert dlg.worker is worker, "线程引用只能由真实 finished 释放"
 
 
-def test_stop_worker_logs_warning_on_timeout_without_terminate(dlg, caplog):
-    """超时未停止时仅记 warning,绝不 terminate。"""
-    import logging
-
-    worker = _FakeWorkerStub(wait_returns=False)  # 模拟未在超时内停止
+def test_stop_worker_keeps_stopped_worker_for_pending_finished(dlg):
+    """线程已停止但排队的 finished 未消费:不请求停止,引用仍留给 finish 消费。"""
+    worker = _FakeWorkerStub(wait_returns=False)
+    worker._running = False
     dlg.worker = worker
 
-    with caplog.at_level(logging.WARNING, logger="file_toolbox.gui.dialogs.pdf_tab"):
-        dlg._stop_worker(timeout_ms=100)
+    dlg._stop_worker(timeout_ms=100)
 
-    assert worker.cancel_called
-    assert not worker.terminate_called, "超时也不应 terminate"
-    assert any("未能" in r.message or "terminate" in r.message for r in caplog.records), (
-        "超时应记录 warning"
-    )
-    assert dlg.worker is None
+    assert not worker.cancel_called
+    assert not worker.terminate_called
+    assert worker.wait_called_with == []
+    assert dlg.worker is worker
 
 
 def test_stop_worker_noop_when_no_worker(dlg):
@@ -580,38 +600,40 @@ def test_generate_short_circuits_when_worker_running(dlg, monkeypatch, tmp_path)
 # ---------- 生成完成:写历史失败时 UI 仍恢复(覆盖 300-301) ----------
 
 
-def test_on_generate_ok_restores_ui_when_history_write_fails(dlg, monkeypatch):
-    """_build_config 抛异常 → 写历史 except 分支(记 warning),UI 仍恢复 enabled、worker 清空。"""
+def test_on_generate_ok_partial_failure_warns_and_finish_restores(dlg, tmp_path, monkeypatch):
+    """部分失败:结果槽弹出警告,但控件恢复/引用释放仍等真实 finished。"""
     from pathlib import Path
 
-    # 完成路径有 fail=0 时不弹 QMessageBox,这里强制全成功避免弹窗
+    warned = []
     monkeypatch.setattr(
         "file_toolbox.gui.dialogs.pdf_tab.QMessageBox.warning",
-        lambda *a, **k: None,
+        lambda *a, **k: warned.append(True),
     )
-    # _render_results 在 _on_generate_ok 内首次调用一次(用真实结果);随后 try 内再次
-    # 调 _build_config 会抛 → 命中 except(300-301)。这里只让第二次(try 内)抛:
-    # 简化:直接 stub _build_config 总抛(首次 _render_results 不依赖它)。
-    monkeypatch.setattr(
-        dlg, "_build_config", lambda: (_ for _ in ()).throw(RuntimeError("cfg boom"))
-    )
-
-    results = [
-        {"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""},
-    ]
+    worker = _SignalWorkerStub()
+    dlg._task.track(worker)
+    worker.finished_ok.connect(dlg._on_generate_ok)
+    worker.finished.connect(dlg._on_worker_finished)
     dlg.selected_files = [Path("a.docx")]
     dlg._do_refresh_preview()
     dlg.ui.btn_generate.setEnabled(False)
     dlg.ui.btn_cancel.setVisible(True)
-    dlg.worker = _RunningWorkerStub()  # 任意非 None,验证会被清空
 
-    dlg._on_generate_ok(results)
+    worker.finished_ok.emit(
+        [{"source": Path("a.docx"), "output": Path("a.pdf"), "success": False, "error": "boom"}]
+    )
+
+    assert warned, "部分失败应在结果槽弹出警告"
+    assert dlg.ui.table_files.item(0, 3).text() == "失败: boom"
+    assert not dlg.ui.btn_generate.isEnabled(), "结果信号不得恢复启动按钮"
+    assert dlg.worker is worker, "结果信号不得提前释放线程引用"
+
+    worker.finished.emit()
 
     # except 被命中但 UI 仍恢复
     assert dlg.ui.btn_generate.isEnabled() is True
     assert dlg.worker is None
-    # 表已被结果态填充(_render_results 先于 try 执行)
-    assert dlg.ui.table_files.item(0, 3).text() == "成功"
+    # 表已被结果态填充(_render_results 先于警告执行)
+    assert dlg.ui.table_files.item(0, 3).text() == "失败: boom"
 
 
 # ---------- 取消(覆盖 314-316) ----------
@@ -625,6 +647,18 @@ class _CancellableWorkerStub:
 
     def cancel(self):
         self.cancel_called = True
+
+
+class _SignalWorkerStub(QThread):
+    """带真实信号、未启动线程的 worker 桩。
+
+    用真实 QThread 信号驱动 finished_ok/failed/finished 独立到达,
+    验证结果槽不恢复控件、真实 finished 才释放引用的新契约。
+    """
+
+    progress = Signal(int, int, str)
+    finished_ok = Signal(list)
+    failed = Signal(str)
 
 
 def test_on_cancel_calls_worker_cancel_and_sets_label(dlg):
@@ -898,3 +932,16 @@ def test_set_ui_enabled_toggles_cancel_button_visibility(dlg):
     dlg._set_ui_enabled(True)
     assert dlg.ui.btn_generate.isEnabled() is True
     assert dlg.ui.btn_cancel.isHidden() is True
+
+
+def test_cleanup_warning_keeps_completed_rows(dlg, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
+
+    dlg.ui.table_files.setRowCount(1)
+    dlg.ui.table_files.setItem(0, 3, QTableWidgetItem("成功"))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
+    dlg._on_cleanup_warning("已完成的输出保留；资源清理失败: controlled failure")
+    assert dlg.ui.table_files.item(0, 3).text() == "成功"
+    assert dlg.ui.label_progress.text() == "任务结果已保留，资源清理失败"
+    assert "controlled failure" in warnings[0]

@@ -10,7 +10,7 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -32,6 +32,7 @@ from file_toolbox.core.plan_schedule import (
 )
 from file_toolbox.gui.controllers.plan_schedule_controller import PlanScheduleController
 from file_toolbox.gui.generated.ui_plan_schedule_dialog import Ui_PlanScheduleDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.plan_schedule_worker import PlanScheduleWorker
 
 _FAIL_COLOR = QColor(255, 242, 204)  # 浅黄(无效行)
@@ -55,13 +56,25 @@ class PlanScheduleTab(QWidget):
         self._history = JsonHistoryStore()
         self._svc = PlanScheduleService(history_store=self._history)
         self._controller = PlanScheduleController()
-        self._close_pending = False
-        self._worker: PlanScheduleWorker | None = None
+        # 生命周期句柄:单一事实保存当前任务与延迟关闭,只在真实 finished 释放;
+        # PlanScheduleWorker 无 cancel,关闭等待只是等待(不请求取消)
+        self._task = TaskLifecycle(self)
         self._connect()
+
+    # 兼容旧 _worker 字段:读写均转发 TaskLifecycle;只有真实
+    # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
+    @property
+    def _worker(self) -> QThread | None:
+        return self._task.worker
+
+    @_worker.setter
+    def _worker(self, value: QThread | None) -> None:
+        self._task.worker = value
 
     @property
     def close_pending(self) -> bool:
-        return self._close_pending
+        """是否正等待写入线程安全退出后重试关闭。"""
+        return self._task.close_pending
 
     def _connect(self) -> None:
         self.ui.btn_browse_input.clicked.connect(self._browse_input)
@@ -133,8 +146,9 @@ class PlanScheduleTab(QWidget):
                 f"不支持的格式 {input_path.suffix},仅支持 {'/'.join(SUPPORTED_SUFFIXES)}",
             )
             return
-        # 避免重复启动(重复点击不泄漏多个 worker)
-        if self._worker is not None:
+        # 避免重复启动(重复点击不泄漏多个 worker):任务未释放或延迟关闭中一律拒绝,
+        # 不以 isRunning() 为准——排队的 finished 尚未消费时同样不能开下一轮
+        if self._task.busy:
             return
         output = self._resolve_outdir() / DEFAULT_OUTPUT_NAME
         worker = PlanScheduleWorker(self._svc, input_path, output, self._options(), parent=self)
@@ -142,29 +156,35 @@ class PlanScheduleTab(QWidget):
         worker.finished_ok.connect(self._on_generate_ok)
         worker.failed.connect(self._on_generate_failed)
         worker.finished.connect(self._on_worker_finished)
-        self._worker = worker  # 持有引用防 GC
+        self._task.track(worker)  # 持有引用防 GC;在 start 前登记
         self.ui.btn_generate.setEnabled(False)
         self.ui.lbl_status.setText("生成中…")
         worker.start()
 
     def _on_progress(self, current: int, total: int, msg: str) -> None:
+        if not self._task.accepts(self.sender()):
+            return
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
     def _on_generate_ok(self, result: ScheduleResult) -> None:
+        if not self._task.accepts(self.sender()):
+            return
         self._populate_table(result)
         summary = self._controller.summarize(result)
         self.ui.lbl_status.setText(summary)
         if result.success:
             assert result.output is not None
             settings.set(_LAST_OUTDIR_KEY, str(Path(result.output).parent))
-            if not self._close_pending:
+            if not self._task.close_pending:
                 QMessageBox.information(self, "生成完成", summary)
-        elif not self._close_pending:
+        elif not self._task.close_pending:
             QMessageBox.warning(self, "未生成输出", summary + "\n\n输入清单未被修改。")
 
     def _on_generate_failed(self, msg: str) -> None:
+        if not self._task.accepts(self.sender()):
+            return
         self.ui.lbl_status.setText("生成失败")
-        if not self._close_pending:
+        if not self._task.close_pending:
             QMessageBox.critical(self, "生成失败", msg)
 
     def _populate_table(self, result: ScheduleResult) -> None:
@@ -179,22 +199,14 @@ class PlanScheduleTab(QWidget):
                 self.ui.table.setItem(r, c, item)
 
     def _on_worker_finished(self) -> None:
-        """只在真实 finished 后释放线程,并恢复按钮或完成延迟关闭。"""
-        worker = self._worker
-        if worker is None:
+        """只在真实 finished 后释放线程,并恢复按钮;延迟关闭由 TaskLifecycle 续接。"""
+        if not self._task.finish(self.sender()):
             return
-        self._worker = None
-        worker.deleteLater()
         self.ui.btn_generate.setEnabled(True)
-        if self._close_pending:
-            self._close_pending = False
-            QTimer.singleShot(0, self.window().close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """同步生成不可由 quit 中断;保留窗口直到实际写盘线程退出。"""
-        if self._worker is not None:
-            self._close_pending = True
+        if self._task.defer_close(event):
             self.ui.lbl_status.setText("正在等待排布写入完成,随后自动关闭…")
-            event.ignore()
             return
         super().closeEvent(event)

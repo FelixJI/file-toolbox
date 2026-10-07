@@ -669,7 +669,7 @@ class MainWindow(QMainWindow):
             for attr in self._tab_attrs
             if (tab := getattr(self, attr)) is not None
             for worker in tab.findChildren(QThread)
-            if worker.isRunning()
+            if worker.isRunning() or worker is getattr(getattr(tab, "_task", None), "worker", None)
         ]
 
     def _on_closing_worker_finished(self) -> None:

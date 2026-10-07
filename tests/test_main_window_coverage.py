@@ -268,11 +268,11 @@ def test_close_event_respects_attendance_pending_state(win, monkeypatch):
     ):
         monkeypatch.setattr(type(tab), "closeEvent", lambda self, event: None, raising=False)
     monkeypatch.setattr(type(win._attendance_tab), "closeEvent", lambda self, event: None)
-    win._attendance_tab._close_pending = True
+    win._attendance_tab._task.close_pending = True
     event = QCloseEvent()
     win.closeEvent(event)
     assert event.isAccepted() is False
-    win._attendance_tab._close_pending = False
+    win._attendance_tab._task.close_pending = False
 
 
 def test_main_window_import_stays_light():
@@ -321,8 +321,6 @@ def test_tab_materialize_import_boundaries():
     回归(旧实现必红):此前打开生成 PDF 页会顶层拉入 pdf_utils(pypdfium2+pypdf+
     PIL),内容替换页拉入 chardet,考勤/workers 聚合拉入 cattrs+attr——首切卡顿的
     直接来源。这些依赖现在只在对应能力真正使用时按需导入。
-    psutil 是有意豁免:ContentReplaceService 构造时必须做 Office PID 基线快照
-    (close 只杀任务期间新起进程的治理契约),页面构造期的这份导入是功能性需求。
     子进程隔离验证(与 test_main_window_import_stays_light 同法)。
     """
     import subprocess

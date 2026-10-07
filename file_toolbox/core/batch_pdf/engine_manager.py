@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
-from file_toolbox.common.office_session import init_office_app
+from file_toolbox.common.office_session import ComSession, dispose_office_app, init_office_app
 
 from . import engine_cache
 from .constants import ENGINE_AUTO, ENGINE_WPS
@@ -95,6 +95,8 @@ class EngineManager(LoggableMixin):
         self._current_word_engine: str | None = None
         self._current_excel_engine: str | None = None
         self._current_ppt_engine: str | None = None
+        self._office_thread: int | None = None
+        self._office_lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     #  引擎检测
@@ -102,22 +104,17 @@ class EngineManager(LoggableMixin):
     @staticmethod
     def _try_detect(prog_id: str, log: Callable[[str], None]) -> bool:
         """尝试 Dispatch 一个 ProgID,成功即视为引擎可用。"""
-        import gc
-        import time
-
-        import win32com.client
-
         try:
-            app = win32com.client.Dispatch(prog_id)
-            with contextlib.suppress(Exception):
-                app.Quit()  # Quit 失败不影响"引擎可用"的判定
-            return True
-        except Exception as e:
-            log(f"{e}")
+            with ComSession():
+                app = init_office_app(prog_id)
+                try:
+                    return True
+                finally:
+                    dispose_office_app(app, prog_id)
+                    app = None
+        except Exception as error:
+            log(str(error))
             return False
-        finally:
-            gc.collect()
-            time.sleep(0.1)
 
     @staticmethod
     def _probe_registry(prog_id: str) -> bool:
@@ -281,11 +278,10 @@ class EngineManager(LoggableMixin):
 
     def _run_async_detect(self) -> None:
         """后台线程入口:CoInitialize 配对 + single-flight 投递。"""
+        session = ComSession()
         com_inited = False
         try:
-            import pythoncom
-
-            pythoncom.CoInitialize()
+            session.__enter__()
             com_inited = True
         except Exception:
             com_inited = False  # 非 Windows / 无 pywin32
@@ -294,7 +290,7 @@ class EngineManager(LoggableMixin):
         finally:
             if com_inited:
                 with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+                    session.__exit__(None, None, None)
 
     def _serve_flight(self) -> None:
         """single-flight 投递体:计算一次结果,广播给订阅者,再解除飞行。
@@ -357,9 +353,20 @@ class EngineManager(LoggableMixin):
         return [spec.ms_prog_id, spec.wps_prog_id]
 
     def _init_office_app(self, kind: str, engine: str = ENGINE_AUTO) -> Any:
+        if not self._office_lock.acquire(blocking=False):
+            raise RuntimeError("Office 会话正在初始化或释放")
+        try:
+            return self._init_office_app_locked(kind, engine)
+        finally:
+            self._office_lock.release()
+
+    def _init_office_app_locked(self, kind: str, engine: str) -> Any:
         """通用初始化逻辑,由 init_word/excel/ppt 复用。"""
         if sys.platform != "win32":
             raise RuntimeError("此功能仅支持 Windows 系统")
+
+        if self._office_thread is not None and self._office_thread != threading.get_ident():
+            raise RuntimeError("Office 会话仍属于另一线程，必须先由创建线程释放")
 
         spec = _APP_CONFIG[kind]
         current_app = getattr(self, spec.app_attr)
@@ -371,18 +378,15 @@ class EngineManager(LoggableMixin):
 
         # 引擎切换:先释放旧实例
         if current_app is not None:
-            with contextlib.suppress(Exception):
-                current_app.Quit()
+            dispose_office_app(current_app, getattr(self, spec.engine_attr), raise_on_error=True)
             setattr(self, spec.app_attr, None)
             setattr(self, spec.engine_attr, None)
 
         last_error = None
         for prog_id in self._prog_ids_to_try(kind, engine):
             try:
-                # 最内层 Dispatch + Visible/DisplayAlerts 复用共享辅助(行为等价于原
-                # app = win32com.client.Dispatch(prog_id); app.Visible=False;
-                # app.DisplayAlerts=False)。缓存/fallback/属性 setattr 仍在此处。
                 app = init_office_app(prog_id)
+                self._office_thread = threading.get_ident()
                 setattr(self, spec.app_attr, app)
                 setattr(self, spec.engine_attr, prog_id)
                 # 真实 Dispatch 成功是最强证据:精确喂养该引擎键(record_engine_
@@ -414,32 +418,33 @@ class EngineManager(LoggableMixin):
         return self._init_office_app("ppt", engine)
 
     def close(self, _from_del: bool = False, *, strict: bool = False) -> None:
-        """关闭Office应用。
+        """创建线程显式释放专属应用；析构不发送跨线程 COM 调用。"""
+        if _from_del:
+            return
+        if not self._office_lock.acquire(blocking=False):
+            raise RuntimeError("Office 会话正在初始化或释放")
+        try:
+            self._close_office_apps(strict=strict)
+        finally:
+            self._office_lock.release()
 
-        _from_del:由 __del__ 调用时为 True,此时跳过末尾的 gc.collect()——在 GC 链中
-        再触发 gc.collect() 会与 pywin32/Windows 堆交互导致 0xc0000374 堆损坏。
-        """
-        import gc
-        import time
-
+    def _close_office_apps(self, *, strict: bool) -> None:
+        if self._office_thread is not None and self._office_thread != threading.get_ident():
+            raise RuntimeError("Office 会话必须在创建线程释放")
         errors: list[Exception] = []
         for spec in _APP_CONFIG.values():
             app = getattr(self, spec.app_attr, None)
             if app is not None:
                 try:
-                    app.Quit()
-                except Exception as e:
-                    self.logger.error(f"关闭{spec.label}应用失败: {e}")
-                    errors.append(e)
-                setattr(self, spec.app_attr, None)
-                setattr(self, spec.engine_attr, None)
-
-        # 强制垃圾回收,确保COM对象被释放。
-        # 注意:不可在 __del__ 触发的 GC 链里调用——Windows + pywin32 下会堆损坏。
-        if not _from_del:
-            gc.collect()
-            time.sleep(0.1)
-        if strict and not _from_del and errors:
+                    dispose_office_app(app, getattr(self, spec.engine_attr), raise_on_error=True)
+                except Exception as error:
+                    self.logger.error(f"关闭{spec.label}应用失败: {error}")
+                    errors.append(error)
+                finally:
+                    setattr(self, spec.app_attr, None)
+                    setattr(self, spec.engine_attr, None)
+        self._office_thread = None
+        if strict and errors:
             raise ExceptionGroup("Office 释放失败: " + "; ".join(map(str, errors)), errors)
 
     def __del__(self) -> None:  # pragma: no cover

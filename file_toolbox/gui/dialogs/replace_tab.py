@@ -4,6 +4,7 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QDialog,
@@ -19,6 +20,7 @@ from file_toolbox.gui.controllers.operation_params import OperationParamCollecto
 from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
 from file_toolbox.gui.controllers.replace_controller import ReplaceController
 from file_toolbox.gui.generated.ui_replace_dialog import Ui_ContentReplaceDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
 
 
 class ContentReplaceDialog(QDialog, BatchDialogMixin):
@@ -28,6 +30,8 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 生命周期句柄先建:_init_batch_dialog 里 self.worker = None 经下方属性转发写入 task
+        self._task = TaskLifecycle(self)
         self._init_batch_dialog()
         self.ui = Ui_ContentReplaceDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
@@ -41,6 +45,16 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self.ui.btn_cancel.setVisible(False)
         self._connect_signals()
         self._update_status()
+
+    # 兼容旧 worker 字段:单一事实在 TaskLifecycle,读写均转发;只有真实
+    # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
+    @property
+    def worker(self) -> QThread | None:
+        return self._task.worker
+
+    @worker.setter
+    def worker(self, value: QThread | None) -> None:
+        self._task.worker = value
 
     def _connect_signals(self) -> None:
         self.ui.btn_select_files.clicked.connect(lambda: self._select_files(self.ui.list_files))
@@ -109,18 +123,21 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
     # ---------- 预览 / 执行 ----------
     # Word/Excel COM 的 Dispatch/Open 单文件可达数十秒:预览与执行均经 worker
     # 移入后台线程(ComSession 负责 COM 线程初始化),主线程只做校验与结果渲染,
-    # 避免 freeze_watchdog 转储的 30-45s 冻结。结果经信号(queued)回主线程。
-    def _worker_busy(self) -> bool:
-        return self.worker is not None and self.worker.isRunning()
-
+    # 避免 freeze_watchdog 转储的 30-45s 冻结。结果经信号(queued)回主线程;
+    # 线程引用/控件恢复只在真实 finished(task.finish)后进行,预览期间对操作/文件
+    # 的变更挂起为 _preview_pending,同样等真实 finished 后重跑。
     def _do_refresh_preview(self) -> None:
         if not self.selected_files or not self.operations:
             self.ui.table_preview.setRowCount(0)
+            if self._task.busy:
+                # 清空发生在老预览运行中:挂起待刷新,老结果返回时被丢弃,
+                # 空表不会被旧结果覆盖
+                self._preview_pending = True
             return
-        if self._worker_busy():
+        if self._task.busy:
             # 预览期间操作/文件仍可编辑(见 _set_preview_busy),防抖定时器或手动
             # 刷新的重入不能像旧实现那样直接丢弃——否则预览会停留在旧操作集上;
-            # 挂起为待刷新,当前 worker 结束后由 _rerun_pending_preview 自动重跑
+            # 挂起为待刷新,当前 worker 真实结束后由 _on_worker_finished 重跑
             self._preview_pending = True
             return
         valid, msg = self._svc.validate_operations(self.operations)
@@ -134,14 +151,14 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         )
         worker.preview_ok.connect(self._on_preview_ok)
         worker.failed.connect(self._on_worker_failed)
-        # 启动即清挂起标记:执行完成后紧跟的立即刷新(_on_execute_ok)不会在
-        # 预览结束后再凭旧标记多跑一轮
+        worker.finished.connect(self._on_worker_finished)
+        # 启动即清挂起标记:本次启动就是最新状态的消费
         self._preview_pending = False
         self._set_preview_busy(True)
         self.ui.label_status.setText("正在预览匹配...")
         self.ui.progress_bar.setRange(0, 0)  # 不定态:预览无逐文件进度回调
         self.ui.progress_bar.setVisible(True)
-        self.worker = worker
+        self._task.track(worker)
         worker.start()
 
     def _rerun_pending_preview(self) -> None:
@@ -151,10 +168,13 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             self._refresh_preview()
 
     def _on_preview_ok(self, result: dict[Path, dict[str, Any]]) -> None:
-        self.worker = None
+        if not self._task.accepts(self.sender()):
+            return
+        if self._preview_pending:
+            # 运行期间操作/文件已变:这份结果过期,丢弃;真实 finished 后用
+            # 最新状态重跑(含清空后的空表),空表不被旧结果覆盖
+            return
         self._render_preview(result)
-        self._restore_ui()
-        self._rerun_pending_preview()
 
     def _render_preview(self, result: dict[Path, dict[str, Any]]) -> None:
         tbl = self.ui.table_preview
@@ -168,7 +188,9 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         if not self.selected_files or not self.operations:
             QMessageBox.information(self, "提示", "请先选择文件并添加操作。")
             return
-        if self._worker_busy():
+        # 任务未在真实 finished 中释放(或预览仍在跑/延迟关闭中)时拒绝重复启动,
+        # 不以 isRunning() 为准——排队的 finished 尚未消费时同样不能开下一轮
+        if self._task.busy:
             return
         reply = QMessageBox.question(
             self,
@@ -176,6 +198,10 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             f"将对 {len(self.selected_files)} 个文件执行替换,执行前自动备份。是否继续?",
         )
         if reply != QMessageBox.StandardButton.Yes:
+            return
+        # 确认框的嵌套事件循环期间,防抖预览可能已启动:Yes 返回后必须复查,
+        # 否则 track 拋错或与预览 worker 并发改写文件
+        if self._task.busy:
             return
         from file_toolbox.gui.workers.replace_worker import ReplaceExecuteWorker
 
@@ -189,61 +215,57 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         worker.progress.connect(self._on_execute_progress)
         worker.execute_ok.connect(self._on_execute_ok)
         worker.failed.connect(self._on_worker_failed)
+        worker.finished.connect(self._on_worker_finished)
         self._set_ui_enabled(False)
         self.ui.label_status.setText("正在执行替换...")
         self.ui.progress_bar.setRange(0, len(self.selected_files))
         self.ui.progress_bar.setValue(0)
         self.ui.progress_bar.setVisible(True)
-        self.worker = worker
+        self._task.track(worker)
         worker.start()
 
     def _on_execute_progress(self, processed: int, total: int) -> None:
+        if not self._task.accepts(self.sender()):
+            return
         self.ui.progress_bar.setMaximum(total)
         self.ui.progress_bar.setValue(processed)
 
     def _on_execute_ok(self, success: int, total: int, errors: list[str]) -> None:
-        self.worker = None
-        self._restore_ui()
+        """结果槽:只展示结果;引用释放/控件恢复/预览重跑等真实 finished。"""
+        if not self._task.accepts(self.sender()):
+            return
+        # 执行改写了文件:预览已过期,标记待刷新,真实 finished 后重跑。
+        # 必须先于下方模态框设置——information 的嵌套事件循环可能先投递并消费
+        # finished(_on_worker_finished 读 _preview_pending),迟设会漏掉自动刷新。
+        self._preview_pending = True
         # 历史记录已下沉 ContentReplaceService.execute_replace(注入了 history_store)
-        QMessageBox.information(
-            self,
-            "完成",
-            f"处理 {success} 个文件, 替换 {total} 处。"
-            + ("\n" + "\n".join(errors) if errors else ""),
-        )
-        self._do_refresh_preview()
+        if not self._task.close_pending:
+            QMessageBox.information(
+                self,
+                "完成",
+                f"处理 {success} 个文件, 替换 {total} 处。"
+                + ("\n" + "\n".join(errors) if errors else ""),
+            )
 
     def _on_worker_failed(self, msg: str) -> None:
-        self.worker = None
+        if not self._task.accepts(self.sender()):
+            return
+        if not self._task.close_pending:
+            QMessageBox.critical(self, "替换失败", msg)
+        # 失败后控件恢复与挂起标记的消费均在真实 finished(_on_worker_finished)
+
+    def _on_worker_finished(self) -> None:
+        """真实 finished 后释放线程、恢复控件并消费挂起的预览刷新。"""
+        if not self._task.finish(self.sender()):
+            return
         self._restore_ui()
-        QMessageBox.critical(self, "替换失败", msg)
-        # 失败也要消费挂起标记:若运行期间用户改过操作,用新状态再试一次预览
+        if self._task.close_pending:
+            return  # 关闭中:不重跑预览,交给 TaskLifecycle 续接关闭
         self._rerun_pending_preview()
 
     def _on_cancel(self) -> None:
-        if self.worker is not None and hasattr(self.worker, "cancel"):
-            self.worker.cancel()
+        self._task.cancel()
         self.ui.label_status.setText("正在取消(当前文件完成后停止)...")
-
-    def _stop_worker(self, timeout_ms: int = 30000) -> None:
-        """停止替换 worker —— 协作式取消 + 较长等待,绝不强制 terminate。
-
-        覆盖 BatchDialogMixin._stop_worker:worker 持有 COM 对象,强制 terminate
-        (QThread.terminate)会在线程仍处于 win32com/Word 调用中途时杀掉它,可能泄漏
-        Office 进程、留下未初始化 COM、甚至死锁。cancel() 仅在文件间生效,大文档
-        处理(>3s)会让基类 wait(3000) 超时进而触发 terminate —— 必须禁用。
-        与 pdf_tab._stop_worker 同构(见其注释)。
-        """
-        if self.worker and self.worker.isRunning():
-            if hasattr(self.worker, "cancel"):
-                self.worker.cancel()
-            self.worker.quit()
-            if not self.worker.wait(timeout_ms):
-                self.logger.warning(
-                    f"{self.__class__.__name__}: 替换 worker 未能在 {timeout_ms}ms 内停止"
-                    "(可能仍在处理大文档);不强制 terminate 以避免 COM 泄漏"
-                )
-        self.worker = None
 
     def _set_ui_enabled(self, enabled: bool) -> None:
         """执行进行中禁用全部操作按钮并显示取消;完成则反之。
@@ -297,6 +319,17 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self.ui.label_status.setText(f"已选择 {len(self.selected_files)} 个文件")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        """任务未结束时延迟关闭:协作取消后等真实 finished 异步重关。
+
+        不再 wait/terminate 后假定线程结束——worker 持 COM 对象,同步等待会冻结
+        关闭、强杀会泄漏 Office 进程;_cleanup_batch_dialog(停防抖定时器、断管理
+        信号、关 svc)只在 worker 已释放后执行,关闭等待期不触发新预览、不弹模态框。
+        """
+        if self._task.defer_close(event):
+            # 关闭等待期不再触发新预览(不等 finished 后的清理):立即停防抖定时器
+            self._preview_timer.stop()
+            self.ui.label_status.setText("正在等待替换任务安全结束,完成后自动关闭…")
+            return
         self._cleanup_batch_dialog()
         with contextlib.suppress(Exception):
             self._svc.close()

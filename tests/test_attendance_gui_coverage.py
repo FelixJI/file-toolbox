@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import Qt, QThread, Signal  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QLabel,
@@ -599,14 +599,23 @@ def test_roster_preview_employee_status_includes_unmatched(tab, tmp_path):
 # --- 关闭路径 ---
 
 
+class _AttendanceWorkerStub(QThread):
+    """带真实信号、未启动线程的考勤 worker 桩:驱动 finished 独立到达。"""
+
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+
 def test_close_event_with_finished_worker_proceeds(tab):
     from PySide6.QtGui import QCloseEvent
 
-    worker = MagicMock()
-    worker.isRunning.return_value = False
-    tab._worker = worker
-    event = QCloseEvent()
+    worker = _AttendanceWorkerStub()
+    tab._task.track(worker)
+    worker.finished.connect(tab._on_worker_finished)
+    worker.finished.emit()  # 真实 finished 已消费:引用释放
+    assert tab._worker is None
 
+    event = QCloseEvent()
     tab.closeEvent(event)
 
     assert event.isAccepted() is True

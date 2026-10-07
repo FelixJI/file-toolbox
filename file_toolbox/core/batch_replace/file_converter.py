@@ -5,15 +5,15 @@
 共享/缓存设计,而 COM 应用绑定创建它的 STA 线程,跨线程复用会失效。
 """
 
-import contextlib
+import os
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from file_toolbox.common.office_session import init_office_app
+from file_toolbox.common.office_session import ComSession, dispose_office_app, init_office_app
 
 
 @dataclass(frozen=True)
@@ -59,53 +59,58 @@ class FileConverterService:
         if sys.platform != "win32":
             return False, src_path, "此功能仅支持 Windows 系统"
 
-        # 显式 ImportError 早返回:pywin32 未装时返回专用提示。ComSession 在无 pywin32
-        # 时是 no-op(吞掉 ImportError),随后 init_office_app 内的 Dispatch 才抛——那样
-        # 错误会落到下方通用 except 返回「转换失败」而非专用提示,属行为变更。故保留
-        # 此显式检查,仅用 init_office_app 替换最内层 Dispatch+属性设置。
+        # 缺少 pywin32 时保留专用错误；不触碰目标文件。
         try:
-            import pythoncom
+            __import__("pythoncom")
         except ImportError:
             return False, src_path, "未安装 pywin32 库，请运行: pip install pywin32"
 
         app = None
+        doc = None
         try:
-            pythoncom.CoInitialize()
+            # 默认预览只拥有独立临时文件，不占用或删除原文件旁的同名文档。
+            # 显式输出在同目录暂存，COM/文档收尾成功后再原子晋升。
+            fd, name = tempfile.mkstemp(
+                prefix="file-toolbox-convert-",
+                suffix=spec.new_suffix,
+                dir=output_path.parent if output_path is not None else None,
+            )
+            os.close(fd)
+            staged = Path(name)
+            self.temp_files.append(staged)
+            session = ComSession()
+            session.__enter__()
             try:
-                # 生成输出路径
-                if output_path is None:
-                    output_path = src_path.with_suffix(spec.new_suffix)
-                    # 目标已存在:先尝试删除,被锁定则用时间戳建新文件
-                    if output_path.exists():
-                        try:
-                            output_path.unlink()
-                        except PermissionError:
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            output_path = src_path.with_name(
-                                f"{src_path.stem}_{timestamp}{spec.new_suffix}"
-                            )
-
-                # 每次创建新的应用实例,避免 COM 对象失效问题。
-                # init_office_app 等价于原 Dispatch(prog_id)+Visible/DisplayAlerts=False。
                 app = init_office_app(spec.prog_id)
-
                 doc = spec.open_doc(app, str(src_path.absolute()))
-                spec.save_doc(doc, str(output_path.absolute()), spec.file_format)
-                doc.Close()
-
-                self.temp_files.append(output_path)
-                return True, output_path, ""
+                spec.save_doc(doc, str(staged.absolute()), spec.file_format)
+                doc.Close(False)
+                doc = None
             finally:
-                if app is not None:
-                    with contextlib.suppress(Exception):
-                        app.Quit()
-                # 注意:此处 CoUninitialize 是**无条件、未 suppress**的(与 handlers 不同)。
-                # 若改用 ComSession,其 __exit__ 会 suppress CoUninit 异常——在极少见情况下
-                # 会把「成功转换」变成不失败(原行为是 CoUninit 抛错会冒泡到外层 except 返回
-                # 失败)。为保持这一边界语义逐字不变,保留手写裸 CoUninitialize。
-                pythoncom.CoUninitialize()
-        except Exception as e:
-            return False, src_path, f"{spec.error_label}转换失败: {e!s}"
+                cleanup_errors: list[Exception] = []
+                if doc is not None:
+                    try:
+                        doc.Close(False)
+                    except Exception as cleanup_error:
+                        cleanup_errors.append(cleanup_error)
+                doc = None
+                try:
+                    dispose_office_app(app, spec.prog_id, raise_on_error=True)
+                except Exception as cleanup_error:
+                    cleanup_errors.append(cleanup_error)
+                app = None
+                session.__exit__(None, None, None)
+                if cleanup_errors:
+                    raise RuntimeError("Office 清理失败: " + "; ".join(map(str, cleanup_errors)))
+            if not staged.is_file() or staged.stat().st_size == 0:
+                raise RuntimeError("Office 未生成有效的转换文件")
+            if output_path is not None:
+                staged.replace(output_path)
+                self.temp_files.remove(staged)
+                return True, output_path, ""
+            return True, staged, ""
+        except Exception as error:
+            return False, src_path, f"{spec.error_label}转换失败: {error}"
 
     def convert_doc_to_docx(
         self, doc_path: Path, output_path: Path | None = None
@@ -115,7 +120,7 @@ class FileConverterService:
 
         Args:
             doc_path: doc文件路径
-            output_path: 输出路径（可选，默认为同目录下的 .docx 文件）
+            output_path: 输出路径（可选，默认返回由本服务清理的独立临时 .docx 文件）
 
         Returns:
             (是否成功, 转换后的文件路径, 错误消息)
@@ -138,7 +143,7 @@ class FileConverterService:
 
         Args:
             xls_path: xls文件路径
-            output_path: 输出路径（可选，默认为同目录下的 .xlsx 文件）
+            output_path: 输出路径（可选，默认返回由本服务清理的独立临时 .xlsx 文件）
 
         Returns:
             (是否成功, 转换后的文件路径, 错误消息)
