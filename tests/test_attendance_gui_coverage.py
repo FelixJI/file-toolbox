@@ -7,13 +7,8 @@ import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
-from PySide6.QtCore import Qt, QThread, Signal  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
-    QApplication,
-    QLabel,
-    QMessageBox,
-    QTableWidgetItem,
-)
+from PySide6.QtCore import QThread, Signal  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from file_toolbox.core.attendance import (  # noqa: E402
     AttendancePlanStore,
@@ -22,6 +17,10 @@ from file_toolbox.core.attendance import (  # noqa: E402
     CellRef,
     EmployeeGroupPreview,
     UnmatchedAttendance,
+)
+from file_toolbox.core.attendance.form_state import (  # noqa: E402
+    PreviewRows,
+    RosterEmployeePreviewRow,
 )
 from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab  # noqa: E402
 
@@ -265,13 +264,13 @@ def test_mappings_skip_fully_blank_rows(tab):
 
 
 def test_rules_reject_blank_pattern_and_empty_table(tab):
-    tab.ui.table_rules.setRowCount(0)
+    tab._set_rules(())
     tab._add_rule()
 
     with pytest.raises(ValueError, match="正则不能为空"):
         tab._build_plan()
 
-    tab.ui.table_rules.setRowCount(0)
+    tab._set_rules(())
 
     with pytest.raises(ValueError, match="至少需要一条判定规则"):
         tab._build_plan()
@@ -288,23 +287,26 @@ def test_mapping_selector_resolves_summary_and_detail_roles(tab):
         )
     )
 
-    assert tab._mapping_sheet_name(0) == "考勤汇总表"
-    assert tab._mapping_sheet_name(1) == "出勤明细"
+    first = tab.ui.table_mappings.cellWidget(0, 0)
+    second = tab.ui.table_mappings.cellWidget(1, 0)
+    assert first is not None and second is not None
+    assert first.currentText() == "考勤汇总表"
+    assert second.currentText() == "出勤明细"
     assert [mapping.sheet_name for mapping in tab._build_plan().mappings] == [
         "考勤汇总表",
         "出勤明细",
     ]
 
 
-def test_mapping_sheet_name_falls_back_to_plain_text_widget(tab):
-    tab._add_mapping()
-    tab.ui.table_mappings.setCellWidget(0, 0, QLabel("遗留 Sheet"))
-    tab.ui.table_mappings.setItem(0, 0, QTableWidgetItem("遗留 Sheet"))
-    tab.ui.table_mappings.item(0, 1).setText("C3")
-    tab.ui.table_mappings.item(0, 2).setText("内容")
+def test_mapping_legacy_sheet_survives_target_sheet_rename(tab):
+    """非明细/汇总的遗留 Sheet 名不受基准 Sheet 改名影响。"""
+    tab._set_mappings((CellMapping("遗留 Sheet", CellRef.parse("C3"), "内容"),))
+    selector = tab.ui.table_mappings.cellWidget(0, 0)
+    assert selector is not None
+
     tab.ui.edit_detail_sheet.setText("改名明细")
 
-    assert tab._mapping_sheet_name(0) == "遗留 Sheet"
+    assert selector.currentText() == "遗留 Sheet"
     assert tab._build_plan().mappings[0].sheet_name == "遗留 Sheet"
 
 
@@ -360,8 +362,8 @@ def test_same_name_same_group_conflicting_targets_are_rejected(tab, warnings):
         ),
     )
     tab._on_preview_ok(preview)
-    tab.ui.table_employee_preview.item(0, 2).setText("B组")
-    tab.ui.table_employee_preview.item(1, 2).setText("C组")
+    assert tab._employee_model.setData(tab._employee_model.index(0, 2), "B组")
+    assert tab._employee_model.setData(tab._employee_model.index(1, 2), "C组")
 
     tab._apply_preview_adjustments()
 
@@ -371,16 +373,17 @@ def test_same_name_same_group_conflicting_targets_are_rejected(tab, warnings):
 def test_roster_capture_exclusions_without_group_rows(tab, tmp_path):
     tab.ui.chk_roster_enabled.setChecked(True)
     tab.ui.edit_roster.setText(str(tmp_path / "roster.xlsx"))
-    tab._configure_preview_tables(True)
-    tab.ui.table_employee_preview.setRowCount(1)
-    export_item = QTableWidgetItem()
-    export_item.setFlags(
-        Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable
+    tab._employee_model.set_rows(
+        PreviewRows(
+            roster_mode=True,
+            target_editable=False,
+            roster_employees=(
+                RosterEmployeePreviewRow(
+                    "wb001", "张三", "市场部", "徐州中车", "正式", False, "已排除"
+                ),
+            ),
+        )
     )
-    export_item.setCheckState(Qt.CheckState.Unchecked)
-    tab.ui.table_employee_preview.setItem(0, 0, export_item)
-    for column, value in enumerate(("wb001", "张三", "市场部", "徐州中车", "正式"), start=1):
-        tab.ui.table_employee_preview.setItem(0, column, QTableWidgetItem(value))
 
     tab._capture_preview_adjustments()
 
@@ -566,7 +569,7 @@ def test_preview_status_appends_overflow_unmatched_entries(tab):
 
     tab._on_preview_ok(preview)
 
-    status = tab.ui.table_employee_preview.item(0, 3).text()
+    status = tab._employee_model.data(tab._employee_model.index(0, 3))
     assert "1日: 异常1" in status and "另 1 条" in status
 
 
@@ -592,7 +595,7 @@ def test_roster_preview_employee_status_includes_unmatched(tab, tmp_path):
 
     tab._on_preview_ok(preview)
 
-    status = tab.ui.table_employee_preview.item(0, 6).text()
+    status = tab._employee_model.data(tab._employee_model.index(0, 6))
     assert "未识别：2日: 特殊状态" in status
 
 
