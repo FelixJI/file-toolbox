@@ -33,7 +33,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         super().__init__(parent)
         self._init_batch_dialog()
         self.ui = Ui_FileRenamerDialog()
-        self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
+        self.ui.setupUi(self)
 
         self._controller = RenameController()
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
