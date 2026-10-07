@@ -10,6 +10,7 @@ pytest.importorskip("PySide6.QtWidgets")
 
 from pathlib import Path
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from file_toolbox.common.history import JsonHistoryStore
@@ -422,43 +423,58 @@ def test_export_failure_does_not_persist_outdir(tab, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# closeEvent:解析中关闭窗口应停止 worker(防泄漏)
+# closeEvent:解析中关闭改为延迟关闭(协作取消 + 等真实 finished 异步重关)
 # ---------------------------------------------------------------------------
 
 
-def test_close_event_stops_running_parse_worker(tab):
-    """解析中触发 closeEvent 应 cancel + wait 停止 _parse_worker,不泄漏。
+class _ParseWorkerStub(QThread):
+    """带真实信号、未启动线程的解析 worker 桩:驱动 failed/finished 独立到达。"""
 
-    回归:InvoiceTab 曾无 closeEvent,关闭窗口(main_window.closeEvent 仅对
-    hasattr(tab,'closeEvent') 的 tab 调用)时 _parse_worker 仍在后台跑,
-    持有 self 为 parent,进程退出可能崩溃/泄漏。补 closeEvent 协作式停止 worker。
+    progress = Signal(int, int)
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_called = False
+
+    def cancel(self) -> None:
+        self.cancel_called = True
+
+
+def test_close_event_defers_close_until_real_finished(tab, monkeypatch):
+    """解析中关闭:协作取消后拒绝关闭;真实 finished 后释放并异步重关。
+
+    回归:旧实现在 closeEvent 里同步 cancel + wait(3000) 后清引用——等待冻结关闭,
+    且超时后清理仍可能撞上仍在运行的线程(持有 self 为 parent,进程退出可能
+    崩溃/泄漏)。新契约:引用释放/重新关闭由 TaskLifecycle 在真实 finished 消费。
     """
+    from unittest.mock import MagicMock
+
     from PySide6.QtGui import QCloseEvent
 
-    cancelled = []
-    waited = []
+    worker = _ParseWorkerStub()
+    tab._task.track(worker)
+    worker.finished.connect(tab._on_worker_finished)
+    event = QCloseEvent()
 
-    class _FakeRunningWorker:
-        """模拟正在运行的 worker:isRunning True,cancel/wait 可记录调用。"""
+    tab.closeEvent(event)
 
-        def isRunning(self) -> bool:
-            return True
+    assert worker.cancel_called, "关闭等待应请求协作取消"
+    assert event.isAccepted() is False
+    assert tab._parse_worker is worker, "真实 finished 前不得释放引用"
 
-        def cancel(self) -> None:
-            cancelled.append(1)
+    owner = MagicMock()
+    monkeypatch.setattr(tab, "window", lambda: owner)
+    monkeypatch.setattr(
+        "file_toolbox.gui.task_lifecycle.QTimer.singleShot",
+        lambda _delay, callback: callback(),
+    )
+    worker.finished.emit()
 
-        def quit(self) -> None:  # 与 _stop_worker 一致:无事件循环 worker 仍调用
-            pass
-
-        def wait(self, timeout_ms: int = 0) -> bool:
-            waited.append(timeout_ms)
-            return True  # 模拟 promptly 停止
-
-    tab._parse_worker = _FakeRunningWorker()  # type: ignore[assignment]
-    tab.closeEvent(QCloseEvent())
-    assert cancelled, "closeEvent 应调用 worker.cancel() 停止解析"
-    assert waited, "closeEvent 应 wait() 等待 worker 退出"
     assert tab._parse_worker is None
+    assert tab.ui.btn_parse.isEnabled() is True
+    owner.close.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -503,25 +519,30 @@ def test_parse_skipped_when_worker_running(tab, monkeypatch, tmp_path):
 
 
 def test_on_parse_failed_no_prior_result_disables_export(tab, monkeypatch):
-    """解析失败且无先前结果 → btn_export 禁用(第 144-149 行,False 分支)。
-
-    _on_parse_failed 直接作为普通方法调用即可覆盖逻辑,不必走真实 worker 线程+信号
-    投递(那条路更脆)。第 147 行 _result is None → btn_export.setEnabled(False)。
-    """
+    """解析失败且无先前结果:结果槽不释放线程/不恢复启动按钮,真实 finished 后恢复。"""
     warned = []
     monkeypatch.setattr(
         QMessageBox, "warning", lambda *a, **k: warned.append(1) or QMessageBox.StandardButton.Ok
     )
+    worker = _ParseWorkerStub()
+    tab._task.track(worker)
+    worker.failed.connect(tab._on_parse_failed)
+    worker.finished.connect(tab._on_worker_finished)
     tab._result = None
-    tab._parse_worker = object()  # type: ignore[assignment]  # 模拟曾有 worker
+    tab.ui.btn_parse.setEnabled(False)
 
-    tab._on_parse_failed("解析爆炸")
+    worker.failed.emit("解析爆炸")
+
+    assert warned, "应弹出失败警告"
+    assert tab._parse_worker is worker, "结果槽不得提前释放线程引用"
+    assert tab.ui.btn_parse.isEnabled() is False, "结果槽不得恢复启动按钮"
+    assert tab.ui.btn_export.isEnabled() is False  # _result is None
+    assert tab.ui.lbl_status.text() == "解析失败"
+
+    worker.finished.emit()
 
     assert tab._parse_worker is None
     assert tab.ui.btn_parse.isEnabled() is True
-    assert tab.ui.btn_export.isEnabled() is False  # _result is None
-    assert tab.ui.lbl_status.text() == "解析失败"
-    assert warned, "应弹出失败警告"
 
 
 def test_on_parse_failed_with_prior_result_keeps_export(tab, monkeypatch):

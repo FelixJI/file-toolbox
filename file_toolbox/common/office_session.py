@@ -1,117 +1,185 @@
-"""Office COM 会话基础设施。
+"""COM 线程配对与 Office 任务资源边界。
 
-提供线程级的 CoInitialize/CoUninitialize 配对上下文管理器,以及通用的
-Office app 初始化/释放辅助(Dispatch + Visible/DisplayAlerts 设置、Quit + gc)。
-供 batch_pdf(EngineManager)与 batch_replace(handlers)共用,消除重复的 COM 典礼。
-
-设计要点:
-- ``ComSession`` 只管「使用 win32com 的线程先 CoInitialize、用完 CoUninitialize'',
-  **不缓存 COM app 实例**——STA 绑定下 COM 应用绑定创建它的线程,跨线程复用会失效,
-  故本类只跟踪本线程的 CoInit 状态(线程局部),由调用方各自管理 app 生命周期。
-- ``init_office_app`` 抽自 ``EngineManager._init_office_app`` 的最内层 Dispatch+属性设置,
-  但不持有/缓存 app:EngineManager 缓存实例,replace handlers 每批建/释放。
-- ``dispose_office_app`` 是「Quit + gc.collect(+可选 sleep)」的最通用形态,供批末清理。
-- **进程退出安全**:`dispose_office_app` 始终走 gc.collect;真正需要在 GC 链中跳过 gc 的
-  场景(如 ``EngineManager.close(_from_del=True)``)保留各自的 ``_from_del`` 守卫逻辑,
-  不下沉到此处——本模块是无状态工具,不理解「是否处于 __del__ 链」这种业务上下文。
-
-这些辅助是**无状态工具**:超时重启(Quit→gc→sleep0.5→kill→sleep0.5→重 Dispatch)、
-PID 清理、ScreenUpdating 等 replace 侧业务逻辑**不在本模块**,保留在各 handler。
+Word/Excel 的独立实例已经过真实 Windows 验证。PowerPoint 是 MultiUse，
+WPS 的隔离能力不作假设：借用其应用时不修改全局属性，也不调用 Quit。
+文档仅接管本次 Open 返回且此前未打开的目标；所有调用仍是协作式、可能阻塞。
 """
 
 from __future__ import annotations
 
 import contextlib
 import gc
+import os
+import threading
 import time
-from typing import Any
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any, Literal, cast
+
+# Microsoft SingleUse 应用；不要把 DispatchEx 等同于所有引擎都独占进程。
+_OWNED_APPLICATIONS = {"Word.Application": "Documents", "Excel.Application": "Workbooks"}
+DocumentCollection = Literal["Documents", "Workbooks", "Presentations"]
+
+
+def _initialize_com() -> None:
+    # pywin32 的主初始化线程不累计嵌套计数；直接调用系统 API 才能成对释放。
+    import ctypes
+
+    import pythoncom
+
+    ole32 = ctypes.OleDLL("ole32")
+    ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    ole32.CoInitializeEx(None, pythoncom.COINIT_APARTMENTTHREADED)
+
+
+def _uninitialize_com() -> None:
+    import ctypes
+
+    ole32 = ctypes.WinDLL("ole32")
+    ole32.CoUninitialize.argtypes = []
+    ole32.CoUninitialize.restype = None
+    ole32.CoUninitialize()
 
 
 class ComSession:
-    """线程级 COM 初始化上下文。
-
-    用法::
-
-        with ComSession():
-            # 本线程内可安全 win32com.client.Dispatch
-            ...
-
-    非 Windows / 无 pywin32 时进入为 no-op(不抛),退出无操作。这样调用方
-    (handlers / worker)无需在调用前判断平台——CoInit 失败即视为「无 COM 环境」。
-    """
+    """在同一线程配对 CoInitialize/CoUninitialize；无 pywin32 时不初始化。"""
 
     def __init__(self) -> None:
         self._inited = False
+        self._thread_id: int | None = None
 
     def __enter__(self) -> ComSession:
+        if self._inited:
+            raise RuntimeError("COM 会话不能重复进入")
         try:
-            import pythoncom
-
-            pythoncom.CoInitialize()
-            self._inited = True
-        except Exception:
-            self._inited = False  # 非 Windows / 无 pywin32
+            _initialize_com()
+        except ImportError:
+            return self
+        self._inited = True
+        self._thread_id = threading.get_ident()
         return self
 
     def __exit__(self, *exc: object) -> None:
         if self._inited:
-            with contextlib.suppress(Exception):
-                import pythoncom
-
-                pythoncom.CoUninitialize()
-        self._inited = False
+            if self._thread_id != threading.get_ident():
+                raise RuntimeError("COM 会话必须在初始化线程释放")
+            try:
+                _uninitialize_com()
+            finally:
+                self._inited = False
+                self._thread_id = None
 
 
 def init_office_app(prog_id: str) -> Any:
-    """Dispatch 一个 Office app 并设置常用属性(Visible/DisplayAlerts=False)。
-
-    调用方负责 CoInitialize(用 ``ComSession``)与 Quit(批末)。
-    prog_id 例:``'Word.Application'`` / ``'Excel.Application'`` / ``'PowerPoint.Application'``。
-
-    与原 ``EngineManager._init_office_app`` 的最内层逻辑等价:
-    ``Dispatch(prog_id)`` → ``Visible=False`` → ``DisplayAlerts=False``。
-    不设 ``ScreenUpdating``——那是 replace batch_replace 的业务优化(减少屏幕刷新),
-    由调用方在需要时单独设置。
-    """
+    """按需创建 COM 引用；共享应用不设置 Visible/DisplayAlerts。"""
     import win32com.client
 
-    app = win32com.client.Dispatch(prog_id)
-    app.Visible = False
-    app.DisplayAlerts = False
+    dispatch_ex = cast(Callable[[str], Any], win32com.client.DispatchEx)
+    app = dispatch_ex(prog_id)
+    if prog_id in _OWNED_APPLICATIONS:
+        try:
+            app.Visible = False
+            app.DisplayAlerts = False
+        except Exception:
+            # 初始化属性失败也必须释放已创建的专属空应用。
+            with contextlib.suppress(Exception):
+                dispose_office_app(app, prog_id, raise_on_error=True)
+            raise
     return app
 
 
 def init_isolated_office_app(prog_id: str) -> Any:
-    """用 DispatchEx 创建不附着用户现有会话的 Office app。"""
-    import win32com.client
+    """只允许已验证独立实例语义的 Microsoft Word/Excel。"""
+    if prog_id not in _OWNED_APPLICATIONS:
+        raise ValueError(f"未验证该应用可创建独占会话: {prog_id}")
+    return init_office_app(prog_id)
 
-    dispatch_ex: Any = win32com.client.DispatchEx
-    app = dispatch_ex(prog_id)
-    app.Visible = False
-    app.DisplayAlerts = False
-    return app
+
+def open_office_document(
+    app: Any,
+    collection_name: DocumentCollection,
+    path: Path,
+    *args: object,
+    **kwargs: object,
+) -> Any:
+    """拒绝接管应用中已经打开的目标文档，避免稍后 Close 非任务文档。"""
+    documents = getattr(app, collection_name)
+    target = os.path.normcase(os.path.realpath(path))
+    for document in documents:
+        if os.path.normcase(os.path.realpath(document.FullName)) == target:
+            raise RuntimeError(f"目标文档已在 Office 中打开，不能接管: {path.name}")
+    return documents.Open(str(path.absolute()), *args, **kwargs)
+
+
+@contextlib.contextmanager
+def office_document(
+    app: Any,
+    collection_name: DocumentCollection,
+    path: Path,
+    *args: object,
+    **kwargs: object,
+) -> Iterator[Any]:
+    """无论转换成功或失败都关闭本次文档；保留处理及关闭错误。"""
+    document = open_office_document(app, collection_name, path, *args, **kwargs)
+
+    def close() -> None:
+        if collection_name == "Presentations":
+            document.Saved = True  # 只丢弃本次转换的内存排版，不改原文件。
+            document.Close()
+        else:
+            document.Close(False)
+
+    try:
+        yield document
+    except Exception as error:
+        try:
+            close()
+        except Exception as cleanup_error:
+            raise RuntimeError(f"{error}；关闭 Office 文档失败: {cleanup_error}") from error
+        raise
+    else:
+        close()
 
 
 def dispose_office_app(
-    app: Any | None, *, gc_pause: float = 0.0, raise_on_error: bool = False
+    app: Any | None,
+    prog_id: str,
+    *,
+    gc_pause: float = 0.0,
+    raise_on_error: bool = False,
 ) -> None:
-    """安全 Quit 一个 Office app 并触发 gc(批末清理用)。
+    """仅 Quit 已知专属且没有未关闭文档的应用；共享引用只由调用方释放。
 
-    - app 为 None 时 no-op。
-    - 默认吞掉 Quit 失败；``raise_on_error=True`` 时完成 gc 后抛出。
-    - 始终 ``gc.collect()`` 释放 COM 对象;``gc_pause > 0`` 时 gc 后再 sleep,用于
-      批间彻底释放(与原 ``Quit→gc.collect→time.sleep`` 时序一致:gc 在前,sleep 在后)。
-
-    注意:**不在此处 kill 残留进程**——PID 清理是 replace 侧业务(依赖批前快照 PID),
-    保留在 handlers。本函数只管单个 app 对象的「软」清理。
+    不按进程名/PID 差集清理，也不能硬中断正在进行的 COM 调用。
+    调用方必须在创建线程关闭文档、清空引用，再退出 ComSession。
     """
     if app is None:
         return
     quit_error: Exception | None = None
     try:
-        app.Quit()
-    except Exception as exc:  # COM 已断开/进程已退出
-        quit_error = exc
+        collection_name = _OWNED_APPLICATIONS.get(prog_id)
+        if collection_name is not None:
+            count = getattr(app, collection_name).Count
+            if count != 0:
+                identity = prog_id
+                # PID 仅用于人工定位保留的会话，绝不作为 kill/归属授权。
+                with contextlib.suppress(Exception):
+                    import win32gui
+                    import win32process
+
+                    window = app.ActiveWindow if prog_id == "Word.Application" else app
+                    hwnd = window.Hwnd
+                    if win32gui.IsWindow(hwnd):
+                        thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+                        if thread_id and pid:
+                            identity += f" (PID {pid})"
+                raise RuntimeError(
+                    f"{identity} 仍有 {count} 个未关闭文档，保留会话，不执行 Quit；"
+                    "请在该应用中保存并关闭文档"
+                )
+            app.Quit()
+    except Exception as error:
+        quit_error = error
     gc.collect()
     if gc_pause > 0:
         time.sleep(gc_pause)

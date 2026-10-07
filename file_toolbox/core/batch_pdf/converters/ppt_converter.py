@@ -7,6 +7,8 @@ PowerPoint转PDF转换器
 from pathlib import Path
 from typing import Any, ClassVar
 
+from file_toolbox.common.office_session import office_document
+
 from ..constants import (
     ORIENTATION_AUTO_DETECT,
     ORIENTATION_LANDSCAPE,
@@ -62,46 +64,42 @@ class PptConverter:
             engine = config.get("engine", "auto")
             ppt = self._engine_manager.init_ppt(engine)
             # msoFalse = 0, msoTrue = -1
-            presentation = ppt.Presentations.Open(
-                str(file_path.absolute()),
-                True,  # ReadOnly
-                False,  # Untitled
-                False,  # WithWindow
-            )
+            with office_document(
+                ppt, "Presentations", file_path, True, True, False
+            ) as presentation:
+                paper_size = config.get("paper_size", "auto")
+                orientation = config.get("orientation", "auto")
 
-            paper_size = config.get("paper_size", "auto")
-            orientation = config.get("orientation", "auto")
+                # 自动检测方向
+                if orientation == ORIENTATION_AUTO_DETECT:
+                    orientation = self._detect_orientation(presentation)
 
-            # 自动检测方向
-            if orientation == ORIENTATION_AUTO_DETECT:
-                orientation = self._detect_orientation(presentation)
+                # 设置纸张大小和方向
+                if paper_size != "auto" and paper_size in self.PAPER_SIZES_POINTS:
+                    paper_w, paper_h = self.PAPER_SIZES_POINTS[paper_size]
 
-            # 设置纸张大小和方向
-            if paper_size != "auto" and paper_size in self.PAPER_SIZES_POINTS:
-                paper_w, paper_h = self.PAPER_SIZES_POINTS[paper_size]
+                    # 根据方向调整
+                    if orientation == ORIENTATION_LANDSCAPE:
+                        paper_w, paper_h = paper_h, paper_w
+                    elif (
+                        orientation in ("auto", ORIENTATION_AUTO_DETECT)
+                        and presentation.PageSetup.SlideWidth > presentation.PageSetup.SlideHeight
+                    ):
+                        # 根据当前幻灯片比例决定方向
+                        paper_w, paper_h = paper_h, paper_w
+                    # orientation == "portrait" 时不交换，保持原始宽高
 
-                # 根据方向调整
-                if orientation == ORIENTATION_LANDSCAPE:
-                    paper_w, paper_h = paper_h, paper_w
-                elif (
-                    orientation in ("auto", ORIENTATION_AUTO_DETECT)
-                    and presentation.PageSetup.SlideWidth > presentation.PageSetup.SlideHeight
-                ):
-                    # 根据当前幻灯片比例决定方向
-                    paper_w, paper_h = paper_h, paper_w
-                # orientation == "portrait" 时不交换，保持原始宽高
+                    # 设置幻灯片大小
+                    presentation.PageSetup.SlideWidth = paper_w
+                    presentation.PageSetup.SlideHeight = paper_h
 
-                # 设置幻灯片大小
-                presentation.PageSetup.SlideWidth = paper_w
-                presentation.PageSetup.SlideHeight = paper_h
+                # ExportAsFixedFormat 使用 ppFixedFormatTypePDF=2；PrintRange 必须显式为空。
+                presentation.ExportAsFixedFormat(
+                    str(output_path.absolute()),
+                    2,  # ppFixedFormatTypePDF
+                    PrintRange=None,
+                )
 
-            # 导出为PDF (ppSaveAsPDF = 32)
-            presentation.ExportAsFixedFormat(
-                str(output_path.absolute()),
-                32,  # ppSaveAsPDF
-            )
-
-            presentation.Close()
             return True, ""
 
         except Exception as e:

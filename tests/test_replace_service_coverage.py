@@ -1,19 +1,17 @@
 """ContentReplaceService 未覆盖分支的补充测试。
 
-聚焦 service.py 行:
-- 217-237: preview_replace 的 .doc/.xls 转换路径(成功/失败两支)
-- 337-345: execute_replace 分组(docx/xlsx 分类 + 锁定跳过)
-- 382-413: execute_replace Word 文档处理块
-- 418-447: execute_replace Excel 文档处理块
-- 472/475: _read_file_content 调用 word/excel handler
-- 497: close() 获取锁成功 → 执行 kill
-- 506-507: close() except 吞异常
-- close(_from_del=True):由 __del__ 调用时跳过进程清理
+聚焦 service.py:
+- preview_replace 的 .doc/.xls 转换路径(成功/失败两支)
+- execute_replace 分组(docx/xlsx 分类 + 锁定跳过)与 Word/Excel 处理块
+- _read_file_content 调用 word/excel handler
+- close()(Task142 后只清理本服务临时文件,不再做进程扫描/强杀):
+  普通关闭委托 converter.close;严格关闭传播清理失败;_from_del 路径不做任何清理
 
-策略:用 MagicMock 替换 svc 的 handler/converter/_get_office_pids,
-避免真实 COM/进程操作。文本路径用真文件。
+策略:用 MagicMock 替换 svc 的 handler/converter,避免真实 COM 操作。
+文本路径用真文件。
 """
 
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -25,13 +23,11 @@ SIMPLE = {"type": "simple_replace", "params": {"find": "old", "replace": "new"}}
 
 
 def _svc_with_mocks() -> ContentReplaceService:
-    """构造 svc,替换所有 handler/converter/pids 为 mock(避免真实 COM/进程操作)。"""
+    """构造 svc,替换所有 handler/converter 为 mock(避免真实 COM 操作)。"""
     svc = ContentReplaceService.__new__(ContentReplaceService)
     svc._history_store = None  # __init__ 被绕过,显式置 None 让 execute_replace 的历史记录块正常跳过
     svc.converter = MagicMock()
-    svc._lock = MagicMock()
-    svc._initial_word_pids = []
-    svc._initial_excel_pids = []
+    svc._lock = threading.Lock()
     svc._word_handler = MagicMock()
     svc._excel_handler = MagicMock()
     svc._text_handler = MagicMock()
@@ -456,72 +452,46 @@ def test_read_file_content_empty_content_returns_empty(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# close():锁获取成功分支 + except 吞异常(行 497, 506-507)+ _from_del 分支
+# close():Task142 后只清理本服务临时文件(无锁、无进程强杀)
 # ---------------------------------------------------------------------------
 
 
-def test_close_acquires_lock_and_kills_processes(monkeypatch):
-    """close():_from_del=False(默认) + 锁获取成功 → 执行 kill(行 497-505)。
-
-    普通调用(非 __del__)总是进入清理路径。
-    """
+def test_close_delegates_to_converter_cleanup():
+    """close() 普通路径:委托 converter.close() 清理临时文件,不带 strict。"""
     svc = _svc_with_mocks()
-    # 锁能获取(blocking=False 返回 True)
-    svc._lock.acquire.return_value = True
-    killed = []
-    monkeypatch.setattr(svc, "_kill_new_office_processes", lambda name, pids: killed.append(name))
 
     svc.close()
 
-    assert "WINWORD.EXE" in killed
-    assert "EXCEL.EXE" in killed
-    svc._lock.release.assert_called_once()
+    svc.converter.close.assert_called_once_with()
 
 
-def test_close_lock_acquire_fails_silently(monkeypatch):
-    """close():锁获取失败(acquire 返回 False)→ 不执行 kill,不抛(行 497 False 分支)。"""
+def test_close_strict_propagates_cleanup_failure():
+    """close(strict=True):临时文件清理失败向上传播(CLI 严格关闭可见)。"""
     svc = _svc_with_mocks()
-    svc._lock.acquire.return_value = False  # 锁被占用
-    killed = []
-    monkeypatch.setattr(svc, "_kill_new_office_processes", lambda name, pids: killed.append(name))
-
-    svc.close()  # 不应抛
-    assert killed == []  # 未获取锁,不 kill
-
-
-def test_close_swallows_exception_in_kill(monkeypatch):
-    """close():kill 抛异常 → except 吞掉,不向上抛(行 506-507)。"""
-    svc = _svc_with_mocks()
-    svc._lock.acquire.return_value = True
-    monkeypatch.setattr(
-        svc,
-        "_kill_new_office_processes",
-        lambda name, pids: (_ for _ in ()).throw(RuntimeError("kill boom")),
+    svc.converter.close.side_effect = ExceptionGroup(
+        "临时文件释放失败: locked", [PermissionError("locked")]
     )
-    svc.close()  # 不应抛
+
+    with pytest.raises(ExceptionGroup, match="临时文件释放失败"):
+        svc.close(strict=True)
+
+    svc.converter.close.assert_called_once_with(strict=True)
 
 
-def test_close_from_del_skips_process_cleanup(monkeypatch):
-    """close(_from_del=True):跳过进程清理(由 __del__ 调用)。
-
-    _from_del=True 时直接 return,不获取锁、不 kill——避免解释器关闭链中
-    调用进程清理 API 的不安全操作。
-    """
+def test_close_from_del_skips_cleanup():
+    """close(_from_del=True):finalizer 路径不做任何清理(临时文件留给显式 close)。"""
     svc = _svc_with_mocks()
-    svc._lock.acquire.return_value = True
-    killed = []
-    monkeypatch.setattr(svc, "_kill_new_office_processes", lambda name, pids: killed.append(name))
 
     svc.close(_from_del=True)
 
-    assert killed == []  # 跳过清理
-    svc._lock.acquire.assert_not_called()
+    svc.converter.close.assert_not_called()
 
 
-def test_del_calls_close():
-    """__del__ 调用 close(_from_del=True)(不抛异常)。"""
+def test_del_calls_close_without_cleanup():
+    """__del__ 调用 close(_from_del=True)(不抛异常、不清理)。"""
     svc = _svc_with_mocks()
     svc.__del__()  # close 被 suppress,不抛
+    svc.converter.close.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

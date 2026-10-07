@@ -23,6 +23,7 @@ def test_velopack_command_enables_delta() -> None:
 def test_velopack_command_locks_pack_identity() -> None:
     cmd = build_exe._velopack_command("dotnet", Path("pack"), "0.3.0", Path("out"))
     for flag, value in (
+        ("--runtime", "win-x64"),
         ("--packId", build_exe._PRODUCT),
         ("--packVersion", "0.3.0"),
         ("--channel", "win"),
