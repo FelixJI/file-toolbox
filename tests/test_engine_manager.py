@@ -22,14 +22,20 @@ def _reset_engine_manager_class_state():
 
     memo 与 single-flight 订阅者是类级共享状态,任一用例遗留都会改变后续用例的
     探测/投递路径;原先各用例手写的尾部清理只覆盖 _cached_engines 一项。
+    按 kind 的预筛 memo 与 verified 证据同样是类级共享(经真实 init_* 的用例
+    会写入,如 WPS 回退成功),一并复位,避免跨文件污染能力展示用例。
     """
     EngineManager._cached_engines = None
     EngineManager._cache_source = None
     EngineManager._flight_subscribers = None
+    EngineManager._cached_kind_availability = None
+    EngineManager._verified_kinds = {}
     yield
     EngineManager._cached_engines = None
     EngineManager._cache_source = None
     EngineManager._flight_subscribers = None
+    EngineManager._cached_kind_availability = None
+    EngineManager._verified_kinds = {}
 
 
 @pytest.fixture
@@ -813,6 +819,77 @@ def test_detect_engines_async_starts_thread_and_invokes_callback(monkeypatch):
     while "info" not in captured and time.time() < deadline:
         time.sleep(0.01)
     assert captured.get("info") == "Word.Application"
+
+
+# ---------------------------------------------------------------------------
+# F8:异步探测线程的 engine_cache 读/写必须落在调用线程捕获的数据根 policy
+# ---------------------------------------------------------------------------
+
+
+def test_async_detect_reads_cache_in_caller_data_root(monkeypatch, tmp_path):
+    """F8 回归:探测线程读持久缓存必须命中调用方根内记录(hit),不得读 cwd 根。
+
+    ContextVar 不随线程继承:旧实现探测线程回落 CLI cwd policy,读的是
+    cwd/.file_toolbox(missing),还会把双无结论落盘到 cwd 根。真实 engine_cache
+    适配器不 stub,TTL/结构校验链路保持原样。
+    """
+    import json as json_module
+
+    from file_toolbox.common.paths import GuiDataRootPolicy, use_data_root_policy
+
+    gui_root = tmp_path / "gui-root"
+    gui_data = gui_root / ".file_toolbox"
+    gui_data.mkdir(parents=True)
+    (gui_data / "settings.json").write_text(
+        json_module.dumps(
+            {"pdf_engine_cache": {"office": True, "wps": False, "verified_at": time.time()}}
+        ),
+        encoding="utf-8",
+    )
+    cwd_root = tmp_path / "cwd-root"
+    cwd_root.mkdir()
+    monkeypatch.chdir(cwd_root)
+    # 注册表预筛与持久记录一致 → hit,不触发双无落盘
+    monkeypatch.setattr(
+        EngineManager,
+        "_probe_registry",
+        staticmethod(lambda prog_id: prog_id == "Word.Application"),
+    )
+
+    done = threading.Event()
+    em = EngineManager()
+    with use_data_root_policy(GuiDataRootPolicy(gui_root)):
+        em.detect_engines_async(callback=lambda _info: done.set())
+    assert done.wait(timeout=5), "异步探测未在 5s 内完成"
+
+    assert EngineManager._cache_source == "hit"  # 读到了调用方根内的记录
+    assert not (cwd_root / ".file_toolbox").exists(), "探测线程不得读写 cwd 根"
+
+
+def test_async_detect_saves_in_caller_data_root(monkeypatch, tmp_path):
+    """F8 回归:双无结论的落盘必须写进调用方根,cwd 根不得出现任何文件。"""
+    import json as json_module
+
+    from file_toolbox.common.paths import GuiDataRootPolicy, use_data_root_policy
+
+    gui_root = tmp_path / "gui-root"
+    cwd_root = tmp_path / "cwd-root"
+    cwd_root.mkdir()
+    monkeypatch.chdir(cwd_root)
+    monkeypatch.setattr(EngineManager, "_probe_registry", staticmethod(lambda _prog_id: False))
+
+    done = threading.Event()
+    em = EngineManager()
+    with use_data_root_policy(GuiDataRootPolicy(gui_root)):
+        em.detect_engines_async(callback=lambda _info: done.set())
+    assert done.wait(timeout=5), "异步探测未在 5s 内完成"
+
+    saved = json_module.loads(
+        (gui_root / ".file_toolbox" / "settings.json").read_text(encoding="utf-8")
+    )["pdf_engine_cache"]
+    assert saved["office"] is False and saved["wps"] is False
+    assert isinstance(saved["verified_at"], float)
+    assert not (cwd_root / ".file_toolbox").exists(), "双无落盘不得写到 cwd 根"
 
 
 # ---------------------------------------------------------------------------

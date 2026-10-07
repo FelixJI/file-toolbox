@@ -22,6 +22,7 @@ from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.office_session import ComSession, dispose_office_app, init_office_app
+from file_toolbox.common.paths import DataRootPolicy, current_data_root_policy, use_data_root_policy
 
 from . import engine_cache
 from .constants import ENGINE_AUTO, ENGINE_WPS
@@ -247,7 +248,37 @@ class EngineManager(LoggableMixin):
             return availability
         return KindAvailability(availability.kind, ProbeState.AVAILABLE, engine, "", True)
 
-    def kind_availability(self, kind: str, *, refresh: bool = False) -> KindAvailability:
+    def _availability_within(
+        self, prescreen: KindAvailability, engines: tuple[str, ...] | None
+    ) -> KindAvailability:
+        """在支持套件约束内选择实际可用性(F7);engines=None 保持既有叠加语义。
+
+        选择规则(复用同一份预筛 memo 与 verified 证据,不另建缓存):
+        1. verified 证据绑定的实际成功套件在集合内 → AVAILABLE+verified(实际
+           成功优先于预筛偏好,不因约束丢失 F4 的"实际套件"语义);
+        2. 预筛命中套件在集合内 → AVAILABLE(未验证,预筛结论);
+        3. 预筛命中套件不在集合内(如仅 MS 工具遇上 WPS winner)→ MISSING,
+           engine 保留检测到的套件名供展示层说明"检测到但不支持";
+        4. 预筛 missing/probe_error 且无集合内 verified 纠正 → 原样透传。
+        """
+        if engines is None:
+            return self._with_verified(prescreen)
+        verified_engine = EngineManager._verified_kinds.get(prescreen.kind)
+        if verified_engine is not None and verified_engine in engines:
+            return KindAvailability(prescreen.kind, ProbeState.AVAILABLE, verified_engine, "", True)
+        if (
+            prescreen.state is ProbeState.AVAILABLE
+            and prescreen.engine is not None
+            and prescreen.engine in engines
+        ):
+            return KindAvailability(prescreen.kind, ProbeState.AVAILABLE, prescreen.engine, "")
+        if prescreen.state is ProbeState.AVAILABLE:
+            return KindAvailability(prescreen.kind, ProbeState.MISSING, prescreen.engine)
+        return prescreen
+
+    def kind_availability(
+        self, kind: str, *, refresh: bool = False, engines: tuple[str, ...] | None = None
+    ) -> KindAvailability:
         """查询单 kind(word/excel/ppt)的按需可用性(注册表预筛,毫秒级)。
 
         - 不启动任何 Office 进程;结果进程内 memo(refresh=True 强制重探)。
@@ -255,13 +286,16 @@ class EngineManager(LoggableMixin):
         - 探测 OSError 与"未注册"严格区分(PROBE_ERROR ≠ MISSING)。
         - verified 由真实 Dispatch 成功喂养(见 _init_office_app_locked),
           注册存在仅是预筛,不是真实转换验证。
+        - engines(可选):调用工具的适配器实际支持的套件集合。提供时在集合
+          内选择实际可用性(见 _availability_within),memo 仍存无约束的原始
+          预筛结论,同一 kind 的不同工具查询互不污染。
         """
         if kind not in _APP_CONFIG:
             raise ValueError(f"未知的 Office 应用类别: {kind!r}")
         if not refresh:
             cached = EngineManager._cached_kind_availability
             if cached is not None and (hit := cached.get(kind)) is not None:
-                return self._with_verified(hit)
+                return self._availability_within(hit, engines)
         spec = _APP_CONFIG[kind]
         outcome = _probe_registry_outcome(spec.ms_prog_id)
         if outcome.registered is None:
@@ -281,7 +315,7 @@ class EngineManager(LoggableMixin):
         memo = EngineManager._cached_kind_availability or {}
         memo[kind] = result
         EngineManager._cached_kind_availability = memo
-        return self._with_verified(result)
+        return self._availability_within(result, engines)
 
     def record_engine_evidence(self, engine: str, available: bool) -> None:
         """记录一条来自真实转换的引擎证据,精确更新进程内缓存与持久缓存。
@@ -381,6 +415,10 @@ class EngineManager(LoggableMixin):
         _run_async_detect),以防未来扩展为真 Dispatch;win32com 要求使用它的每个
         线程先 CoInitialize,否则进程退出时抛 CO_E_NOTINITIALIZED(0x800401f0)
         致命异常。
+
+        数据根(F8):ContextVar 不随线程继承——探测体内的 engine_cache 读/写
+        必须命中调用线程的数据根 policy,故启动线程前捕获快照并传入
+        _run_async_detect 重入,否则会落到线程默认的 cwd 根(打包运行即 HOME)。
         """
         launch_flight = False
         with EngineManager._flight_lock:
@@ -390,11 +428,12 @@ class EngineManager(LoggableMixin):
             if callback is not None:
                 EngineManager._flight_subscribers.append(callback)
         if launch_flight:
+            policy = current_data_root_policy()  # 调用线程捕获(GUI 线程的便携根)
             # daemon=True: 进程退出时无需等待,避免测试/关闭时悬挂
-            threading.Thread(target=self._run_async_detect, daemon=True).start()
+            threading.Thread(target=self._run_async_detect, args=(policy,), daemon=True).start()
 
-    def _run_async_detect(self) -> None:
-        """后台线程入口:CoInitialize 配对 + single-flight 投递。"""
+    def _run_async_detect(self, data_root_policy: DataRootPolicy) -> None:
+        """后台线程入口:数据根 policy 重入 + CoInitialize 配对 + single-flight 投递。"""
         session = ComSession()
         com_inited = False
         try:
@@ -403,7 +442,8 @@ class EngineManager(LoggableMixin):
         except Exception:
             com_inited = False  # 非 Windows / 无 pywin32
         try:
-            self._serve_flight()
+            with use_data_root_policy(data_root_policy):
+                self._serve_flight()
         finally:
             if com_inited:
                 with contextlib.suppress(Exception):

@@ -313,7 +313,7 @@ def test_tool_statuses_follow_declared_needs(monkeypatch):
     monkeypatch.setattr(
         EngineManager,
         "kind_availability",
-        lambda self, kind, refresh=False: KindAvailability(
+        lambda self, kind, refresh=False, engines=None: KindAvailability(
             kind, ProbeState.AVAILABLE if kind == "excel" else ProbeState.MISSING, "office"
         ),
     )
@@ -374,11 +374,138 @@ def test_office_kind_status_maps_availability(monkeypatch):
     monkeypatch.setattr(
         EngineManager,
         "kind_availability",
-        lambda self, kind, refresh=False: KindAvailability(kind, ProbeState.MISSING),
+        lambda self, kind, refresh=False, engines=None: KindAvailability(kind, ProbeState.MISSING),
     )
     status = office_kind_status("ppt", (".ppt", ".pptx"))
     assert status.requirement == "PowerPoint(ppt/pptx)"
     assert status.state is ProbeState.MISSING and status.verified is False
+
+
+# ---------------------------------------------------------------------------
+# F7:支持套件按实际 adapter 限制——PDF 转换链有 WPS 回退,替换/考勤仅 MS
+# ---------------------------------------------------------------------------
+
+
+def test_registry_declares_adapter_supported_engines():
+    """登记声明:pdf 各 kind 允许 MS+WPS;replace/attendance 仅 MS(与实际
+    handler 的 ProgID 一致,不为修提示扩大 WPS 业务支持)。"""
+    pdf = spec_by_tool_id("pdf")
+    assert pdf is not None
+    assert all(need.engines == ("office", "wps") for need in pdf.office_needs)
+    replace = spec_by_tool_id("replace")
+    assert replace is not None
+    assert all(need.engines == ("office",) for need in replace.office_needs)
+    attendance = spec_by_tool_id("attendance")
+    assert attendance is not None
+    assert all(need.engines == ("office",) for need in attendance.office_needs)
+
+
+def test_office_kind_status_restricts_unsupported_suite(monkeypatch):
+    """WPS-only 机器:engines 限定 MS 时不得展示为可用,pdf 语义仍可用。"""
+    _patch_outcomes(
+        monkeypatch,
+        {"Word.Application": em._ProbeOutcome(False), "KWPS.Application": em._ProbeOutcome(True)},
+    )
+    ms_only = office_kind_status("word", (".doc", ".docx"), engines=("office",))
+    assert ms_only.state is ProbeState.MISSING
+    assert "WPS" in ms_only.detail and "仅支持" in ms_only.detail
+    both = office_kind_status("word", (".doc", ".docx"), engines=("office", "wps"))
+    assert both.state is ProbeState.AVAILABLE
+    assert "WPS" in both.detail
+
+
+def test_wps_only_machine_reports_missing_for_ms_only_tools(monkeypatch):
+    """F7 回归:WPS-only 环境下 replace/attendance 能力提示必须为未检测到,
+    不得把 PDF 的 MS+WPS 支持集合套用于仅 MS 的 adapter。"""
+    _patch_outcomes(
+        monkeypatch,
+        {
+            "Word.Application": em._ProbeOutcome(False),
+            "KWPS.Application": em._ProbeOutcome(True),
+            "Excel.Application": em._ProbeOutcome(False),
+            "Ket.Application": em._ProbeOutcome(True),
+            "PowerPoint.Application": em._ProbeOutcome(False),
+            "KWPP.Application": em._ProbeOutcome(False),
+        },
+    )
+    for tool_id in ("replace", "attendance"):
+        statuses = tool_capability_statuses(tool_id)
+        assert statuses, tool_id
+        for status in statuses:
+            assert status.state is ProbeState.MISSING, f"{tool_id} 不应展示 WPS 可用"
+            assert "WPS" in status.detail
+    pdf_statuses = {
+        status.requirement.split("(", 1)[0]: status for status in tool_capability_statuses("pdf")
+    }
+    assert pdf_statuses["Word"].state is ProbeState.AVAILABLE
+    assert pdf_statuses["Excel"].state is ProbeState.AVAILABLE
+
+
+def test_wps_verified_evidence_does_not_cross_ms_only_tools(monkeypatch):
+    """F7 回归:本进程内 PDF 转换回退 WPS 成功的 verified 证据,不得让仅 MS 的
+    replace 展示"已验证可用";PDF 仍如实展示 WPS 已验证。"""
+    _patch_outcomes(
+        monkeypatch,
+        {
+            "Word.Application": em._ProbeOutcome(False),
+            "KWPS.Application": em._ProbeOutcome(True),
+            "Excel.Application": em._ProbeOutcome(False),
+            "Ket.Application": em._ProbeOutcome(False),
+            "PowerPoint.Application": em._ProbeOutcome(False),
+            "KWPP.Application": em._ProbeOutcome(False),
+        },
+    )
+    EngineManager._mark_kind_verified("word", "wps")
+    replace_status = next(
+        status
+        for status in tool_capability_statuses("replace")
+        if status.requirement.startswith("Word")
+    )
+    assert replace_status.state is ProbeState.MISSING
+    assert replace_status.verified is False
+    assert "WPS" in replace_status.detail
+    pdf_status = next(
+        status
+        for status in tool_capability_statuses("pdf")
+        if status.requirement.startswith("Word")
+    )
+    assert pdf_status.state is ProbeState.AVAILABLE
+    assert pdf_status.verified is True
+    assert "WPS" in pdf_status.detail
+
+
+def test_dual_suite_machine_keeps_ms_prescreen_for_ms_only_tools(monkeypatch):
+    """F7 反向回归:MS+WPS 都注册且 PDF 回退 WPS 成功(verified=wps)时,仅 MS
+    的 replace 仍展示 MS 预筛可用(未验证),不得图 WPS 叠加被误标 MISSING/
+    继承 WPS verified;PDF 如实展示实际成功的 WPS 已验证。"""
+    _patch_outcomes(
+        monkeypatch,
+        {
+            "Word.Application": em._ProbeOutcome(True),
+            "KWPS.Application": em._ProbeOutcome(True),
+            "Excel.Application": em._ProbeOutcome(True),
+            "Ket.Application": em._ProbeOutcome(True),
+            "PowerPoint.Application": em._ProbeOutcome(True),
+            "KWPP.Application": em._ProbeOutcome(True),
+        },
+    )
+    EngineManager._mark_kind_verified("word", "wps")
+    replace_status = next(
+        status
+        for status in tool_capability_statuses("replace")
+        if status.requirement.startswith("Word")
+    )
+    assert replace_status.state is ProbeState.AVAILABLE
+    assert replace_status.detail == "MS Office"
+    assert replace_status.verified is False  # 不继承 WPS verified
+    pdf_status = next(
+        status
+        for status in tool_capability_statuses("pdf")
+        if status.requirement.startswith("Word")
+    )
+    assert pdf_status.state is ProbeState.AVAILABLE
+    assert pdf_status.detail == "WPS"
+    assert pdf_status.verified is True  # 实际成功套件优先于预筛偏好
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +525,7 @@ def _kind_office(monkeypatch, available: set[str]) -> None:
     monkeypatch.setattr(
         EngineManager,
         "kind_availability",
-        lambda self, kind, refresh=False: KindAvailability(
+        lambda self, kind, refresh=False, engines=None: KindAvailability(
             kind,
             ProbeState.AVAILABLE if kind in available else ProbeState.MISSING,
             "office",

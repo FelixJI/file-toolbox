@@ -62,6 +62,7 @@ class SelftestReport(TypedDict):
     data_root: str
     history_dir: str
     workdir: str
+    evidence_missing: bool
     scenarios: list[ScenarioEntry]
 
 
@@ -180,6 +181,9 @@ def _load_report(path: Path) -> SelftestReport:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or not isinstance(raw.get("scenarios"), list):
         raise ValueError(f"报告结构无效: {path}")
+    evidence_missing = raw.get("evidence_missing")
+    if not isinstance(evidence_missing, bool):
+        raise ValueError(f"报告 evidence_missing 字段无效: {evidence_missing!r}")
     scenarios: list[ScenarioEntry] = []
     for entry in raw["scenarios"]:
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
@@ -211,6 +215,7 @@ def _load_report(path: Path) -> SelftestReport:
         data_root=str(raw.get("data_root", "")),
         history_dir=str(raw.get("history_dir", "")),
         workdir=str(raw.get("workdir", "")),
+        evidence_missing=evidence_missing,
         scenarios=scenarios,
     )
 
@@ -233,6 +238,18 @@ def _validate_report(
         raise AssertionError(
             f"报告 exit_code 与子进程退出码不一致: {report['exit_code']} ≠ {child_code}"
         )
+    # 顶层缺证据标志必须与退出码/场景状态一致(F3):全 pass/exit0 却声明
+    # evidence_missing=true 属于矛盾报告,fail closed 拒绝进入读回。
+    if report["evidence_missing"] is not (report["exit_code"] == EXIT_EVIDENCE_MISSING):
+        raise AssertionError(
+            f"报告 evidence_missing 标志与退出码矛盾: {report['evidence_missing']} "
+            f"vs exit_code={report['exit_code']}"
+        )
+    has_missing_scenario = any(item["status"] == "evidence_missing" for item in report["scenarios"])
+    if has_missing_scenario and report["exit_code"] == EXIT_PASS:
+        raise AssertionError("存在 evidence_missing 场景但 exit_code 为 PASS,状态矛盾")
+    if not has_missing_scenario and report["exit_code"] == EXIT_EVIDENCE_MISSING:
+        raise AssertionError("exit_code 为 EVIDENCE_MISSING 但没有 evidence_missing 场景,状态矛盾")
     names = [item["name"] for item in report["scenarios"]]
     if len(names) != len(set(names)):
         raise AssertionError(f"场景重复: {names}")
@@ -313,7 +330,10 @@ def _artifact_str_map(scenario: ScenarioEntry, key: str) -> dict[str, str]:
 def _assert_pdf_pages(path: Path, minimum: int = 1) -> int:
     from pypdf import PdfReader
 
-    pages = len(PdfReader(str(path)).pages)
+    try:
+        pages = len(PdfReader(str(path)).pages)
+    except Exception as error:
+        raise AssertionError(f"PDF 无法解析: {path} ({error})") from error
     if pages < minimum:
         raise AssertionError(f"PDF 页数异常: {path} → {pages}")
     return pages
@@ -387,11 +407,16 @@ def _verify_run1(report: SelftestReport, mode: str) -> list[str]:
     checks.append("history jsonl")
     if mode == "full":
         pdf_office = _require_scenario(report, "pdf_office")
-        _assert_artifacts_under(pdf_office, workdir, ("docx", "xlsx"))
-        for label, pdf in pdf_office["artifacts"].items():
-            if not isinstance(pdf, str):
-                raise AssertionError(f"office pdf 工件类型不符: {label}")
-            checks.append(f"office pdf {label}: {_assert_pdf_pages(Path(pdf))}")
+        # 两条 Office PDF 工件缺一不可(F3):必须在对应场景子目录 workdir/pdf-office
+        # 内(不接受指向 pure 场景等其它路径的复用),且解析后两路径必须不同
+        # (同一文件重复不构成两条证据);各自读回有效 PDF 页数。
+        _assert_artifacts_under(pdf_office, workdir / "pdf-office", ("docx", "xlsx"))
+        docx_pdf = Path(_artifact_str(pdf_office, "docx"))
+        xlsx_pdf = Path(_artifact_str(pdf_office, "xlsx"))
+        if docx_pdf.resolve() == xlsx_pdf.resolve():
+            raise AssertionError(f"office pdf docx/xlsx 指向同一文件: {docx_pdf}")
+        checks.append(f"office pdf docx: {_assert_pdf_pages(docx_pdf)}")
+        checks.append(f"office pdf xlsx: {_assert_pdf_pages(xlsx_pdf)}")
         replace_office = _require_scenario(report, "replace_office")
         _assert_artifacts_under(replace_office, workdir, ("docx",))
         _assert_docx_contains(

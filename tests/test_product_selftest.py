@@ -45,7 +45,14 @@ def test_resolve_inputs_missing_zip_fails_closed(monkeypatch, tmp_path):
         ps._resolve_inputs(_args(zip=None, version=None, artifacts_dir=None))
 
 
-def test_resolve_inputs_requires_version_or_zip():
+def test_resolve_inputs_requires_version_or_zip(monkeypatch):
+    """缺版本/zip 时 fail closed;须隔离继承的 CI 真实环境(F9)。
+
+    release_smoke/CI 进程会导出 AUTOMATION_VERSION/AUTOMATION_ARTIFACTS_DIR;
+    不清理时本测试会走到“便携 zip 不存在”分支,预期“缺少版本”断言失真。
+    """
+    monkeypatch.delenv("AUTOMATION_VERSION", raising=False)
+    monkeypatch.delenv("AUTOMATION_ARTIFACTS_DIR", raising=False)
     with pytest.raises(SystemExit, match="缺少版本"):
         ps._resolve_inputs(_args(zip=None, version=None, artifacts_dir=None))
 
@@ -108,6 +115,7 @@ def _valid_report(tmp_path: Path, **overrides: object) -> Path:
         "scenarios": [
             {"name": "pages", "status": "pass", "detail": "", "duration_s": 0.1, "artifacts": {}}
         ],
+        "evidence_missing": False,
         **overrides,
     }
     path = tmp_path / "report.json"
@@ -260,6 +268,7 @@ def _pure_report(portable: Path, files: dict[str, str]) -> ps.SelftestReport:
         data_root=str(portable / ".file_toolbox"),
         history_dir=str(portable / ".file_toolbox" / "history"),
         workdir=str(portable / "selftest-work"),
+        evidence_missing=False,
         scenarios=[
             entry("pages", {}),
             entry(
@@ -311,6 +320,65 @@ def _run1_scene(portable: Path) -> tuple[dict[str, str], ps.SelftestReport]:
     return files, _pure_report(portable, files)
 
 
+def _blank_pdf(path: Path) -> str:
+    """写一个真实可解析的空白单页 PDF,返回路径字符串。"""
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    with path.open("wb") as stream:
+        writer.write(stream)
+    return str(path)
+
+
+def _full_scene(portable: Path) -> tuple[dict[str, str], ps.SelftestReport]:
+    """在 pure 基础上补齐 full 三场景的虚构产物(docx/xlsx 两条 Office PDF)。"""
+    from openpyxl import Workbook
+
+    files, report = _run1_scene(portable)
+    office = portable / "selftest-work" / "pdf-office"
+    office.mkdir(parents=True, exist_ok=True)
+    docx_pdf = _blank_pdf(office / "office-docx-source.pdf")
+    xlsx_pdf = _blank_pdf(office / "office-xlsx-source.pdf")
+    replaced = office / "replaced.docx"
+    with zipfile.ZipFile(replaced, "w") as package:
+        package.writestr("word/document.xml", "<w:t>office-replaced</w:t>")
+
+    def _workbook(path: Path, *sheets: str) -> str:
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+        for sheet in sheets:
+            workbook.create_sheet(sheet)
+        workbook.save(path)
+        workbook.close()
+        return str(path)
+
+    plain_output = _workbook(office / "plain.xlsx", "甲明细", "乙明细")
+    roster_output = _workbook(office / "roster.xlsx", "丙明细", "丁明细")
+    placeholders = {
+        key: str(office / f"{key}.bin") for key in ("source", "source_roster", "template", "roster")
+    }
+    for value in placeholders.values():
+        Path(value).write_bytes(b"fixture")
+    report["mode"] = "full"
+    report["scenarios"].extend(
+        [
+            _scenario_dict("pdf_office", "pass", artifacts={"docx": docx_pdf, "xlsx": xlsx_pdf}),
+            _scenario_dict("replace_office", "pass", artifacts={"docx": str(replaced)}),
+            _scenario_dict(
+                "attendance",
+                "pass",
+                artifacts={
+                    **placeholders,
+                    "plain_output": plain_output,
+                    "roster_output": roster_output,
+                },
+            ),
+        ]
+    )
+    return files, report
+
+
 def _reopen_report_after_undo(portable: Path) -> ps.SelftestReport:
     """run2:撤销已发生(新名消失/原名恢复/历史标记 undone)后的报告。"""
     scene = portable / "selftest-work" / "scene"
@@ -335,6 +403,7 @@ def _reopen_report_after_undo(portable: Path) -> ps.SelftestReport:
         data_root=str(portable / ".file_toolbox"),
         history_dir=str(portable / ".file_toolbox" / "history"),
         workdir=str(portable / "selftest-work"),
+        evidence_missing=False,
         scenarios=[
             _scenario_dict(
                 "reopen_history_undo", "pass", artifacts={"restored": [str(scene / "a.txt")]}
@@ -357,6 +426,121 @@ def test_verify_run1_fails_on_missing_rename_output(tmp_path):
     (portable / "selftest-work" / "scene" / "b.txt").unlink()
     with pytest.raises(AssertionError, match="重命名文件缺失"):
         ps._verify_run1(report, "pure")
+
+
+# ---------------------------------------------------------------------------
+# F3 残留:full 读回必须要求 docx/xlsx 两条 Office PDF 工件,拒绝空/缺一/越界/无效
+# ---------------------------------------------------------------------------
+
+
+def test_verify_run1_full_requires_both_office_pdfs(tmp_path):
+    """full 正例:docx 与 xlsx 两条 Office PDF 都必须读回页数。"""
+    portable = tmp_path / "portable"
+    _files, report = _full_scene(portable)
+    checks = ps._verify_run1(report, "full")
+    assert any("office pdf docx" in check for check in checks)
+    assert any("office pdf xlsx" in check for check in checks)
+
+
+def test_verify_run1_full_rejects_empty_office_artifacts(tmp_path):
+    """负例:pdf_office.artifacts 为空 dict 时 full 读回必须失败(F3 残留)。"""
+    portable = tmp_path / "portable"
+    _files, report = _full_scene(portable)
+    ps._scenario(report, "pdf_office")["artifacts"] = {}
+    with pytest.raises(AssertionError, match="不是路径字符串"):
+        ps._verify_run1(report, "full")
+
+
+def test_verify_run1_full_rejects_single_office_artifact(tmp_path):
+    """负例:仅剩 docx 一条 Office PDF 时 full 读回必须失败(缺 xlsx)。"""
+    portable = tmp_path / "portable"
+    _files, report = _full_scene(portable)
+    artifacts = ps._scenario(report, "pdf_office")["artifacts"]
+    del artifacts["xlsx"]
+    with pytest.raises(AssertionError, match="不是路径字符串"):
+        ps._verify_run1(report, "full")
+
+
+def test_verify_run1_full_rejects_office_pdf_outside_workdir(tmp_path):
+    """负例:Office PDF 路径越出本次运行 workdir 时必须失败。"""
+    portable = tmp_path / "portable"
+    _files, report = _full_scene(portable)
+    outside = _blank_pdf(tmp_path / "outside.pdf")
+    ps._scenario(report, "pdf_office")["artifacts"]["xlsx"] = outside
+    with pytest.raises(AssertionError, match="越出本次运行范围"):
+        ps._verify_run1(report, "full")
+
+
+def test_verify_run1_full_rejects_invalid_office_pdf(tmp_path):
+    """负例:工件指向无法解析的伪 PDF 时必须失败(有效 PDF 校验)。"""
+    portable = tmp_path / "portable"
+    _files, report = _full_scene(portable)
+    fake = portable / "selftest-work" / "pdf-office" / "fake.pdf"
+    fake.write_bytes(b"not a pdf")
+    ps._scenario(report, "pdf_office")["artifacts"]["xlsx"] = str(fake)
+    with pytest.raises(AssertionError, match="PDF 无法解析"):
+        ps._verify_run1(report, "full")
+
+
+def test_verify_run1_full_rejects_reused_pure_pdf(tmp_path):
+    """负例:docx/xlsx 复用 pure 场景的 PDF(不在 pdf-office 子目录)→ 失败。
+
+    仅约束整个 run 时同一路径既当 pure 证据又当 office 证据可混过;收紧到
+    对应场景子目录后,跨场景复用必须被拒绝。
+    """
+    portable = tmp_path / "portable"
+    files, report = _full_scene(portable)
+    artifacts = ps._scenario(report, "pdf_office")["artifacts"]
+    artifacts["docx"] = files["pdf"]
+    artifacts["xlsx"] = files["pdf"]
+    with pytest.raises(AssertionError, match="越出本次运行范围"):
+        ps._verify_run1(report, "full")
+
+
+def test_verify_run1_full_rejects_duplicate_office_pdf_path(tmp_path):
+    """负例:docx/xlsx 都指向 pdf-office 内同一文件 → 失败(不是两条证据)。"""
+    portable = tmp_path / "portable"
+    _files, report = _full_scene(portable)
+    artifacts = ps._scenario(report, "pdf_office")["artifacts"]
+    artifacts["xlsx"] = artifacts["docx"]
+    with pytest.raises(AssertionError, match="指向同一文件"):
+        ps._verify_run1(report, "full")
+
+
+# ---------------------------------------------------------------------------
+# F3 残留:报告顶层 evidence_missing 标志与 exit/status 不得矛盾
+# ---------------------------------------------------------------------------
+
+
+def test_load_report_rejects_invalid_evidence_missing_flag(tmp_path):
+    """顶层 evidence_missing 非 bool → 拒绝整份报告。"""
+    report_path = _valid_report(tmp_path, evidence_missing="yes")
+    with pytest.raises(ValueError, match="evidence_missing"):
+        ps._load_report(report_path)
+
+
+def test_validate_report_accepts_consistent_report(tmp_path):
+    portable = tmp_path / "portable"
+    _files, report = _run1_scene(portable)
+    ps._validate_report(report, expected_mode="pure", child_code=0, portable_root=portable)
+
+
+def test_validate_report_rejects_flag_exit_contradiction(tmp_path):
+    """负例:全 pass/exit0 但顶层 evidence_missing=true → 矛盾拒绝。"""
+    portable = tmp_path / "portable"
+    _files, report = _run1_scene(portable)
+    report["evidence_missing"] = True
+    with pytest.raises(AssertionError, match="矛盾"):
+        ps._validate_report(report, expected_mode="pure", child_code=0, portable_root=portable)
+
+
+def test_validate_report_rejects_missing_scenario_with_pass_exit(tmp_path):
+    """负例:存在 evidence_missing 场景但 exit_code 仍为 PASS → 矛盾拒绝。"""
+    portable = tmp_path / "portable"
+    _files, report = _run1_scene(portable)
+    ps._scenario(report, "pages")["status"] = "evidence_missing"
+    with pytest.raises(AssertionError, match="evidence_missing"):
+        ps._validate_report(report, expected_mode="pure", child_code=0, portable_root=portable)
 
 
 def test_verify_run2_binds_exact_record_and_content(tmp_path):

@@ -11,6 +11,11 @@ worker 负责:
 纯图片/PDF 批处理天然不触碰 Office,含 Office 文档的批处理只按需 Dispatch 本次
 文件类型所需应用,临时失败由转换器的 ProgID 回退兜底。
 
+数据根(F8):ContextVar 不随线程继承——构造发生在 GUI 线程(便携数据根
+policy 已生效),``run()`` 在后台线程执行,必须用构造时捕获的 policy 重新
+进入上下文,否则引擎证据缓存会经 engine_cache→settings 落到线程默认的
+cwd 根(源码运行越出隔离根,打包运行越到 HOME)。
+
 参考 gui/updater_widget.py 的 QThread + Signal 模式。
 """
 
@@ -24,6 +29,7 @@ from PySide6.QtWidgets import QWidget
 
 from file_toolbox.common.loggable import LoggableMixin
 from file_toolbox.common.office_session import ComSession
+from file_toolbox.common.paths import DataRootPolicy, current_data_root_policy, use_data_root_policy
 
 
 class PdfGenerateWorker(QThread, LoggableMixin):
@@ -59,6 +65,8 @@ class PdfGenerateWorker(QThread, LoggableMixin):
         self._files = list(files)
         self._config = config
         self._cancel = False
+        # 在构造线程(GUI 线程)捕获数据根 policy 快照,run() 内重入(F8)
+        self._data_root_policy: DataRootPolicy = current_data_root_policy()
 
     def cancel(self) -> None:
         """请求取消(下一个文件前生效)。"""
@@ -71,7 +79,7 @@ class PdfGenerateWorker(QThread, LoggableMixin):
         """结果先投递；同线程严格清理之后才真正 finished。"""
         outcome_emitted = False
         try:
-            with ComSession():
+            with ComSession(), use_data_root_policy(self._data_root_policy):
                 try:
                     self.logger.info("PDF 生成 worker 开始 files=%d", len(self._files))
                     results = self._svc.batch_generate(

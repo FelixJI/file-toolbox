@@ -46,12 +46,24 @@ def _format_suffixes(suffixes: tuple[str, ...]) -> str:
 
 
 def office_kind_status(
-    kind: str, suffixes: tuple[str, ...] = (), *, refresh: bool = False
+    kind: str,
+    suffixes: tuple[str, ...] = (),
+    *,
+    engines: tuple[str, ...] = ("office", "wps"),
+    refresh: bool = False,
 ) -> CapabilityStatus:
-    """查询单类 Office 应用的可用性(注册表预筛,毫秒级,不启动 Office)。"""
+    """查询单类 Office 应用的可用性(注册表预筛,毫秒级,不启动 Office)。
+
+    engines 是调用工具的适配器实际支持的套件集合(F7):选择在集合内进行
+    (引擎管理器内完成,复用同一份预筛 memo/verified 证据)——仅 MS 的工具
+    不会继承 PDF 回退 WPS 的 verified 证据,但 MS 预筛命中仍如实展示;
+    命中套件不在集合内时接 MISSING,详情说明检测到但该工具不支持。
+    """
     label = _KIND_LABELS.get(kind, kind)
     requirement = f"{label}({_format_suffixes(suffixes)})" if suffixes else label
-    availability: KindAvailability = EngineManager().kind_availability(kind, refresh=refresh)
+    availability: KindAvailability = EngineManager().kind_availability(
+        kind, refresh=refresh, engines=engines
+    )
     if availability.state is ProbeState.AVAILABLE:
         engine = _ENGINE_LABELS.get(availability.engine or "", availability.engine or "?")
         return CapabilityStatus(
@@ -59,6 +71,14 @@ def office_kind_status(
             state=ProbeState.AVAILABLE,
             detail=engine,
             verified=availability.verified,
+        )
+    if availability.state is ProbeState.MISSING and availability.engine:
+        detected = _ENGINE_LABELS.get(availability.engine, availability.engine)
+        supported = "/".join(_ENGINE_LABELS.get(item, item) for item in engines)
+        return CapabilityStatus(
+            requirement=requirement,
+            state=ProbeState.MISSING,
+            detail=f"检测到{detected},但该工具仅支持 {supported}",
         )
     return CapabilityStatus(
         requirement=requirement,
@@ -89,7 +109,8 @@ def tool_capability_statuses(tool_id: str, *, refresh: bool = False) -> list[Cap
     if spec is None:
         raise ValueError(f"未登记的工具: {tool_id!r}")
     statuses = [
-        office_kind_status(need.kind, need.suffixes, refresh=refresh) for need in spec.office_needs
+        office_kind_status(need.kind, need.suffixes, engines=need.engines, refresh=refresh)
+        for need in spec.office_needs
     ]
     if spec.requires_pandoc:
         statuses.append(pandoc_status())

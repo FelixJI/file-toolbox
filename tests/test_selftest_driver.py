@@ -482,6 +482,58 @@ def test_close_timeout_writes_report_then_waits_real_finish(app, monkeypatch, tm
     assert write_times[0] < released_at["t"]
 
 
+def test_close_timeout_report_write_failure_keeps_waiting_and_fails(app, monkeypatch, tmp_path):
+    """F1 残留回归:超时中间报告写失败(OSError)不得让 driver 抛出/提前返回。
+
+    报告目标为已存在目录(每次写出必抛 OSError)且窗口因运行中 worker 协作
+    延迟关闭:driver 必须把写失败记录为非零结果并继续事件循环等真实 finished/
+    关闭,最后仍以非零返回——写失败不能截断活跃 worker 的收尾等待。
+    """
+    import time as time_module
+
+    from PySide6.QtCore import QThread
+
+    from file_toolbox.gui import selftest_driver as driver
+
+    released_at: dict[str, float] = {}
+    write_attempts: list[float] = []
+    original_write = driver._write_report
+
+    def counting_write(*args, **kwargs):
+        write_attempts.append(time_module.monotonic())
+        return original_write(*args, **kwargs)  # 目标是目录 → 抛 OSError
+
+    class _DelayedWorker(QThread):
+        def run(self) -> None:
+            time_module.sleep(0.8)
+            released_at["t"] = time_module.monotonic()
+
+    def controlled_scenario(ctx):
+        tab = ctx.window._rename_tab
+        worker = _DelayedWorker(tab)  # 挂在页面下:closeEvent 按运行中 worker 协作延迟
+        worker.start()
+        return driver._pass("controlled")
+
+    report_target = tmp_path / "report-as-dir"
+    report_target.mkdir()  # write_text 对目录抛 OSError(IsADirectory/Permission)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        driver, "_scenarios_for", lambda mode: [("controlled", controlled_scenario)]
+    )
+    monkeypatch.setattr(driver, "_write_report", counting_write)
+    started = time_module.monotonic()
+    code = driver._execute_selftest(app, "pure", report_target, close_wait_s=0.2)
+    returned_at = time_module.monotonic()
+    # 写失败保留为失败结果:最终仍非零,不以异常逃出 driver
+    assert code == driver.EXIT_FAIL
+    # 关键契约:真实收尾完成(延迟 worker 释放)之后才返回,未在期限处截断
+    assert returned_at >= released_at["t"]
+    assert returned_at - started >= 0.8
+    # 超时中间写与最终写都尝试过(均失败),失败被记录而非中断流程
+    assert len(write_attempts) >= 2
+    assert write_attempts[0] < released_at["t"]
+
+
 # ---------------------------------------------------------------------------
 # F6:结果输出成功但严格清理失败(cleanup_warning)→ 场景/总结果非零,产物保留
 # ---------------------------------------------------------------------------
@@ -515,8 +567,8 @@ def test_track_observer_subscribes_strictly_before_start(app):
 def test_immediate_worker_failure_captured_via_track_seam(app, monkeypatch, tmp_path):
     """F6 竞态回归:batch_generate 立即抛错(worker 可能在主线程连接前发射 failed)。
 
-    此前 71 pass 的回归只覆盖"慢任务结束后清理失败"的发射时序,未覆盖 start
-    前竞态;track 观察缝订阅严格先于 start → 场景 detail 必含 failed 信号证据,
+    仅覆盖“慢任务结束后清理失败”的发射时序不充分,还须覆盖 start 前竞态;
+    track 观察缝订阅严格先于 start → 场景 detail 必含 failed 信号证据,
     而非仅靠缺输出推断。
     """
     from file_toolbox.core.batch_pdf.service import PDFGeneratorService

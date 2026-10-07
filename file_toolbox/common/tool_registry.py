@@ -31,10 +31,15 @@ class OfficeAppNeed:
         纯文件路径(不启动 Office)。声明只描述"按操作/文件类型的需要",运行期
         可用/缺失/检测失败由 core.office_capability 查询注册表预筛得出,注册
         存在不冒称真实转换验证。
+    engines: 该工具的适配器实际支持的引擎套件("office"=MS ProgID,"wps"=WPS
+        ProgID)。默认仅 MS——与 batch_replace/file_converter/考勤的现状一致;
+        PDF 转换链有转换期 ProgID 回退,声明为 MS+WPS。能力展示/自测前置判定
+        按此集合过滤,不为修提示扩大 WPS 业务支持。
     """
 
     kind: str
     suffixes: tuple[str, ...]
+    engines: tuple[str, ...] = ("office",)
 
 
 # 系统页稳定 ID:主窗口导航/登记查找按 ID 定位,不依赖标签序号。
@@ -196,9 +201,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         cli_command="pdf",
         summary=_pdf_summary,
         office_needs=(
-            OfficeAppNeed("word", (".doc", ".docx")),
-            OfficeAppNeed("excel", (".xls", ".xlsx")),
-            OfficeAppNeed("ppt", (".ppt", ".pptx")),
+            OfficeAppNeed("word", (".doc", ".docx"), engines=("office", "wps")),
+            OfficeAppNeed("excel", (".xls", ".xlsx"), engines=("office", "wps")),
+            OfficeAppNeed("ppt", (".ppt", ".pptx"), engines=("office", "wps")),
         ),
     ),
     ToolSpec(

@@ -374,8 +374,8 @@ def _observe_task_problems(lifecycle: TaskLifecycle, sink: list[str]) -> None:
     """经 TaskLifecycle.track 的 start 前统一注册点订阅问题信号(F6)。
 
     track 在 worker.start() 之前执行,订阅严格先于任何发射——工作线程可能在
-    主线程连接前立即失败/立即清理告警,启动后再连接会丢这些信号;此前
-    "start 后立即连接必先于发射"的断言不成立,71 pass 的回归未覆盖该竞态。
+    主线程连接前立即失败/立即清理告警,启动后再连接会丢这些信号;"start 后
+    立即连接必先于发射"的时序假设不成立,必须经 start 前注册点订阅。
     """
 
     def observe(worker: QThread) -> None:
@@ -1244,6 +1244,27 @@ def _write_report(
     logger.info("selftest 报告已写出: %s(exit=%s)", path, exit_code)
 
 
+def _write_report_best_effort(
+    path: Path,
+    mode: str,
+    outcomes: list[ScenarioOutcome],
+    exit_code: int,
+    boxes: _MessageBoxScript | None = None,
+) -> bool:
+    """尽力写报告:OSError 记为失败 outcome 返回 False,不向调用方抛出。
+
+    报告写出失败不能截断收尾流程(F1):中间/最终报告写失败都先落内存失败
+    证据(保证退出码非零),由调用方继续等待真实 finished/关闭后再返回。
+    """
+    try:
+        _write_report(path, mode, outcomes, exit_code, boxes)
+        return True
+    except OSError as error:
+        logger.exception("selftest 报告写出失败: %s", path)
+        outcomes.append(ScenarioOutcome("report", "fail", f"报告写出失败: {error}"))
+        return False
+
+
 def _execute_selftest(
     app: QApplication,
     mode: str,
@@ -1313,7 +1334,8 @@ def _execute_selftest(
                                     f"窗口关闭超出协作收尾期限({close_wait_s}s),已先落失败报告并继续等待真实收尾",
                                 )
                             )
-                            _write_report(
+                            # 写失败只记为额外失败证据,不截断对真实收尾的等待(F1)
+                            _write_report_best_effort(
                                 report_path or _default_report_path(),
                                 mode,
                                 outcomes,
@@ -1324,7 +1346,11 @@ def _execute_selftest(
         coordinator.release.set()
         app.setQuitOnLastWindowClosed(previous_quit_on_close)
     exit_code = _aggregate(outcomes)
-    _write_report(report_path or _default_report_path(), mode, outcomes, exit_code, boxes)
+    # 终版报告写失败同样保留为非零结果,不让 driver 以异常逃出(F1)
+    if not _write_report_best_effort(
+        report_path or _default_report_path(), mode, outcomes, exit_code, boxes
+    ):
+        return EXIT_FAIL
     return exit_code
 
 
