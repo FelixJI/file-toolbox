@@ -1,11 +1,13 @@
 ################################################################################
-## 手维护的 UI 构建代码(无 .ui 源文件)。
+## 手写 UI 布局(HANDMADE,无 .ui 源)。
 ##
-## 本文件由人工维护,PySide6 控件树在 Ui_FileRenamerDialog.setupUi 里手写构建。
-## 仓库内目前没有对应的 file_renamer_dialog.ui;日后若用 Qt Designer 产出
-## .ui 并接入 scripts/regen_ui.py 的再生链路,本文件会被 pyside6-uic 覆盖。
+## 批量重命名 Tab 的纯布局代码:一个 Ui_* 类,setupUi 构建控件树。
+## 业务逻辑(信号连接/预览/执行)留在 dialogs/rename_tab.py。
 ##
-## 详见 scripts/regen_ui.py(HANDMADE 清单)与 .superpowers/sdd/task-6-report.md。
+## 本文件在 scripts/regen_ui.py 的 HANDMADE 白名单中:无 .ui、不走
+## pyside6-uic 再生,regen/check 不会生成、覆盖或比对本文件;新增 .ui
+## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
+## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
 
 from PySide6.QtCore import (
@@ -25,11 +27,12 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 
 class Ui_FileRenamerDialog:
-    def setupUi(self, FileRenamerDialog):
+    def setupUi(self, FileRenamerDialog: QWidget) -> None:
         if not FileRenamerDialog.objectName():
             FileRenamerDialog.setObjectName("FileRenamerDialog")
         FileRenamerDialog.resize(900, 700)
@@ -77,7 +80,7 @@ class Ui_FileRenamerDialog:
 
         self.list_files = QListWidget(FileRenamerDialog)
         self.list_files.setObjectName("list_files")
-        self.list_files.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.list_files.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list_files.setMaximumSize(QSize(16777215, 150))
 
         self.verticalLayout.addWidget(self.list_files)
@@ -96,7 +99,7 @@ class Ui_FileRenamerDialog:
 
         self.list_operations = QListWidget(FileRenamerDialog)
         self.list_operations.setObjectName("list_operations")
-        self.list_operations.setDragDropMode(QAbstractItemView.InternalMove)
+        self.list_operations.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.list_operations.setMaximumSize(QSize(16777215, 150))
 
         self.verticalLayout.addWidget(self.list_operations)
@@ -191,9 +194,9 @@ class Ui_FileRenamerDialog:
         __qtablewidgetitem4 = QTableWidgetItem()
         self.table_preview.setHorizontalHeaderItem(4, __qtablewidgetitem4)
         self.table_preview.setObjectName("table_preview")
-        self.table_preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_preview.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table_preview.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_preview.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_preview.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table_preview.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
         self.verticalLayout.addWidget(self.table_preview)
 
@@ -240,7 +243,7 @@ class Ui_FileRenamerDialog:
 
     # setupUi
 
-    def retranslateUi(self, FileRenamerDialog):
+    def retranslateUi(self, FileRenamerDialog: QWidget) -> None:
         FileRenamerDialog.setWindowTitle(
             QCoreApplication.translate(
                 "FileRenamerDialog",
@@ -254,9 +257,7 @@ class Ui_FileRenamerDialog:
         self.btn_select_folder.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u9009\u62e9\u6587\u4ef6\u5939", None)
         )
-        self.btn_clear_files.setText(
-            QCoreApplication.translate("FileRenamerDialog", "清空", None)
-        )
+        self.btn_clear_files.setText(QCoreApplication.translate("FileRenamerDialog", "清空", None))
         self.btn_load_template.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u52a0\u8f7d\u6a21\u677f", None)
         )
@@ -272,9 +273,7 @@ class Ui_FileRenamerDialog:
             QCoreApplication.translate("FileRenamerDialog", "重命名操作：", None)
         )
         self.label_operations.setToolTip(
-            QCoreApplication.translate(
-                "FileRenamerDialog", "可拖拽列表项调整操作顺序", None
-            )
+            QCoreApplication.translate("FileRenamerDialog", "可拖拽列表项调整操作顺序", None)
         )
         self.btn_add_prefix.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u6dfb\u52a0\u524d\u7f00", None)
@@ -310,22 +309,27 @@ class Ui_FileRenamerDialog:
             QCoreApplication.translate("FileRenamerDialog", "\u5237\u65b0\u9884\u89c8", None)
         )
         ___qtablewidgetitem = self.table_preview.horizontalHeaderItem(0)
+        assert ___qtablewidgetitem is not None
         ___qtablewidgetitem.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u539f\u6587\u4ef6\u540d", None)
         )
         ___qtablewidgetitem1 = self.table_preview.horizontalHeaderItem(1)
+        assert ___qtablewidgetitem1 is not None
         ___qtablewidgetitem1.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u65b0\u6587\u4ef6\u540d", None)
         )
         ___qtablewidgetitem2 = self.table_preview.horizontalHeaderItem(2)
+        assert ___qtablewidgetitem2 is not None
         ___qtablewidgetitem2.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u5927\u5c0f", None)
         )
         ___qtablewidgetitem3 = self.table_preview.horizontalHeaderItem(3)
+        assert ___qtablewidgetitem3 is not None
         ___qtablewidgetitem3.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u4fee\u6539\u65f6\u95f4", None)
         )
         ___qtablewidgetitem4 = self.table_preview.horizontalHeaderItem(4)
+        assert ___qtablewidgetitem4 is not None
         ___qtablewidgetitem4.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u72b6\u6001", None)
         )

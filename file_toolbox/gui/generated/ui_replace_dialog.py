@@ -1,13 +1,14 @@
 ################################################################################
-## 手维护的 UI 构建代码(无 .ui 源文件)。
+## 手写 UI 布局(HANDMADE,无 .ui 源)。
 ##
-## 本文件由人工维护,PySide6 控件树在 Ui_ContentReplaceDialog.setupUi 里手写构建。
-## 仓库内目前没有对应的 content_replace_dialog.ui;日后若用 Qt Designer 产出
-## .ui 并接入 scripts/regen_ui.py 的再生链路,本文件会被 pyside6-uic 覆盖。
+## 批量内容替换 Tab 的纯布局代码:一个 Ui_* 类,setupUi 构建控件树。
+## 业务逻辑(信号连接/预览/执行)留在 dialogs/replace_tab.py。
 ##
-## 详见 scripts/regen_ui.py(HANDMADE 清单)与 .superpowers/sdd/task-6-report.md。
+## 本文件在 scripts/regen_ui.py 的 HANDMADE 白名单中:无 .ui、不走
+## pyside6-uic 再生,regen/check 不会生成、覆盖或比对本文件;新增 .ui
+## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
+## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
-
 
 from PySide6.QtCore import (
     QCoreApplication,
@@ -31,11 +32,12 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 
 class Ui_ContentReplaceDialog:
-    def setupUi(self, ContentReplaceDialog):
+    def setupUi(self, ContentReplaceDialog: QWidget) -> None:
 
         if not ContentReplaceDialog.objectName():
             ContentReplaceDialog.setObjectName("ContentReplaceDialog")
@@ -293,7 +295,7 @@ class Ui_ContentReplaceDialog:
 
     # setupUi
 
-    def retranslateUi(self, ContentReplaceDialog):
+    def retranslateUi(self, ContentReplaceDialog: QWidget) -> None:
 
         ContentReplaceDialog.setWindowTitle(
             QCoreApplication.translate(
@@ -359,30 +361,35 @@ class Ui_ContentReplaceDialog:
 
         ___qtablewidgetitem = self.table_preview.horizontalHeaderItem(0)
 
+        assert ___qtablewidgetitem is not None
         ___qtablewidgetitem.setText(
             QCoreApplication.translate("ContentReplaceDialog", "\u6587\u4ef6\u540d", None)
         )
 
         ___qtablewidgetitem1 = self.table_preview.horizontalHeaderItem(1)
 
+        assert ___qtablewidgetitem1 is not None
         ___qtablewidgetitem1.setText(
             QCoreApplication.translate("ContentReplaceDialog", "\u5339\u914d\u6570", None)
         )
 
         ___qtablewidgetitem2 = self.table_preview.horizontalHeaderItem(2)
 
+        assert ___qtablewidgetitem2 is not None
         ___qtablewidgetitem2.setText(
             QCoreApplication.translate("ContentReplaceDialog", "\u6587\u4ef6\u5927\u5c0f", None)
         )
 
         ___qtablewidgetitem3 = self.table_preview.horizontalHeaderItem(3)
 
+        assert ___qtablewidgetitem3 is not None
         ___qtablewidgetitem3.setText(
             QCoreApplication.translate("ContentReplaceDialog", "\u683c\u5f0f\u8f6c\u6362", None)
         )
 
         ___qtablewidgetitem4 = self.table_preview.horizontalHeaderItem(4)
 
+        assert ___qtablewidgetitem4 is not None
         ___qtablewidgetitem4.setText(
             QCoreApplication.translate("ContentReplaceDialog", "\u72b6\u6001", None)
         )

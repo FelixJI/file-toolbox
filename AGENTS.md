@@ -66,7 +66,7 @@
 
 - 本仓是 Python CLI + PySide6 GUI 文件工具。批量重命名、PDF 等核心功能可跨平台；Word/Excel/PPT 转换及替换依赖 Windows Office/WPS COM，禁止把这部分宣称为跨平台或在非 Windows CI 伪造通过。
 - 权威自动化入口是 `scripts/automation.py`，由它读取 `.ci/project.json`：`uv sync --frozen --all-extras`，release contract、Ruff、mypy、UI 生成校验，两套 pytest 覆盖率门禁（不低于 90%）、测试数量基线、`uv build`，以及真实 Nuitka release build/smoke。
-- `file_toolbox/gui/generated/` 由 `.ui` 经 `scripts/regen_ui.py` 生成，禁止手改或用全仓格式化破坏。UI 变更同时修改源 `.ui`、重新生成并执行 `--check`。
+- `file_toolbox/gui/generated/` 的来源唯一且在 `scripts/regen_ui.py` 显式登记：4 个真生成物（attendance/markdown/mkdir/plan_schedule）由 `forms/` 下对应 `.ui` 经 pyside6-uic 再生成，禁止手改或用全仓格式化破坏；6 个手写布局（excel_merge/invoice/pdf/pdf_sort/rename/replace）在 HANDMADE 白名单中，无 `.ui`，与普通代码一样遵守 Ruff/mypy 规则。`regen_ui.py` 对登记分类 fail closed（拒绝已登记源丢失、未登记 ui_*.py、孤儿 .ui、重复/交叉登记），`--check` 另外拒绝生成物缺失/漂移（正常 regen 即用于重建/修复），不会因出现 `.ui` 自动覆盖手写文件；改走 `.ui` 生成链路必须先更新登记。真生成页面的 UI 变更须同时修改源 `.ui`、重新生成并执行 `--check`；手写布局直接改代码，无需 `.ui`。
 - 唯一版本源是 `pyproject.toml [project].version`；`uv.lock` 的 editable package 版本和运行时 metadata 是派生值。不要新增 `version.txt` 或手打 tag。
 - Velopack 发布契约固定为 `FileToolbox-{version}-full.nupkg`、`FileToolbox-{version}-delta.nupkg`(取不到上一正式版本时降级为仅 full)、`FileToolbox-v{version}-win-x64.zip`、`releases.win.json`、`checksums.txt`、`SBOM.spdx.json`、`build-identity.json`；checksums/SBOM/identity 必须绑定同一精确资产集合。发行形态只有便携包（vpk `--noInst`，不生成 Setup 安装器）；应用内更新只使用 Velopack，便携运行态同样由 Velopack 自更新（差量基线取上一正式 Release 的 full.nupkg，拉取失败 fail closed），不得重新引入安装器或自研下载链。
 - 文件修改命令默认 dry-run，只有明确 `--yes` 才执行；不得为了简化调用移除此保险。应用更新由 Velopack 管理安装事务，项目不再维护 `.file_toolbox/` 更新备份、历史或自研 replacer 回滚链。

@@ -34,7 +34,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self._task = TaskLifecycle(self)
         self._init_batch_dialog()
         self.ui = Ui_ContentReplaceDialog()
-        self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
+        self.ui.setupUi(self)
         self._controller = ReplaceController()
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()

@@ -1,11 +1,13 @@
 ################################################################################
-## 手维护的 UI 构建代码(无 .ui 源文件)。
+## 手写 UI 布局(HANDMADE,无 .ui 源)。
 ##
-## 本文件由人工维护,PySide6 控件树在 Ui_PDFGeneratorDialog.setupUi 里手写构建。
-## 仓库内目前没有对应的 ui_pdf_generator_dialog.ui;日后若用 Qt Designer 产出
-## .ui 并接入 scripts/regen_ui.py 的再生链路,本文件会被 pyside6-uic 覆盖。
+## 批量生成 PDF Tab 的纯布局代码:一个 Ui_* 类,setupUi 构建控件树。
+## 业务逻辑(信号连接/转换/进度)留在 dialogs/pdf_tab.py。
 ##
-## 详见 scripts/regen_ui.py(HANDMADE 清单)与 .superpowers/sdd/task-6-report.md。
+## 本文件在 scripts/regen_ui.py 的 HANDMADE 白名单中:无 .ui、不走
+## pyside6-uic 再生,regen/check 不会生成、覆盖或比对本文件;新增 .ui
+## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
+## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
 
 from PySide6.QtCore import (
@@ -30,11 +32,12 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 
 class Ui_PDFGeneratorDialog:
-    def setupUi(self, PDFGeneratorDialog):
+    def setupUi(self, PDFGeneratorDialog: QWidget) -> None:
         if not PDFGeneratorDialog.objectName():
             PDFGeneratorDialog.setObjectName("PDFGeneratorDialog")
         PDFGeneratorDialog.resize(900, 700)
@@ -95,12 +98,12 @@ class Ui_PDFGeneratorDialog:
         self.table_files.setHorizontalHeaderItem(2, __qtablewidgetitem_files2)
         __qtablewidgetitem_files3 = QTableWidgetItem()
         self.table_files.setHorizontalHeaderItem(3, __qtablewidgetitem_files3)
-        self.table_files.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_files.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.table_files.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_files.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table_files.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table_files.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_files.setAlternatingRowColors(True)
         self.table_files.setAcceptDrops(True)
-        self.table_files.setDragDropMode(QAbstractItemView.DropOnly)
+        self.table_files.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
 
         self.filesLayout.addWidget(self.table_files)
 
@@ -251,8 +254,8 @@ class Ui_PDFGeneratorDialog:
 
         self.line1 = QFrame(self.group_settings)
         self.line1.setObjectName("line1")
-        self.line1.setFrameShape(QFrame.HLine)
-        self.line1.setFrameShadow(QFrame.Sunken)
+        self.line1.setFrameShape(QFrame.Shape.HLine)
+        self.line1.setFrameShadow(QFrame.Shadow.Sunken)
 
         self.settingsLayout.addWidget(self.line1)
 
@@ -395,7 +398,11 @@ class Ui_PDFGeneratorDialog:
         self.label_progress = QLabel(PDFGeneratorDialog)
         self.label_progress.setObjectName("label_progress")
         self.label_progress.setMinimumSize(QSize(80, 0))
-        self.label_progress.setAlignment(Qt.AlignRight | Qt.AlignTrailing | Qt.AlignVCenter)
+        self.label_progress.setAlignment(
+            Qt.AlignmentFlag.AlignRight
+            | Qt.AlignmentFlag.AlignTrailing
+            | Qt.AlignmentFlag.AlignVCenter
+        )
 
         self.progressLayout.addWidget(self.label_progress)
 
@@ -452,7 +459,7 @@ class Ui_PDFGeneratorDialog:
 
     # setupUi
 
-    def retranslateUi(self, PDFGeneratorDialog):
+    def retranslateUi(self, PDFGeneratorDialog: QWidget) -> None:
         PDFGeneratorDialog.setWindowTitle(
             QCoreApplication.translate("PDFGeneratorDialog", "\u6279\u91cf\u751f\u6210PDF", None)
         )
@@ -568,18 +575,22 @@ class Ui_PDFGeneratorDialog:
             QCoreApplication.translate("PDFGeneratorDialog", "\u6d4f\u89c8", None)
         )
         ___qtablewidgetitem = self.table_files.horizontalHeaderItem(0)
+        assert ___qtablewidgetitem is not None
         ___qtablewidgetitem.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u6e90\u6587\u4ef6", None)
         )
         ___qtablewidgetitem1 = self.table_files.horizontalHeaderItem(1)
+        assert ___qtablewidgetitem1 is not None
         ___qtablewidgetitem1.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u8f93\u51fa", None)
         )
         ___qtablewidgetitem2 = self.table_files.horizontalHeaderItem(2)
+        assert ___qtablewidgetitem2 is not None
         ___qtablewidgetitem2.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u5927\u5c0f", None)
         )
         ___qtablewidgetitem3 = self.table_files.horizontalHeaderItem(3)
+        assert ___qtablewidgetitem3 is not None
         ___qtablewidgetitem3.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u72b6\u6001", None)
         )
