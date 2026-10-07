@@ -20,6 +20,7 @@ from file_toolbox.core.markdown_convert import (
     ConversionResult,
     MarkdownConvertService,
 )
+from file_toolbox.core.office_capability import format_status, pandoc_status
 from file_toolbox.gui.batch_mixin import FileImportMixin
 from file_toolbox.gui.file_models import FileTableModel, table_model
 from file_toolbox.gui.generated.ui_markdown_dialog import Ui_MarkdownConvertDialog
@@ -137,11 +138,18 @@ class MarkdownConvertTab(QWidget, FileImportMixin):
     # --- 目标格式联动 ---
 
     def _sync_target_ui(self) -> None:
-        """目标格式切换:Excel 模式仅对 .xlsx 有效;提示随目标更新。"""
+        """目标格式切换:Excel 模式仅对 .xlsx 有效;提示随目标更新(含能力状态)。
+
+        能力提示消费统一登记声明:docx 需要包内 Pandoc(缺失时给出准确错误,
+        不回退 PATH/下载);xlsx 两种模式均为纯库转换,无需 Office/Pandoc。
+        """
         is_excel = self._target() == "xlsx"
         self.ui.cmb_excel_mode.setEnabled(is_excel)
         self.ui.label_excel_mode.setEnabled(is_excel)
-        self.ui.lbl_hint.setText(_HINT_XLSX if is_excel else _HINT_DOCX)
+        if is_excel:
+            self.ui.lbl_hint.setText(_HINT_XLSX + "\nExcel 输出为纯库转换,无需 Office/Pandoc")
+        else:
+            self.ui.lbl_hint.setText(_HINT_DOCX + "\n" + format_status(pandoc_status()))
 
     def _target(self) -> str:
         return _TARGETS[self.ui.cmb_target.currentIndex()]

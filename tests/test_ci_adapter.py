@@ -188,7 +188,11 @@ def test_project_config_has_required_protocol_steps_and_mirrors() -> None:
         if argument.startswith("--cov=")
     ]
     assert coverage_targets == ["--cov=file_toolbox.core", "--cov=file_toolbox"]
-    assert config["ci"]["release_smoke"] == [["python", "scripts/release_smoke.py"]]
+    assert config["ci"]["release_smoke"] == [
+        ["python", "scripts/release_smoke.py"],
+        # Issue #143:资产结构检查之外追加项目专属成品 pure 自测(保留原条目不变)
+        ["uv", "run", "--all-extras", "python", "scripts/product_selftest.py", "--mode", "pure"],
+    ]
     mirrors = {mirror["name"]: mirror for mirror in config["release"]["mirrors"]}
     assert mirrors["gitee"]["url_env"] == "GITEE_URL"
     assert "user" not in mirrors["gitee"]

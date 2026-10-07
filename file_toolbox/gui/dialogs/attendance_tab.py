@@ -46,6 +46,7 @@ from file_toolbox.core.attendance.form_state import (
     default_form_state,
     default_output_name,
 )
+from file_toolbox.core.office_capability import format_statuses, tool_capability_statuses
 from file_toolbox.gui.dialogs.attendance_models import EmployeePreviewModel, GroupPreviewModel
 from file_toolbox.gui.generated.ui_attendance_dialog import Ui_AttendanceDialog
 from file_toolbox.gui.task_lifecycle import TaskLifecycle
@@ -122,6 +123,15 @@ class AttendanceTab(QWidget):
         self._set_defaults()
         self._connect()
         self._refresh_plans()
+        self._refresh_excel_status()
+
+    def _refresh_excel_status(self) -> None:
+        """Excel 能力提示:消费统一登记声明(预筛结论,不禁用任何控件)。
+
+        考勤读写均经真实 Excel 会话;任务真实结束后刷新一次,让本进程内
+        实际 Dispatch 成功的证据(已验证)如实呈现。
+        """
+        self.ui.label_excel_status.setText(format_statuses(tool_capability_statuses("attendance")))
 
     # 兼容旧 _worker 字段:读写均转发 TaskLifecycle;只有真实
     # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
@@ -850,6 +860,7 @@ class AttendanceTab(QWidget):
         self._set_busy(False, self._next_status)
         if self._preview_request is not None:
             self.ui.btn_generate.setEnabled(self._preview_can_generate)
+        self._refresh_excel_status()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """任务未结束时延迟关闭:协作取消后等真实 finished 异步重关。

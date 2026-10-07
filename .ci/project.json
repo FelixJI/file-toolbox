@@ -20,7 +20,18 @@
       ["uv", "build", "--out-dir", "build/package-validation"]
     ],
     "release_build": [["uv", "run", "--all-extras", "python", "scripts/build_exe.py", "--ci"]],
-    "release_smoke": [["python", "scripts/release_smoke.py"]]
+    "release_smoke": [
+      ["python", "scripts/release_smoke.py"],
+      [
+        "uv",
+        "run",
+        "--all-extras",
+        "python",
+        "scripts/product_selftest.py",
+        "--mode",
+        "pure"
+      ]
+    ]
   },
   "release": {
     "version_sources": [

@@ -753,7 +753,8 @@ def test_detect_engines_async_path_records_callback(dlg, monkeypatch):
     # 回调内部 emit _engine_detected(同线程直连到槽),文本立即生效
     captured["callback"]("检测到: Office")
     QApplication.processEvents()
-    assert dlg.ui.label_engine_info.text() == "检测到: Office"
+    # 检测结果为第一行,第二行为按文件类型的独立预筛结论
+    assert dlg.ui.label_engine_info.text().startswith("检测到: Office")
 
 
 def test_engine_echo_stale_generation_token_ignored(dlg, monkeypatch):
@@ -773,7 +774,7 @@ def test_engine_echo_stale_generation_token_ignored(dlg, monkeypatch):
 
     dlg._engine_detected.emit(2, "新结果: MS Office")
     QApplication.processEvents()
-    assert dlg.ui.label_engine_info.text() == "新结果: MS Office"
+    assert dlg.ui.label_engine_info.text().startswith("新结果: MS Office")
 
 
 def test_engine_echo_error_terminal_state_delivered(dlg, monkeypatch):

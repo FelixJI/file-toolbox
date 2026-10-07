@@ -22,6 +22,21 @@ class ToolCategory(StrEnum):
     SYSTEM = "system"
 
 
+@dataclass(frozen=True)
+class OfficeAppNeed:
+    """工具对一类 Office 应用的按需声明(纯数据,不含检测)。
+
+    kind: word/excel/ppt,对应 EngineManager 的应用类别(ProgID 见其 _APP_CONFIG)。
+    suffixes: 需要该应用的文件后缀(小写);不在任何 need.suffixes 内的类型为
+        纯文件路径(不启动 Office)。声明只描述"按操作/文件类型的需要",运行期
+        可用/缺失/检测失败由 core.office_capability 查询注册表预筛得出,注册
+        存在不冒称真实转换验证。
+    """
+
+    kind: str
+    suffixes: tuple[str, ...]
+
+
 # 系统页稳定 ID:主窗口导航/登记查找按 ID 定位,不依赖标签序号。
 UPDATE_TOOL_ID = "update"
 ABOUT_TOOL_ID = "about"
@@ -52,6 +67,11 @@ class ToolSpec:
     history_key: str | None = None
     cli_command: str | None = None
     summary: Callable[[Mapping[str, object]], str] | None = None
+    # 按需外部能力声明(纯元数据):Office 应用类别与关联后缀、内置 Pandoc 依赖。
+    # 默认空 = 纯文件工具(rename/mkdir/invoice/excel_merge/pdf_sort/plan_schedule
+    # 及系统页),不因任何引擎缺失受影响。
+    office_needs: tuple[OfficeAppNeed, ...] = ()
+    requires_pandoc: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +195,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         history_key="pdf",
         cli_command="pdf",
         summary=_pdf_summary,
+        office_needs=(
+            OfficeAppNeed("word", (".doc", ".docx")),
+            OfficeAppNeed("excel", (".xls", ".xlsx")),
+            OfficeAppNeed("ppt", (".ppt", ".pptx")),
+        ),
     ),
     ToolSpec(
         tool_id="replace",
@@ -187,6 +212,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         history_key="replace",
         cli_command="replace",
         summary=_replace_summary,
+        office_needs=(
+            OfficeAppNeed("word", (".doc", ".docx")),
+            OfficeAppNeed("excel", (".xls", ".xlsx")),
+        ),
     ),
     ToolSpec(
         tool_id="attendance",
@@ -199,6 +228,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         history_key="attendance",
         cli_command=None,  # 考勤汇总当前仅 GUI,无 CLI 子命令
         summary=_attendance_summary,
+        office_needs=(OfficeAppNeed("excel", (".xlsx",)),),
     ),
     ToolSpec(
         tool_id="invoice",
@@ -259,6 +289,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         history_key="markdown_convert",
         cli_command="markdown-convert",
         summary=_markdown_summary,
+        requires_pandoc=True,  # 仅 docx 目标;xlsx 两种模式为纯库转换
     ),
     ToolSpec(
         tool_id=UPDATE_TOOL_ID,
@@ -286,5 +317,14 @@ def spec_by_history_key(history_key: str) -> ToolSpec | None:
     便于测试以 monkeypatch 注入 fixture 登记)。"""
     for spec in TOOL_SPECS:
         if spec.history_key == history_key:
+            return spec
+    return None
+
+
+def spec_by_tool_id(tool_id: str) -> ToolSpec | None:
+    """按稳定 ID 查登记项(GUI 页面能力提示/导航定位使用;同样读模块级
+    TOOL_SPECS 以兼容测试注入)。"""
+    for spec in TOOL_SPECS:
+        if spec.tool_id == tool_id:
             return spec
     return None

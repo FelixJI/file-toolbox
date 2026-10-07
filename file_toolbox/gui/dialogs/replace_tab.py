@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_replace import ContentReplaceService, ReplaceOperationType
+from file_toolbox.core.office_capability import format_statuses, tool_capability_statuses
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.operation_params import OperationParamCollector
 from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
@@ -47,7 +48,20 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self._preview_pending = False
         self.ui.btn_cancel.setVisible(False)
         self._connect_signals()
+        self._refresh_capability_hint()
         self._update_status()
+
+    def _refresh_capability_hint(self) -> None:
+        """能力提示:按文件类型展示 Office 状态(消费统一登记声明,预筛结论)。
+
+        txt/md 为纯文件处理,不因任何引擎缺失受影响;页面不禁用任何按钮,
+        依赖缺失只在执行期对对应操作报错。
+        """
+        statuses = format_statuses(tool_capability_statuses("replace"))
+        self.ui.label_file_filter.setWordWrap(True)
+        self.ui.label_file_filter.setText(
+            f"支持格式: docx, doc, xlsx, xls, txt, md；txt/md 纯文件处理；{statuses}"
+        )
 
     # 兼容旧 worker 字段:单一事实在 TaskLifecycle,读写均转发;只有真实
     # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。

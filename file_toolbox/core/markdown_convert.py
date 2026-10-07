@@ -271,6 +271,11 @@ class MarkdownConvertService(LoggableMixin):
         self._history_store.add_record(HISTORY_TOOL, data)
 
 
+def locate_bundled_pandoc() -> Path:
+    """公共入口:包内 Pandoc 定位(能力提示/--selftest 复用同一规则,不回退 PATH)。"""
+    return _locate_pandoc()
+
+
 def _locate_pandoc() -> Path:
     """定位内置 Pandoc:只用确定位置,不回退 PATH。
 

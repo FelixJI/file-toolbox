@@ -17,6 +17,7 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from file_toolbox.common.loggable import LoggableMixin
@@ -73,6 +74,62 @@ def _engine_suite_for_prog_id(prog_id: str) -> str | None:
     return None
 
 
+class ProbeState(StrEnum):
+    """外部能力预筛的三态结论(Office kind 与包内 Pandoc 共用)。
+
+    AVAILABLE/MISSING 是可展示的确定结论(探测可判定);PROBE_ERROR 表示
+    探测本身失败(如权限 OSError),不得当作"未安装"展示。
+    """
+
+    AVAILABLE = "available"
+    MISSING = "missing"
+    PROBE_ERROR = "probe_error"
+
+
+@dataclass(frozen=True)
+class KindAvailability:
+    """单 kind 的按需可用性(注册表预筛结论 + 进程内真实 Dispatch 证据)。
+
+    state=AVAILABLE 时 engine 指向命中的套件(优先 MS Office);verified=True
+    仅表示本进程真实 Dispatch 成功过(最强证据),预筛命中不能冒称真实转换
+    验证;detail 携带检测错误原因或平台说明,供页面准确展示。
+    """
+
+    kind: str
+    state: ProbeState
+    engine: str | None = None
+    detail: str = ""
+    verified: bool = False
+
+
+@dataclass(frozen=True)
+class _ProbeOutcome:
+    """单 ProgID 注册表探测结果:registered=None 表示探测失败(无法判定)。
+
+    FileNotFoundError → registered=False(确定未注册);OSError → None(检测
+    错误,与"未安装"严格区分);非 Windows(winreg 不可用)→ False 附平台说明。
+    """
+
+    registered: bool | None
+    detail: str = ""
+
+
+def _probe_registry_outcome(prog_id: str) -> _ProbeOutcome:
+    """注册表探测的完整三态结果(供按 kind 能力查询区分缺失/检测错误)。"""
+    try:
+        import winreg
+    except ImportError:
+        return _ProbeOutcome(False, "此功能仅支持 Windows 系统")  # 非 Windows
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id)
+    except FileNotFoundError:
+        return _ProbeOutcome(False, "")
+    except OSError as error:
+        return _ProbeOutcome(None, str(error))
+    winreg.CloseKey(key)
+    return _ProbeOutcome(True, "")
+
+
 class EngineManager(LoggableMixin):
     """Office引擎管理器"""
 
@@ -87,6 +144,14 @@ class EngineManager(LoggableMixin):
     # 锁内只做登记,回调投递一律在锁外(见 _serve_flight)。
     _flight_lock = threading.Lock()
     _flight_subscribers: list[Callable[[str], None]] | None = None
+    # 按 kind 的能力预筛 memo(类变量,所有实例共享):None = 尚未查询过。
+    # 与套件级 _cached_engines 互补:套件缓存以 Word/KWPS ProgID 判定 office/wps
+    # 套件,不能据此推断 Excel/PPT 的存在;按 kind 查询各自探测其 ProgID,
+    # 仅进程内 memo、不落盘(持久缓存仍由 engine_cache 承担)。
+    _cached_kind_availability: dict[str, KindAvailability] | None = None
+    # 本进程经真实 Dispatch 成功过的 kind → 实际成功的套件(office/wps);
+    # 转换期喂养,最强证据:绑定实际套件并可纠正旧预筛(含 missing/probe_error)。
+    _verified_kinds: dict[str, str] = {}
 
     def __init__(self) -> None:
         self._word_app = None
@@ -118,21 +183,14 @@ class EngineManager(LoggableMixin):
 
     @staticmethod
     def _probe_registry(prog_id: str) -> bool:
-        """注册表探测:HKCR 下是否存在该 ProgID(毫秒级,不启动任何进程)。
+        """注册表探测(bool 视图,兼容既有消费者):HKCR 下是否存在该 ProgID。
 
         作为快速预筛——"注册了"基本等于"装了";更强证据由转换期真实 Dispatch
-        成功后喂养(record_engine_evidence)。非 Windows 或 winreg 不可用时返回 False。
+        成功后喂养(record_engine_evidence)。非 Windows 或 winreg 不可用时返回
+        False;探测本身的 OSError 也返回 False(需要区分"缺失/检测错误"的调用
+        方改用 _probe_registry_outcome / kind_availability)。
         """
-        try:
-            import winreg
-        except ImportError:
-            return False  # 非 Windows
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id)
-            winreg.CloseKey(key)
-            return True
-        except (FileNotFoundError, OSError):
-            return False
+        return _probe_registry_outcome(prog_id).registered is True
 
     def _detect_available_engines(self, force_refresh: bool = False) -> dict[str, bool]:
         """检测可用的 Office 引擎(带缓存)。
@@ -165,6 +223,65 @@ class EngineManager(LoggableMixin):
 
         EngineManager._cached_engines = engines
         return engines
+
+    @classmethod
+    def _mark_kind_verified(cls, kind: str, engine: str) -> None:
+        """真实 Dispatch 成功后记录 kind 与实际成功的套件(进程内证据,不落盘)。
+
+        证据绑定实际套件:MS 预筛命中但 Dispatch 回退 WPS 成功时,以 WPS 为准;
+        预筛 missing/probe_error 被真实成功纠正。与套件级 record_engine_evidence
+        互补(套件键持久化,kind 证据只影响本进程能力展示,不另建持久缓存)。
+        """
+        cls._verified_kinds[kind] = engine
+
+    def _with_verified(self, availability: KindAvailability) -> KindAvailability:
+        """把进程内真实 Dispatch 证据叠加到预筛结果上(实际套件与状态优先)。"""
+        engine = EngineManager._verified_kinds.get(availability.kind)
+        if engine is None:
+            return availability
+        if (
+            availability.verified
+            and availability.state is ProbeState.AVAILABLE
+            and availability.engine == engine
+        ):
+            return availability
+        return KindAvailability(availability.kind, ProbeState.AVAILABLE, engine, "", True)
+
+    def kind_availability(self, kind: str, *, refresh: bool = False) -> KindAvailability:
+        """查询单 kind(word/excel/ppt)的按需可用性(注册表预筛,毫秒级)。
+
+        - 不启动任何 Office 进程;结果进程内 memo(refresh=True 强制重探)。
+        - 各 kind 独立探测自己的 ms/wps ProgID:Word 缺失不能否定 Excel/PPT,
+        - 探测 OSError 与"未注册"严格区分(PROBE_ERROR ≠ MISSING)。
+        - verified 由真实 Dispatch 成功喂养(见 _init_office_app_locked),
+          注册存在仅是预筛,不是真实转换验证。
+        """
+        if kind not in _APP_CONFIG:
+            raise ValueError(f"未知的 Office 应用类别: {kind!r}")
+        if not refresh:
+            cached = EngineManager._cached_kind_availability
+            if cached is not None and (hit := cached.get(kind)) is not None:
+                return self._with_verified(hit)
+        spec = _APP_CONFIG[kind]
+        outcome = _probe_registry_outcome(spec.ms_prog_id)
+        if outcome.registered is None:
+            result = KindAvailability(kind, ProbeState.PROBE_ERROR, detail=outcome.detail)
+        elif outcome.registered:
+            result = KindAvailability(kind, ProbeState.AVAILABLE, engine="office")
+        else:
+            wps = _probe_registry_outcome(spec.wps_prog_id)
+            if wps.registered is None:
+                result = KindAvailability(kind, ProbeState.PROBE_ERROR, detail=wps.detail)
+            elif wps.registered:
+                result = KindAvailability(kind, ProbeState.AVAILABLE, engine="wps")
+            else:
+                result = KindAvailability(
+                    kind, ProbeState.MISSING, detail=outcome.detail or wps.detail
+                )
+        memo = EngineManager._cached_kind_availability or {}
+        memo[kind] = result
+        EngineManager._cached_kind_availability = memo
+        return self._with_verified(result)
 
     def record_engine_evidence(self, engine: str, available: bool) -> None:
         """记录一条来自真实转换的引擎证据,精确更新进程内缓存与持久缓存。
@@ -395,6 +512,9 @@ class EngineManager(LoggableMixin):
                 suite = _engine_suite_for_prog_id(prog_id)
                 if suite is not None:
                     self.record_engine_evidence(suite, True)
+                    # 真实 Dispatch 成功同时是本 kind 的最强证据:绑定实际成功
+                    # 的套件(回退 WPS 成功时不冒称 MS),并纠正旧预筛结论。
+                    EngineManager._mark_kind_verified(kind, suite)
                 return app
             except Exception as e:
                 last_error = e
