@@ -101,3 +101,17 @@ def test_command_includes_gui_modules_from_registry() -> None:
     assert {m for m in included if m.startswith("file_toolbox.gui")} == {
         spec.gui_module for spec in TOOL_SPECS
     }
+
+
+def test_command_includes_workers_package_for_dynamic_attr_resolution() -> None:
+    """workers 包整包收包:包级名称的 PEP 562 动态解析静态分析追不到。
+
+    ``from file_toolbox.gui.workers import X`` 经 ``__getattr__`` 以运行期字符串
+    importlib 导入子模块,Nuitka 静态分析不可达:只经该路径消费的 worker
+    (attendance_worker,attendance_tab 唯一消费方式)会从便携产物缺失,真实
+    EXE full 在 attendance 场景 ModuleNotFoundError(其余 9 场景经直接模块
+    导入静态可达)。整包 --include-package 以包目录为单一来源,不引入第二份
+    worker 清单,运行期懒导入语义不变(Issue #124)。
+    """
+    cmd = _cmd()
+    assert "--include-package=file_toolbox.gui.workers" in cmd

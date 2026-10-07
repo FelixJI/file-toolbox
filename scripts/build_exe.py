@@ -334,6 +334,12 @@ def _nuitka_command(entry: Path, version: str, output_dir: Path) -> list[str]:
         # GUI 页面经统一工具登记懒导入(importlib),静态分析追不到;
         # 从同一登记派生 --include-module 显式收包,不维护第二份手工 GUI 清单。
         *(f"--include-module={gui_module}" for gui_module in _gui_tab_modules()),
+        # gui.workers:包级名称经 PEP 562 __getattr__ 按运行期字符串 importlib
+        # 导入子模块,静态分析同样追不到——只经该路径消费的 worker(如
+        # attendance_worker)会从便携产物缺失,真实 EXE full 曾在 attendance
+        # 场景 ModuleNotFoundError。整包收包以包目录为单一来源,不引入第二份
+        # worker 清单;运行期仍按需导入,懒加载语义不变(Issue #124)。
+        "--include-package=file_toolbox.gui.workers",
         # pywin32:win32com 动态 Dispatch 按 ProgID 运行期解析,静态追不全 → 整包收;
         # pythoncom/pywintypes 是带 DLL 的顶层模块,standalone DLL 扫描据此收
         # pywin32_system32 下的 pythoncom3XX.dll / pywintypes3XX.dll
