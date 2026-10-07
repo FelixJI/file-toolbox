@@ -9,7 +9,6 @@
 ## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
 ## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
-
 from PySide6.QtCore import (
     QCoreApplication,
     QMetaObject,
@@ -20,15 +19,17 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListView,
     QListWidget,
     QPushButton,
     QSizePolicy,
     QSpacerItem,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
+
+from file_toolbox.gui.file_models import FileTableModel
 
 
 class Ui_FileRenamerDialog:
@@ -78,7 +79,7 @@ class Ui_FileRenamerDialog:
 
         self.verticalLayout.addWidget(self.label_files)
 
-        self.list_files = QListWidget(FileRenamerDialog)
+        self.list_files = QListView(FileRenamerDialog)
         self.list_files.setObjectName("list_files")
         self.list_files.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list_files.setMaximumSize(QSize(16777215, 150))
@@ -180,19 +181,10 @@ class Ui_FileRenamerDialog:
 
         self.verticalLayout.addLayout(self.horizontalLayout_3)
 
-        self.table_preview = QTableWidget(FileRenamerDialog)
-        if self.table_preview.columnCount() < 5:
-            self.table_preview.setColumnCount(5)
-        __qtablewidgetitem = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(0, __qtablewidgetitem)
-        __qtablewidgetitem1 = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(1, __qtablewidgetitem1)
-        __qtablewidgetitem2 = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(2, __qtablewidgetitem2)
-        __qtablewidgetitem3 = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(3, __qtablewidgetitem3)
-        __qtablewidgetitem4 = QTableWidgetItem()
-        self.table_preview.setHorizontalHeaderItem(4, __qtablewidgetitem4)
+        self.table_preview = QTableView(FileRenamerDialog)
+        self.table_preview.setModel(
+            FileTableModel(["原文件名", "新文件名", "大小", "修改时间", "状态"], self.table_preview)
+        )
         self.table_preview.setObjectName("table_preview")
         self.table_preview.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_preview.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -307,31 +299,6 @@ class Ui_FileRenamerDialog:
         )
         self.btn_refresh_preview.setText(
             QCoreApplication.translate("FileRenamerDialog", "\u5237\u65b0\u9884\u89c8", None)
-        )
-        ___qtablewidgetitem = self.table_preview.horizontalHeaderItem(0)
-        assert ___qtablewidgetitem is not None
-        ___qtablewidgetitem.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u539f\u6587\u4ef6\u540d", None)
-        )
-        ___qtablewidgetitem1 = self.table_preview.horizontalHeaderItem(1)
-        assert ___qtablewidgetitem1 is not None
-        ___qtablewidgetitem1.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u65b0\u6587\u4ef6\u540d", None)
-        )
-        ___qtablewidgetitem2 = self.table_preview.horizontalHeaderItem(2)
-        assert ___qtablewidgetitem2 is not None
-        ___qtablewidgetitem2.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u5927\u5c0f", None)
-        )
-        ___qtablewidgetitem3 = self.table_preview.horizontalHeaderItem(3)
-        assert ___qtablewidgetitem3 is not None
-        ___qtablewidgetitem3.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u4fee\u6539\u65f6\u95f4", None)
-        )
-        ___qtablewidgetitem4 = self.table_preview.horizontalHeaderItem(4)
-        assert ___qtablewidgetitem4 is not None
-        ___qtablewidgetitem4.setText(
-            QCoreApplication.translate("FileRenamerDialog", "\u72b6\u6001", None)
         )
         self.label_status.setText(
             QCoreApplication.translate("FileRenamerDialog", "已选择 0 个文件", None)

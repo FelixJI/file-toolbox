@@ -7,6 +7,8 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 
 pytest.importorskip("PySide6.QtWidgets")
+
+from gui_model_helpers import wait_page
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -82,6 +84,7 @@ def test_excel_real_worker_keeps_result_and_independent_warnings(
     bad.write_bytes(b"not a workbook")
     tab = excel_merge_tab.ExcelMergeTab()
     tab._add_paths([source, bad])
+    wait_page(tab)
     tab.ui.edit_outdir.setText(str(tmp_path / "outputs"))
     merge = Mock(wraps=tab._svc.merge)
     monkeypatch.setattr(tab._svc, "merge", merge)
@@ -102,7 +105,7 @@ def test_excel_real_worker_keeps_result_and_independent_warnings(
     finally:
         workbook.close()
     assert source.read_bytes() == original
-    assert tab.ui.table.rowCount() == 2
+    assert tab.ui.table.model().rowCount() == 2
     assert str(outputs[0]) in tab.ui.lbl_status.text()
     assert tab.ui.btn_merge.isEnabled()
     assert [(kind, title) for kind, title, _ in messages] == [
@@ -131,6 +134,7 @@ def test_pdf_real_worker_keeps_outputs_when_preference_fails(
     original = source.read_bytes()
     tab = pdf_sort_tab.PdfSortTab()
     tab._add_paths([source, second])
+    wait_page(tab)
     tab.ui.edit_pattern.setText(r"NO\.(\d+)")
     tab.ui.edit_outdir.setText(str(tmp_path / "outputs"))
     sort = tab._svc.sort
@@ -155,7 +159,7 @@ def test_pdf_real_worker_keeps_outputs_when_preference_fails(
     with outputs[0].open("rb") as stream:
         assert "NO.1" in PdfReader(stream).pages[0].extract_text()
     assert source.read_bytes() == original
-    assert tab.ui.table.rowCount() == (2 if cancelled else 4)
+    assert tab.ui.table.model().rowCount() == (2 if cancelled else 4)
     assert [(kind, title) for kind, title, _ in messages] == [
         ("warning", "排序已取消") if cancelled else ("information", "排序完成"),
         ("warning", "偏好保存失败"),
@@ -183,6 +187,7 @@ def test_excel_real_worker_business_failure_is_not_reported_as_saved(
     source.write_bytes(b"broken workbook")
     tab = excel_merge_tab.ExcelMergeTab()
     tab._add_paths([source])
+    wait_page(tab)
     tab.ui.edit_outdir.setText(str(tmp_path / "outputs"))
     if unexpected_error:
         merge = Mock(side_effect=RuntimeError("business failed"))
@@ -204,7 +209,7 @@ def test_excel_real_worker_business_failure_is_not_reported_as_saved(
         assert messages == [("critical", "合并失败", "business failed")]
     else:
         assert failures == [] and len(results) == 1 and not results[0].success
-        assert tab.ui.table.rowCount() == 1
+        assert tab.ui.table.model().rowCount() == 1
         assert [(kind, title) for kind, title, _ in messages] == [("warning", "未生成输出")]
     tab.close()
 
@@ -225,13 +230,14 @@ def test_excel_output_close_warning_keeps_real_result(
     monkeypatch.setattr(dest, "close", close)
     monkeypatch.setattr(tab._svc, "_new_workbook", lambda: dest)
     tab._add_paths([source])
+    wait_page(tab)
     tab.ui.edit_outdir.setText(str(tmp_path / "outputs"))
     results, failures = observe_start(monkeypatch, ExcelMergeWorker)
     tab._merge()
     worker = tab._worker
     finish(worker, app)
     assert len(results) == 1 and results[0].success and failures == []
-    assert results[0].output.is_file() and tab.ui.table.rowCount() == 1
+    assert results[0].output.is_file() and tab.ui.table.model().rowCount() == 1
     assert str(results[0].output) in tab.ui.lbl_status.text()
     assert [(kind, title) for kind, title, _ in messages] == [
         ("information", "合并完成"),

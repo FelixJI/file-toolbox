@@ -9,7 +9,6 @@
 ## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
 ## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
-
 from PySide6.QtCore import (
     QCoreApplication,
     QMetaObject,
@@ -23,17 +22,19 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListView,
     QListWidget,
     QProgressBar,
     QPushButton,
     QSizePolicy,
     QSpacerItem,
     QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
+
+from file_toolbox.gui.file_models import FileTableModel
 
 
 class Ui_ContentReplaceDialog:
@@ -64,7 +65,7 @@ class Ui_ContentReplaceDialog:
 
         self.verticalLayout_2.setObjectName("verticalLayout_2")
 
-        self.list_files = QListWidget(self.groupBox_files)
+        self.list_files = QListView(self.groupBox_files)
 
         self.list_files.setObjectName("list_files")
 
@@ -178,30 +179,10 @@ class Ui_ContentReplaceDialog:
 
         self.verticalLayout_4.setObjectName("verticalLayout_4")
 
-        self.table_preview = QTableWidget(self.groupBox_preview)
-
-        if self.table_preview.columnCount() < 5:
-            self.table_preview.setColumnCount(5)
-
-        __qtablewidgetitem = QTableWidgetItem()
-
-        self.table_preview.setHorizontalHeaderItem(0, __qtablewidgetitem)
-
-        __qtablewidgetitem1 = QTableWidgetItem()
-
-        self.table_preview.setHorizontalHeaderItem(1, __qtablewidgetitem1)
-
-        __qtablewidgetitem2 = QTableWidgetItem()
-
-        self.table_preview.setHorizontalHeaderItem(2, __qtablewidgetitem2)
-
-        __qtablewidgetitem3 = QTableWidgetItem()
-
-        self.table_preview.setHorizontalHeaderItem(3, __qtablewidgetitem3)
-
-        __qtablewidgetitem4 = QTableWidgetItem()
-
-        self.table_preview.setHorizontalHeaderItem(4, __qtablewidgetitem4)
+        self.table_preview = QTableView(self.groupBox_preview)
+        self.table_preview.setModel(
+            FileTableModel(["文件名", "匹配数", "文件大小", "格式转换", "状态"], self.table_preview)
+        )
 
         self.table_preview.setObjectName("table_preview")
 
@@ -357,41 +338,6 @@ class Ui_ContentReplaceDialog:
 
         self.groupBox_preview.setTitle(
             QCoreApplication.translate("ContentReplaceDialog", "\u9884\u89c8", None)
-        )
-
-        ___qtablewidgetitem = self.table_preview.horizontalHeaderItem(0)
-
-        assert ___qtablewidgetitem is not None
-        ___qtablewidgetitem.setText(
-            QCoreApplication.translate("ContentReplaceDialog", "\u6587\u4ef6\u540d", None)
-        )
-
-        ___qtablewidgetitem1 = self.table_preview.horizontalHeaderItem(1)
-
-        assert ___qtablewidgetitem1 is not None
-        ___qtablewidgetitem1.setText(
-            QCoreApplication.translate("ContentReplaceDialog", "\u5339\u914d\u6570", None)
-        )
-
-        ___qtablewidgetitem2 = self.table_preview.horizontalHeaderItem(2)
-
-        assert ___qtablewidgetitem2 is not None
-        ___qtablewidgetitem2.setText(
-            QCoreApplication.translate("ContentReplaceDialog", "\u6587\u4ef6\u5927\u5c0f", None)
-        )
-
-        ___qtablewidgetitem3 = self.table_preview.horizontalHeaderItem(3)
-
-        assert ___qtablewidgetitem3 is not None
-        ___qtablewidgetitem3.setText(
-            QCoreApplication.translate("ContentReplaceDialog", "\u683c\u5f0f\u8f6c\u6362", None)
-        )
-
-        ___qtablewidgetitem4 = self.table_preview.horizontalHeaderItem(4)
-
-        assert ___qtablewidgetitem4 is not None
-        ___qtablewidgetitem4.setText(
-            QCoreApplication.translate("ContentReplaceDialog", "\u72b6\u6001", None)
         )
 
         self.chk_keep_new_format.setText(

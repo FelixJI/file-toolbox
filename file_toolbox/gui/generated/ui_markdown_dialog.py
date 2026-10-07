@@ -16,9 +16,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QPushButton, QSizePolicy, QSpacerItem,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+    QHeaderView, QLabel, QLineEdit, QListView,
+    QPushButton, QSizePolicy, QSpacerItem, QTableView,
+    QVBoxLayout, QWidget)
 
 class Ui_MarkdownConvertDialog(object):
     def setupUi(self, MarkdownConvertDialog):
@@ -50,7 +50,7 @@ class Ui_MarkdownConvertDialog(object):
 
         self.verticalLayout_main.addLayout(self.horizontalLayout_files)
 
-        self.list_files = QListWidget(MarkdownConvertDialog)
+        self.list_files = QListView(MarkdownConvertDialog)
         self.list_files.setObjectName(u"list_files")
 
         self.verticalLayout_main.addWidget(self.list_files)
@@ -130,17 +130,7 @@ class Ui_MarkdownConvertDialog(object):
 
         self.verticalLayout_main.addLayout(self.horizontalLayout_actions)
 
-        self.table = QTableWidget(MarkdownConvertDialog)
-        if (self.table.columnCount() < 4):
-            self.table.setColumnCount(4)
-        __qtablewidgetitem = QTableWidgetItem()
-        self.table.setHorizontalHeaderItem(0, __qtablewidgetitem)
-        __qtablewidgetitem1 = QTableWidgetItem()
-        self.table.setHorizontalHeaderItem(1, __qtablewidgetitem1)
-        __qtablewidgetitem2 = QTableWidgetItem()
-        self.table.setHorizontalHeaderItem(2, __qtablewidgetitem2)
-        __qtablewidgetitem3 = QTableWidgetItem()
-        self.table.setHorizontalHeaderItem(3, __qtablewidgetitem3)
+        self.table = QTableView(MarkdownConvertDialog)
         self.table.setObjectName(u"table")
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -148,8 +138,6 @@ class Ui_MarkdownConvertDialog(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(self.table.sizePolicy().hasHeightForWidth())
         self.table.setSizePolicy(sizePolicy)
-        self.table.setColumnCount(4)
-        self.table.setRowCount(0)
 
         self.verticalLayout_main.addWidget(self.table)
 
@@ -182,13 +170,5 @@ class Ui_MarkdownConvertDialog(object):
         self.btn_convert.setText(QCoreApplication.translate("MarkdownConvertDialog", u"\u5f00\u59cb\u8f6c\u6362", None))
         self.btn_cancel.setText(QCoreApplication.translate("MarkdownConvertDialog", u"\u53d6\u6d88", None))
         self.lbl_status.setText(QCoreApplication.translate("MarkdownConvertDialog", u"\u5c31\u7eea", None))
-        ___qtablewidgetitem = self.table.horizontalHeaderItem(0)
-        ___qtablewidgetitem.setText(QCoreApplication.translate("MarkdownConvertDialog", u"\u6587\u4ef6", None))
-        ___qtablewidgetitem1 = self.table.horizontalHeaderItem(1)
-        ___qtablewidgetitem1.setText(QCoreApplication.translate("MarkdownConvertDialog", u"\u7ed3\u679c", None))
-        ___qtablewidgetitem2 = self.table.horizontalHeaderItem(2)
-        ___qtablewidgetitem2.setText(QCoreApplication.translate("MarkdownConvertDialog", u"\u8f93\u51fa", None))
-        ___qtablewidgetitem3 = self.table.horizontalHeaderItem(3)
-        ___qtablewidgetitem3.setText(QCoreApplication.translate("MarkdownConvertDialog", u"\u8bf4\u660e", None))
         pass
     # retranslateUi

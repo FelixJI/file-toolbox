@@ -9,7 +9,6 @@
 ## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
 ## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
-
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -17,13 +16,15 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QListWidget,
+    QListView,
     QPushButton,
     QRadioButton,
-    QTableWidget,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
+
+from file_toolbox.gui.file_models import FileTableModel
 
 # 表格列头(与 invoice 业务字段一一对应;放此处供 setupUi 与测试共用)
 HEADERS = [
@@ -67,7 +68,7 @@ class Ui_InvoiceDialog:
         file_row.addStretch(1)
         layout.addLayout(file_row)
 
-        self.list_files = QListWidget(InvoiceDialog)
+        self.list_files = QListView(InvoiceDialog)
         self.list_files.setObjectName("list_files")
         layout.addWidget(self.list_files)
 
@@ -140,8 +141,8 @@ class Ui_InvoiceDialog:
         layout.addLayout(btn_row)
 
         # ---- 结果表格 ----
-        self.table = QTableWidget(0, len(HEADERS), InvoiceDialog)
+        self.table = QTableView(InvoiceDialog)
         self.table.setObjectName("table")
-        self.table.setHorizontalHeaderLabels(HEADERS)
+        self.table.setModel(FileTableModel(list(HEADERS), self.table))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table, stretch=1)

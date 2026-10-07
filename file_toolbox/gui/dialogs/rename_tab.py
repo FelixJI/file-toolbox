@@ -1,27 +1,32 @@
 """重命名 Tab:批量重命名界面(文件选择 + 操作列表 + 预览/执行)。"""
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QDialog,
     QInputDialog,
     QListWidgetItem,
     QMessageBox,
-    QTableWidgetItem,
     QWidget,
 )
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService, OperationType
-from file_toolbox.core.rename_execution import PlanState
+from file_toolbox.core.rename_execution import PlanEntry, PlanState, RenameResult
 from file_toolbox.core.rename_template import RenameTemplateService
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.operation_params import OperationParamCollector
 from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
 from file_toolbox.gui.controllers.rename_controller import RenameController
+from file_toolbox.gui.file_models import table_model
 from file_toolbox.gui.generated.ui_rename_dialog import Ui_FileRenamerDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
+from file_toolbox.gui.workers.file_scan_worker import ScannedFile
+from file_toolbox.gui.workers.rename_worker import RenameExecuteWorker, RenamePreviewWorker
 
 
 class FileRenamerDialog(QDialog, BatchDialogMixin):
@@ -31,9 +36,16 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._task = TaskLifecycle(self)
         self._init_batch_dialog()
         self.ui = Ui_FileRenamerDialog()
         self.ui.setupUi(self)
+        self.ui.list_files.setUniformItemSizes(True)
+        self.ui.list_files.setModel(self._file_model)
+        self._file_model.full_path = True
+        self._preview_plan: dict[Path, PlanEntry] = {}
+        self._preview_snapshot: tuple[list[Path], list[dict[str, Any]]] | None = None
+        self._preview_pending = False
 
         self._controller = RenameController()
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
@@ -78,6 +90,7 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         self.ui.btn_remove_operation.clicked.connect(self._remove_operation)
         self.ui.btn_refresh_preview.clicked.connect(self._do_refresh_preview)
         self.ui.btn_execute.clicked.connect(self._execute)
+        self.ui.btn_cancel.clicked.connect(self._on_cancel)
         self.ui.btn_show_history.clicked.connect(self._show_history)
         self.ui.btn_load_template.clicked.connect(self._load_template)
         self.ui.btn_save_template.clicked.connect(self._save_template)
@@ -129,72 +142,189 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         return collector.collect(op_type, existing)
 
     # ---------- 预览 / 执行 ----------
+    @property
+    def worker(self) -> QThread | None:
+        return self._task.worker
+
+    @worker.setter
+    def worker(self, worker: QThread | None) -> None:
+        self._task.worker = worker
+
+    def _refresh_preview(self) -> None:
+        self._preview_snapshot = None
+        self._preview_plan = {}
+        if isinstance(self.worker, RenamePreviewWorker):
+            self._preview_pending = True
+            self._task.cancel()
+        super()._refresh_preview()
+
     def _do_refresh_preview(self) -> None:
+        self._preview_timer.stop()
+        self._preview_snapshot = None
+        self._preview_plan = {}
         if not self.selected_files or not self.operations:
-            self.ui.table_preview.setRowCount(0)
+            table_model(self.ui.table_preview).replace_rows([])
             return
-        valid, msg = self._svc.validate_operations(self.operations)
-        if not valid:
-            QMessageBox.warning(self, "操作无效", msg)
+        if self._task.busy:
+            self._preview_pending = True
             return
-        result = self._svc.apply_operations(self.selected_files, self.operations)
-        self._render_preview(result)
+        if self._task.close_pending:
+            return
+        self._preview_pending = False
+        snapshot = (list(self.selected_files), deepcopy(self.operations))
+        worker = RenamePreviewWorker(self._svc, *snapshot, self._file_metadata, self)
+        self._requested_snapshot = snapshot
+        worker.preview_ok.connect(self._on_preview_ok)
+        worker.failed.connect(self._on_worker_failed)
+        worker.finished.connect(self._on_worker_finished)
+        self._business_generation = self._import_generation
+        self._task.track(worker)
+        self._set_busy(True)
+        self.ui.label_status.setText("正在计算预览…")
+        worker.start()
+
+    def _on_preview_ok(
+        self, plan: dict[Path, PlanEntry], rows: list[tuple[list[str], None]]
+    ) -> None:
+        if (
+            self.sender() is not self.worker
+            or not self._accept_business_result()
+            or self._preview_pending
+            or self._task.close_pending
+        ):
+            return
+        if self._requested_snapshot != (self.selected_files, self.operations):
+            self._preview_pending = True
+            return
+        self._preview_snapshot = deepcopy(self._requested_snapshot)
+        self._preview_plan = plan
+        if isinstance(self.worker, RenamePreviewWorker):
+            self._file_metadata.update(self.worker.metadata)
+        table_model(self.ui.table_preview).replace_rows(rows)
 
     def _render_preview(self, result: dict[Path, tuple[Path, str]]) -> None:
-        self.ui.table_preview.setRowCount(len(result))
-        for row, (old, (new, status)) in enumerate(result.items()):
-            info = self._svc.get_file_info(old)
-            self.ui.table_preview.setItem(row, 0, QTableWidgetItem(old.name))
-            self.ui.table_preview.setItem(row, 1, QTableWidgetItem(new.name))
-            self.ui.table_preview.setItem(row, 2, QTableWidgetItem(info["size_str"]))
-            self.ui.table_preview.setItem(row, 3, QTableWidgetItem(info["modified_str"]))
-            self.ui.table_preview.setItem(row, 4, QTableWidgetItem(status))
+        # 显示已有数据；元数据只能由扫描/预览 worker 提供。
+        table_model(self.ui.table_preview).replace_rows(
+            [
+                (
+                    [
+                        old.name,
+                        new.name,
+                        self._file_metadata.get(old, ScannedFile(old)).size,
+                        self._file_metadata.get(old, ScannedFile(old)).modified,
+                        status,
+                    ],
+                    None,
+                )
+                for old, (new, status) in result.items()
+            ]
+        )
 
     def _execute(self) -> None:
-        if not self.selected_files or not self.operations:
-            QMessageBox.information(self, "提示", "请先选择文件并添加操作。")
+        if self._task.busy:
             return
-        valid, msg = self._svc.validate_operations(self.operations)
-        if not valid:
-            QMessageBox.warning(self, "操作无效", msg)
+        if self._preview_snapshot != (self.selected_files, self.operations):
+            QMessageBox.information(self, "提示", "请先等待当前文件和规则的预览完成。")
+            self._do_refresh_preview()
             return
-        result = self._svc.plan_operations(self.selected_files, self.operations)
         ready = {
-            old: entry.target for old, entry in result.items() if entry.state == PlanState.READY
+            old: entry.target
+            for old, entry in self._preview_plan.items()
+            if entry.state == PlanState.READY
         }
         if not ready:
             QMessageBox.warning(self, "无可执行", "没有就绪的文件(可能全部冲突或无变化)。")
             return
+        snapshot = deepcopy(self._preview_snapshot)
         reply = QMessageBox.question(self, "确认执行", f"将重命名 {len(ready)} 个文件,是否继续?")
-        if reply != QMessageBox.StandardButton.Yes:
+        if (
+            reply != QMessageBox.StandardButton.Yes
+            or self._task.busy
+            or snapshot != (self.selected_files, self.operations)
+            or snapshot != self._preview_snapshot
+        ):
             return
-        outcome = self._svc.execute_rename_result(ready)
-        count, errors = outcome.count, outcome.messages
+        self._preview_timer.stop()
+        self._preview_snapshot = None
+        worker = RenameExecuteWorker(self._svc, ready, self)
+        worker.execute_ok.connect(self._on_execute_ok)
+        worker.failed.connect(self._on_worker_failed)
+        worker.finished.connect(self._on_worker_finished)
+        self._task.track(worker)
+        self._set_busy(True, executing=True)
+        self.ui.label_status.setText("正在重命名…")
+        worker.start()
+
+    def _on_execute_ok(self, outcome: RenameResult) -> None:
+        if self.sender() is not self.worker:
+            return
         self._sync_selected_paths_after_rename(outcome.successful)
-        QMessageBox.information(
-            self,
-            "完成",
-            f"已重命名 {count} 个文件。" + ("\n" + "\n".join(errors) if errors else ""),
+        self._preview_pending = not (
+            outcome.cancelled or bool(self.worker and self.worker.isInterruptionRequested())
         )
-        self._do_refresh_preview()
+        if not self._task.close_pending:
+            QMessageBox.information(
+                self,
+                "已取消" if outcome.cancelled else "完成",
+                f"已重命名 {outcome.count} 个文件。"
+                + ("\n" + "\n".join(outcome.messages) if outcome.messages else ""),
+            )
+
+    def _on_worker_failed(self, message: str) -> None:
+        if self.sender() is not self.worker or self._task.close_pending:
+            return
+        if isinstance(self.worker, RenamePreviewWorker) and (
+            self.worker.isInterruptionRequested()
+            or self._preview_pending
+            or not self._accept_business_result()
+            or self._requested_snapshot != (self.selected_files, self.operations)
+        ):
+            return
+        QMessageBox.warning(self, "重命名失败", message)
+
+    def _on_worker_finished(self) -> None:
+        if not self._task.finish(self.sender()):
+            return
+        self._set_busy(False)
+        self._update_status()
+        if self._task.close_pending or self._resume_import():
+            return
+        if self._preview_pending:
+            self._preview_pending = False
+            self._refresh_preview()
+
+    def _set_busy(self, busy: bool, executing: bool = False) -> None:
+        self.ui.btn_execute.setEnabled(not busy)
+        self.ui.btn_cancel.setVisible(busy)
+        for button in (
+            self.ui.btn_select_files,
+            self.ui.btn_select_folder,
+            self.ui.btn_clear_files,
+            self.ui.btn_add_prefix,
+            self.ui.btn_add_suffix,
+            self.ui.btn_replace_text,
+            self.ui.btn_regex_replace,
+            self.ui.btn_add_number,
+            self.ui.btn_delete_chars,
+            self.ui.btn_add_date,
+            self.ui.btn_edit_operation,
+            self.ui.btn_remove_operation,
+            self.ui.btn_load_template,
+        ):
+            button.setEnabled(not (busy and executing))
+
+    def _on_cancel(self) -> None:
+        self._preview_pending = False
+        self._preview_timer.stop()
+        if not self._cancel_import():
+            self._task.cancel()
+        self.ui.label_status.setText("正在取消，等待当前操作安全结束…")
 
     def _sync_selected_paths_after_rename(self, rename_map: dict[Path, Path]) -> None:
-        """执行后把 selected_files 与文件列表控件同步到重命名后的新路径。
-
-        调用方只传入核心报告的实际成功项,不根据路径存在状态猜测。
-        不同步的话,随后刷新的预览会基于已不存在的旧路径计算:状态列误报
-        "文件名冲突",大小/时间列显示"未知"(与内容替换 Tab 执行后即刷新的行为
-        不一致)。
-        """
-        renamed = {str(old): str(new) for old, new in rename_map.items()}
-        if not renamed:
-            return
-        self.selected_files = [Path(renamed.get(str(p), str(p))) for p in self.selected_files]
-        for row in range(self.ui.list_files.count()):
-            item = self.ui.list_files.item(row)
-            new_text = renamed.get(item.text())
-            if new_text is not None:
-                item.setText(new_text)
+        self._file_model.replace_paths([rename_map.get(p, p) for p in self.selected_files])
+        self._file_metadata = {
+            rename_map.get(p, p): value for p, value in self._file_metadata.items()
+        }
 
     def _show_history(self) -> None:
         records = self._history.get_records("rename")
@@ -256,5 +386,8 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
         self.ui.label_status.setText(f"已选择 {n} 个文件")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._task.defer_close(event):
+            self._preview_timer.stop()
+            return
         self._cleanup_batch_dialog()
         super().closeEvent(event)

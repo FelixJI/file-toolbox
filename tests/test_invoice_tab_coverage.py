@@ -10,6 +10,7 @@ pytest.importorskip("PySide6.QtWidgets")
 
 from pathlib import Path
 
+from gui_model_helpers import wait_page
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -74,8 +75,9 @@ def test_add_files(tab, monkeypatch, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(f1)], ""))
     tab._add_files()
+    wait_page(tab)
     assert len(tab._files) == 1
-    assert tab.ui.list_files.count() == 1
+    assert tab.ui.list_files.model().rowCount() == 1
 
 
 def test_add_files_multiple(tab, monkeypatch, tmp_path):
@@ -83,6 +85,7 @@ def test_add_files_multiple(tab, monkeypatch, tmp_path):
     f2 = _xml(tmp_path / "2.xml", "2")
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(f1), str(f2)], ""))
     tab._add_files()
+    wait_page(tab)
     assert len(tab._files) == 2
 
 
@@ -92,6 +95,7 @@ def test_add_folder_non_recursive(tab, monkeypatch, tmp_path):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     tab._add_folder()
+    wait_page(tab)
     assert len(tab._files) == 1
     assert tab._files[0].suffix == ".xml"
 
@@ -104,12 +108,14 @@ def test_add_folder_recursive(tab, monkeypatch, tmp_path):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     tab._add_folder()
+    wait_page(tab)
     assert len(tab._files) == 2
 
 
 def test_add_folder_cancelled(tab, monkeypatch):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: "")
     tab._add_folder()
+    wait_page(tab)
     assert tab._files == []
 
 
@@ -120,16 +126,17 @@ def test_add_folder_dedup(tab, monkeypatch, tmp_path):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     tab._add_folder()
+    wait_page(tab)
     assert len(tab._files) == 1  # 不重复
 
 
 def test_clear(tab, tmp_path):
-    tab._files = [tmp_path / "a.xml"]
-    tab.ui.list_files.addItem("a.xml")
+    tab._file_model.replace_paths([tmp_path / "a.xml"])
+    tab._file_model.replace_paths(list(tab._files))
     tab._result = object()  # 非 None
     tab._clear()
     assert tab._files == []
-    assert tab.ui.list_files.count() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
     assert tab._result is None
     assert tab.ui.btn_export.isEnabled() is False
     assert tab.ui.lbl_status.text() == "就绪"
@@ -163,13 +170,13 @@ def test_parse_no_files_warns(tab, monkeypatch):
 
 def test_parse_success(tab, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
     tab._parse()
     _wait_parse(tab)
     assert tab._result is not None
     assert len(tab._result.invoices) == 1
     assert tab.ui.btn_export.isEnabled()
-    assert tab.ui.table.rowCount() == 1
+    assert tab.ui.table.model().rowCount() == 1
 
 
 def test_parse_mixed_results(tab, tmp_path):
@@ -177,7 +184,7 @@ def test_parse_mixed_results(tab, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
     bad = tmp_path / "bad.xml"
     bad.write_text("not xml", encoding="utf-8")
-    tab._files = [f1, bad]
+    tab._file_model.replace_paths([f1, bad])
     tab._parse()
     _wait_parse(tab)
     assert len(tab._result.failed) == 1
@@ -245,7 +252,7 @@ def test_populate_table_duplicate_color(tab, tmp_path):
     )
     tab._result = ParseResult(invoices=[inv1, inv2], duplicates=[], failed=[])
     tab._populate_table()
-    assert tab.ui.table.rowCount() == 2
+    assert tab.ui.table.model().rowCount() == 2
 
 
 def test_populate_table_pdf_color(tab):
@@ -280,7 +287,7 @@ def test_populate_table_pdf_color(tab):
     )
     tab._result = ParseResult(invoices=[inv], duplicates=[], failed=[])
     tab._populate_table()
-    assert tab.ui.table.rowCount() == 1
+    assert tab.ui.table.model().rowCount() == 1
 
 
 def test_dedupe_strategy_and_format(tab):
@@ -308,7 +315,7 @@ def test_export_no_data_warns(tab, monkeypatch):
 
 def test_export_success(tab, monkeypatch, tmp_path):
     f1 = _xml(tmp_path / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
     tab._parse()
     _wait_parse(tab)
     tab.ui.edit_outdir.setText(str(tmp_path / "out"))
@@ -326,7 +333,7 @@ def test_export_success(tab, monkeypatch, tmp_path):
 def test_export_failure_critical(tab, monkeypatch, tmp_path):
     """导出抛异常 → critical 提示(行 160-162)。"""
     f1 = _xml(tmp_path / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
     tab._parse()
     _wait_parse(tab)
     tab.ui.edit_outdir.setText(str(tmp_path))
@@ -351,7 +358,7 @@ def test_export_default_outdir(tab, monkeypatch, tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     f1 = _xml(src / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
     tab._parse()
     _wait_parse(tab)
     tab.ui.edit_outdir.setText("")
@@ -370,7 +377,7 @@ def test_export_reuses_last_output_dir(tab, monkeypatch, tmp_path):
     """输出框为空 → 复用上次成功导出的目录(chdir 隔离 settings)。"""
     monkeypatch.chdir(tmp_path)
     f1 = _xml(tmp_path / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
     tab._parse()
     _wait_parse(tab)
     out1 = tmp_path / "out1"
@@ -395,7 +402,7 @@ def test_export_stale_last_dir_falls_back_to_source_dir(tab, monkeypatch, tmp_pa
     src = tmp_path / "src"
     src.mkdir()
     f1 = _xml(src / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
     tab._parse()
     _wait_parse(tab)
     tab.ui.edit_outdir.setText("")
@@ -410,7 +417,7 @@ def test_export_failure_does_not_persist_outdir(tab, monkeypatch, tmp_path):
     from file_toolbox.common import settings
 
     f1 = _xml(tmp_path / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
     tab._parse()
     _wait_parse(tab)
     tab.ui.edit_outdir.setText(str(tmp_path / "bad"))
@@ -454,6 +461,7 @@ def test_close_event_defers_close_until_real_finished(tab, monkeypatch):
     from PySide6.QtGui import QCloseEvent
 
     worker = _ParseWorkerStub()
+    tab._business_generation = tab._import_generation
     tab._task.track(worker)
     worker.finished.connect(tab._on_worker_finished)
     event = QCloseEvent()
@@ -490,12 +498,13 @@ def test_parse_skipped_when_worker_running(tab, monkeypatch, tmp_path):
     即可稳定触发(与 test_close_event_stops_running_parse_worker 同款手法)。
     """
     f1 = _xml(tmp_path / "1.xml", "1")
-    tab._files = [f1]
+    tab._file_model.replace_paths([f1])
 
     class _FakeRunningWorker:
         def isRunning(self) -> bool:
             return True
 
+    tab._business_generation = tab._import_generation
     tab._parse_worker = _FakeRunningWorker()  # type: ignore[assignment]
 
     warned = []
@@ -525,6 +534,7 @@ def test_on_parse_failed_no_prior_result_disables_export(tab, monkeypatch):
         QMessageBox, "warning", lambda *a, **k: warned.append(1) or QMessageBox.StandardButton.Ok
     )
     worker = _ParseWorkerStub()
+    tab._business_generation = tab._import_generation
     tab._task.track(worker)
     worker.failed.connect(tab._on_parse_failed)
     worker.finished.connect(tab._on_worker_finished)
@@ -581,6 +591,7 @@ def test_on_parse_failed_with_prior_result_keeps_export(tab, monkeypatch):
         parse_method="xml",
     )
     tab._result = ParseResult(invoices=[inv], duplicates=[], failed=[])
+    tab._business_generation = tab._import_generation
     tab._parse_worker = object()  # type: ignore[assignment]
 
     tab._on_parse_failed("err")

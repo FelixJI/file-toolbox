@@ -10,6 +10,7 @@ import pytest
 # 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
+from gui_model_helpers import header
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from file_toolbox.core.invoice.dedupe import DEDUPE, KEEP_ALL, MARK  # noqa: E402
@@ -29,16 +30,14 @@ def tab(app):
 
 def test_invoice_tab_has_expected_table_headers(tab):
     """表格应预置 8 列业务表头,列数与表头一致。"""
-    assert tab.ui.table.columnCount() == len(HEADERS)
-    headers = [
-        tab.ui.table.horizontalHeaderItem(i).text() for i in range(tab.ui.table.columnCount())
-    ]
+    assert tab.ui.table.model().columnCount() == len(HEADERS)
+    headers = [header(tab.ui.table, i) for i in range(tab.ui.table.model().columnCount())]
     assert headers == HEADERS
 
 
 def test_invoice_tab_starts_empty(tab):
     """新建 Tab 表格应无数据行。"""
-    assert tab.ui.table.rowCount() == 0
+    assert tab.ui.table.model().rowCount() == 0
 
 
 def test_format_defaults_to_excel(tab):

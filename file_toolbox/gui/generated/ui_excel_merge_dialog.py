@@ -9,7 +9,6 @@
 ## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
 ## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
-
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -17,12 +16,14 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QListWidget,
+    QListView,
     QPushButton,
-    QTableWidget,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
+
+from file_toolbox.gui.file_models import FileTableModel
 
 # 结果表格列头(与合并结果字段一一对应;放此处供 setupUi 与测试共用)
 HEADERS = ["文件", "工作表", "合并后名称", "状态"]
@@ -61,7 +62,7 @@ class Ui_ExcelMergeDialog:
         file_row.addStretch(1)
         layout.addLayout(file_row)
 
-        self.list_files = QListWidget(ExcelMergeDialog)
+        self.list_files = QListView(ExcelMergeDialog)
         self.list_files.setObjectName("list_files")
         layout.addWidget(self.list_files)
 
@@ -126,8 +127,8 @@ class Ui_ExcelMergeDialog:
         layout.addLayout(btn_row)
 
         # ---- 结果表格 ----
-        self.table = QTableWidget(0, len(HEADERS), ExcelMergeDialog)
+        self.table = QTableView(ExcelMergeDialog)
         self.table.setObjectName("table")
-        self.table.setHorizontalHeaderLabels(HEADERS)
+        self.table.setModel(FileTableModel(list(HEADERS), self.table))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table, stretch=1)

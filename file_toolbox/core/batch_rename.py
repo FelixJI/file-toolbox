@@ -1,6 +1,7 @@
 """批量文件重命名核心逻辑。支持 7 种操作组合,预览-执行两段式。"""
 
 import re
+from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -150,12 +151,17 @@ class FileRenameService(BaseOperationService):
         }
 
     def plan_operations(
-        self, files: list[Path], operations: list[dict[str, Any]]
+        self,
+        files: list[Path],
+        operations: list[dict[str, Any]],
+        cancel_check: Callable[[], bool] | None = None,
     ) -> dict[Path, PlanEntry]:
         """核心计划状态决定可执行项,中文消息只用于展示。"""
         mapping: dict[Path, Path] = {}
         errors: dict[Path, PlanEntry] = {}
         for idx, file_path in enumerate(files):
+            if cancel_check and cancel_check():
+                break
             try:
                 name = file_path.stem
                 for operation in operations:
@@ -167,9 +173,9 @@ class FileRenameService(BaseOperationService):
                 mapping[file_path] = file_path.parent / (name + file_path.suffix)
             except Exception as exc:
                 errors[file_path] = PlanEntry(file_path, PlanState.INVALID, str(exc))
-        plan = plan_mapping(mapping)
+        plan = plan_mapping(mapping, cancel_check)
         plan.update(errors)
-        return {path: plan[path] for path in files}
+        return {path: plan[path] for path in files if path in plan}
 
     def _apply_single_operation(
         self,
@@ -363,9 +369,11 @@ class FileRenameService(BaseOperationService):
 
         return name
 
-    def execute_rename_result(self, rename_map: dict[Path, Path]) -> RenameResult:
+    def execute_rename_result(
+        self, rename_map: dict[Path, Path], cancel_check: Callable[[], bool] | None = None
+    ) -> RenameResult:
         """返回实际成功映射、逐项错误和独立的历史保存错误。"""
-        return execute(rename_map, self._history_store)
+        return execute(rename_map, self._history_store, cancel_check)
 
     def execute_rename(self, rename_map: dict[Path, Path]) -> tuple[int, list[str]]:
         """旧接口薄适配;计数只包含真实成功操作。"""

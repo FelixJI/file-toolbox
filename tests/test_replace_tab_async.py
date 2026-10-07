@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
+
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +103,7 @@ def test_preview_replace_runs_off_main_thread(app, tmp_path):
 
     dlg._do_refresh_preview()
     rendered = _pump_until(
-        app, lambda: svc.preview_calls > 0 and dlg.ui.table_preview.rowCount() == 1
+        app, lambda: svc.preview_calls > 0 and dlg.ui.table_preview.model().rowCount() == 1
     )
     assert rendered, "预览应完成并渲染表格"
     assert svc.preview_threads[0] is not threading.main_thread(), (
@@ -149,7 +150,7 @@ def test_preview_returns_before_slow_service_finishes(app, tmp_path):
     assert app.processEvents() is None
 
     block.set()
-    assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1)
+    assert _pump_until(app, lambda: dlg.ui.table_preview.model().rowCount() == 1)
 
 
 def test_execute_returns_before_slow_service_finishes(app, tmp_path, monkeypatch):
@@ -202,7 +203,7 @@ def test_refresh_while_busy_is_deferred_not_dropped(app, tmp_path):
     assert svc.preview_calls == 1, "忙碌期间不得并发启动第二个预览 worker"
 
     block.set()
-    assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1)
+    assert _pump_until(app, lambda: dlg.ui.table_preview.model().rowCount() == 1)
     assert _pump_until(app, lambda: svc.preview_calls == 2), "挂起的刷新应自动重跑"
     # 重跑的预览也要结束(queued 信号回到主线程)后,按钮才恢复
     assert _pump_until(app, lambda: dlg.worker is None and not dlg._preview_pending)
@@ -265,7 +266,7 @@ def test_execute_skipped_while_preview_busy(app, tmp_path, monkeypatch):
     assert svc.execute_calls == 0
 
     block.set()
-    assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1)
+    assert _pump_until(app, lambda: dlg.ui.table_preview.model().rowCount() == 1)
 
 
 def test_preview_failure_shows_critical_and_restores(app, tmp_path, monkeypatch):
@@ -312,7 +313,7 @@ def test_cancel_requests_worker_cancel(app, tmp_path):
     assert "取消" in dlg.ui.label_status.text()
 
     block.set()
-    assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1)
+    assert _pump_until(app, lambda: dlg.ui.table_preview.model().rowCount() == 1)
 
 
 def test_execute_ok_marks_pending_before_modal_finish_race(app, tmp_path, monkeypatch):
@@ -412,6 +413,6 @@ def test_stop_worker_cancels_without_terminate(app, tmp_path, monkeypatch):
     assert dlg.worker is worker, "线程引用只能由真实 finished 释放"
 
     block.set()
-    assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1), (
+    assert _pump_until(app, lambda: dlg.ui.table_preview.model().rowCount() == 1), (
         "释放后 worker 应正常完成"
     )
