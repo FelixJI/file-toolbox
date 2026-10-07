@@ -48,8 +48,10 @@ class FileScanWorker(QThread):
         self.check_files = check_files
         self.metadata = metadata
         self.deduplicate = True
+        self.cancel_requested = False
 
     def cancel(self) -> None:
+        self.cancel_requested = True
         self.requestInterruption()
 
     def run(self) -> None:

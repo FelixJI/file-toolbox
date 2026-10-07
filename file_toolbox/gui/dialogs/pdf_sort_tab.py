@@ -55,7 +55,7 @@ class PdfSortTab(QWidget, FileImportMixin):
         assert layout is not None
         layout.addWidget(self._scan_cancel)
         self._scan_cancel.hide()
-        self._scan_cancel.clicked.connect(self._task.cancel)
+        self._scan_cancel.clicked.connect(self._cancel_import)
         self._connect()
 
     # 兼容旧 _worker 字段:读写均转发 TaskLifecycle;只有真实

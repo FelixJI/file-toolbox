@@ -316,7 +316,8 @@ class FileRenamerDialog(QDialog, BatchDialogMixin):
     def _on_cancel(self) -> None:
         self._preview_pending = False
         self._preview_timer.stop()
-        self._task.cancel()
+        if not self._cancel_import():
+            self._task.cancel()
         self.ui.label_status.setText("正在取消，等待当前操作安全结束…")
 
     def _sync_selected_paths_after_rename(self, rename_map: dict[Path, Path]) -> None:

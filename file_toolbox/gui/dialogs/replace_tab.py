@@ -275,7 +275,10 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             self._rerun_pending_preview()
 
     def _on_cancel(self) -> None:
-        self._task.cancel()
+        self._preview_pending = False
+        self._preview_timer.stop()
+        if not self._cancel_import():
+            self._task.cancel()
         self.ui.label_status.setText("正在取消(当前文件完成后停止)...")
 
     def _set_ui_enabled(self, enabled: bool) -> None:

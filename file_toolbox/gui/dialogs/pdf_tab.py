@@ -297,14 +297,12 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
     # ---------- 文件选择包装器(适配 table,不改 mixin 签名) ----------
 
     def _on_select_files(self) -> None:
-        """选文件:list_widget 传 None(mixin 只更新 selected_files),再刷新预览表。"""
+        """文件进入扫描队列，元数据批次直接填表，全部完成后刷新旧结果状态。"""
         self._select_files(list_widget=None)
-        self._refresh_preview()
 
     def _on_select_folder(self) -> None:
-        """选文件夹:同上。"""
+        """目录进入相同的追加队列，保留递归选择与过滤规则。"""
         self._select_folder(list_widget=None)
-        self._refresh_preview()
 
     def _on_clear_files(self) -> None:
         """清空:同时清 selected_files 与 table_files。"""
@@ -391,7 +389,10 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             self._do_refresh_preview()
 
     def _on_cancel(self) -> None:
-        self._task.cancel()
+        self._pdf_preview_pending = False
+        self._preview_timer.stop()
+        if not self._cancel_import():
+            self._task.cancel()
         self.ui.label_progress.setText("正在取消...")
 
     # ---------- 预览 ----------
@@ -420,7 +421,13 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     def _after_import(self) -> None:
         self._pdf_display_files = list(self.selected_files)
-        # 扫描已带元数据，首批直接可见；无需防抖后二次 stat。
+        # 首批已带元数据；队列全部完成后同步消费配置变更和旧结果状态。
+        if self._import_changed or self._pdf_preview_pending:
+            self._pdf_preview_pending = False
+            self._do_refresh_preview()
+
+    def _import_cancelled(self) -> None:
+        super()._import_cancelled()
         self._pdf_preview_pending = False
 
     def _do_refresh_preview(self) -> None:
@@ -478,9 +485,13 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             model.dataChanged.emit(model.index(min(changed), 2), model.index(max(changed), 2))
 
     def _on_pdf_metadata_finished(self) -> None:
+        worker = self.worker
+        cancelled = isinstance(worker, FileScanWorker) and worker.cancel_requested
         if not self._task.finish(self.sender()):
             return
         self._import_busy(False)
+        if cancelled:
+            self._import_cancelled()
         if not self._task.close_pending and not self._resume_import() and self._pdf_preview_pending:
             self._pdf_preview_pending = False
             self._do_refresh_preview()

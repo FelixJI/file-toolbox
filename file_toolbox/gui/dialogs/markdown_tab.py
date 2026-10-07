@@ -200,7 +200,8 @@ class MarkdownConvertTab(QWidget, FileImportMixin):
         worker = self._task.worker
         if worker is None:
             return
-        self._task.cancel()
+        if not self._cancel_import():
+            self._task.cancel()
         self.ui.btn_cancel.setEnabled(False)
         self.ui.lbl_status.setText("正在取消,等待当前文件安全结束…")
 

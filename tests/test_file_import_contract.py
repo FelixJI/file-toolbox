@@ -121,7 +121,7 @@ def test_first_batch_can_switch_cancel_and_queue_new_directory(
         page._invalidate_import()  # 清空发起取消，后台不可中断调用仍准确等待。
         assert page._task.worker is worker
         page._queue_import([], supported, new)
-        assert page._task.worker is worker and page._import_pending is not None
+        assert page._task.worker is worker and bool(page._import_pending)
         release.set()
         wait_page(page)
         assert page._file_model.files == [latest]
@@ -412,7 +412,7 @@ def test_rename_close_waits_for_actual_write_and_preserves_success(isolated, tmp
         assert source.with_name("done_a.txt").read_text() == "synthetic"
         assert not source.exists() and not messages
         assert len(page._history.get_records("rename")) == 1
-        assert page._import_pending is None
+        assert not page._import_pending
     finally:
         release.set()
         page._task.cancel()

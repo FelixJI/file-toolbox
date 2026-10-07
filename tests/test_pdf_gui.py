@@ -501,14 +501,12 @@ def test_dialog_exposes_logger_for_mixin_contract(dlg):
     assert dlg.worker is None
 
 
-# ---------- 文件选择包装器(覆盖 244-245 / 249-250) ----------
-# _on_select_files / _on_select_folder 委托给 mixin 的 _select_files / _select_folder,
-# 然后调 _refresh_preview(防抖定时器)。这两组测试把 _select_* 替换为 spy,验证委托
-# 与预览触发(预览经防抖定时器,_refresh_preview 调用会被记录)。
+# ---------- 文件选择包装器与扫描完成刷新 ----------
+# 包装器只委托给扫描队列；整个追加队列完成后才刷新旧结果状态。
 
 
-def test_on_select_files_calls_select_files_and_refresh(dlg, monkeypatch):
-    """_on_select_files 委托给 _select_files(list_widget=None)并触发 _refresh_preview。"""
+def test_on_select_files_refreshes_after_scan_completes(dlg, monkeypatch):
+    """选择时不启动多余防抖，导入完成仍刷新预览。"""
     calls = {"select": 0, "refresh": 0}
 
     def fake_select_files(list_widget=None, auto_preview=True):
@@ -517,17 +515,20 @@ def test_on_select_files_calls_select_files_and_refresh(dlg, monkeypatch):
 
     monkeypatch.setattr(dlg, "_select_files", fake_select_files)
     monkeypatch.setattr(
-        dlg, "_refresh_preview", lambda: calls.__setitem__("refresh", calls["refresh"] + 1)
+        dlg, "_do_refresh_preview", lambda: calls.__setitem__("refresh", calls["refresh"] + 1)
     )
 
     dlg._on_select_files()
 
     assert calls["select"] == 1
+    assert calls["refresh"] == 0 and not dlg._preview_timer.isActive()
+    dlg._import_changed = True
+    dlg._after_import()
     assert calls["refresh"] == 1
 
 
-def test_on_select_folder_calls_select_folder_and_refresh(dlg, monkeypatch):
-    """_on_select_folder 委托给 _select_folder(list_widget=None)并触发 _refresh_preview。"""
+def test_on_select_folder_refreshes_after_scan_completes(dlg, monkeypatch):
+    """目录选择委托与队列完成后的预览刷新均保留。"""
     calls = {"select": 0, "refresh": 0}
 
     def fake_select_folder(list_widget=None, ask_recursive=True, auto_preview=True):
@@ -536,12 +537,15 @@ def test_on_select_folder_calls_select_folder_and_refresh(dlg, monkeypatch):
 
     monkeypatch.setattr(dlg, "_select_folder", fake_select_folder)
     monkeypatch.setattr(
-        dlg, "_refresh_preview", lambda: calls.__setitem__("refresh", calls["refresh"] + 1)
+        dlg, "_do_refresh_preview", lambda: calls.__setitem__("refresh", calls["refresh"] + 1)
     )
 
     dlg._on_select_folder()
 
     assert calls["select"] == 1
+    assert calls["refresh"] == 0 and not dlg._preview_timer.isActive()
+    dlg._import_changed = True
+    dlg._after_import()
     assert calls["refresh"] == 1
 
 

@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -69,9 +70,11 @@ class FileImportMixin:
         if view is not None:
             view.setUniformItemSizes(True)
             view.setModel(self._file_model)
+        # epoch仅由清空/取消废弃；追加请求排队，不使正在收尾的业务结果失效。
         self._import_generation = 0
         self._business_generation = 0
-        self._import_pending: FileScanWorker | None = None
+        self._import_pending: deque[FileScanWorker] = deque()
+        self._import_changed = False
         self._import_resolved = resolved
         self._import_check_files = check_files
         self._import_metadata = metadata
@@ -89,11 +92,12 @@ class FileImportMixin:
     ) -> None:
         if self._task.close_pending:
             return
-        self._import_generation += 1
-        self._import_errors.clear()
-        if self._import_pending is not None:
-            self._import_pending.deleteLater()
-        self._import_pending = FileScanWorker(
+        active = self._task.worker
+        if not self._import_pending and (
+            not isinstance(active, FileScanWorker) or active.cancel_requested
+        ):
+            self._import_errors.clear()
+        worker = FileScanWorker(
             self._import_generation,
             paths,
             folder,
@@ -105,16 +109,14 @@ class FileImportMixin:
             self._import_metadata and not unchecked,
             cast(QWidget, self),
         )
-        self._import_pending.deduplicate = not unchecked
-        if isinstance(self._task.worker, FileScanWorker):
-            self._task.cancel()
+        worker.deduplicate = not unchecked
+        self._import_pending.append(worker)
         self._resume_import()
 
     def _resume_import(self) -> bool:
-        if self._task.busy or self._import_pending is None:
+        if self._task.busy or not self._import_pending:
             return False
-        worker = self._import_pending
-        self._import_pending = None
+        worker = self._import_pending.popleft()
         worker.existing = list(self._import_files)
         worker.batch.connect(self._on_import_batch)
         worker.failed.connect(self._on_import_error)
@@ -132,6 +134,7 @@ class FileImportMixin:
             or self._task.close_pending
         ):
             return
+        self._import_changed = True
         self._file_metadata.update({item.path: item for item in batch})
         self._file_model.append_paths([item.path for item in batch])
         self._import_updated(batch)
@@ -148,11 +151,22 @@ class FileImportMixin:
         self._import_status(f"扫描失败: {message}")
 
     def _on_import_finished(self) -> None:
+        worker = self._task.worker
+        if not isinstance(worker, FileScanWorker):
+            return
+        cancelled = worker.cancel_requested
+        current = worker.generation == self._import_generation
         if not self._task.finish(cast(QObject, self).sender()):
             return
         self._import_busy(False)
+        if cancelled:
+            self._import_cancelled()
+            if current:
+                self._discard_import_queue()
         if not self._task.close_pending and not self._resume_import():
-            self._after_import()
+            if current and not cancelled:
+                self._after_import()
+            self._import_changed = False
             if self._import_errors:
                 self._import_status(
                     f"已选择 {len(self._import_files)} 个文件，扫描错误 "
@@ -162,12 +176,30 @@ class FileImportMixin:
     def _invalidate_import(self) -> None:
         self._import_generation += 1
         self._import_errors.clear()
-        if self._import_pending is not None:
-            self._import_pending.deleteLater()
-            self._import_pending = None
+        self._discard_import_queue()
+        self._import_changed = False
         self._task.cancel()
+        self._import_cancelled()
         self._file_metadata.clear()
         self._file_model.replace_paths([])
+
+    def _discard_import_queue(self) -> None:
+        while self._import_pending:
+            self._import_pending.popleft().deleteLater()
+
+    def _cancel_import(self) -> bool:
+        # 只取消扫描：业务取消仍须接收实际完成成果，且不丢其排队导入。
+        if not isinstance(self._task.worker, FileScanWorker):
+            return False
+        self._import_generation += 1
+        self._discard_import_queue()
+        self._import_changed = False
+        self._task.cancel()
+        self._import_cancelled()
+        return True
+
+    def _import_cancelled(self) -> None:
+        pass
 
     def _accept_business_result(self) -> bool:
         return self._task.accepts(cast(QObject, self).sender()) and (
@@ -221,7 +253,6 @@ class BatchDialogMixin(FileImportMixin):
             self.logger = logging.getLogger(type(self).__module__)
         self.selected_files = []
         self._import_auto_preview = True
-        self._import_added = False
         if not hasattr(self, "_task"):
             self._task = TaskLifecycle(cast(QWidget, self))
         self._init_import(self.selected_files, metadata=True)
@@ -268,8 +299,7 @@ class BatchDialogMixin(FileImportMixin):
             if isinstance(list_widget, QListView):
                 list_widget.setModel(self._file_model)
                 self._file_model.full_path = True
-            self._import_auto_preview = auto_preview
-            self._import_added = False
+            self._prepare_import_preview(auto_preview)
             self._queue_import([Path(p) for p in files], self._is_file_supported)
 
     def _select_folder(
@@ -299,17 +329,27 @@ class BatchDialogMixin(FileImportMixin):
         if isinstance(list_widget, QListView):
             list_widget.setModel(self._file_model)
             self._file_model.full_path = True
-        self._import_auto_preview = auto_preview
-        self._import_added = False
+        self._prepare_import_preview(auto_preview)
         self._queue_import([], self._is_file_supported, folder_path, recursive)
 
     def _import_updated(self, batch: list[ScannedFile]) -> None:
         self._update_status()
-        self._import_added = True
+
+    def _prepare_import_preview(self, auto_preview: bool) -> None:
+        active = self._task.worker
+        if not self._import_pending and (
+            not isinstance(active, FileScanWorker) or active.cancel_requested
+        ):
+            self._import_auto_preview = auto_preview
+        elif auto_preview:
+            self._import_auto_preview = True
 
     def _after_import(self) -> None:
-        if self._import_auto_preview and self._import_added:
+        if self._import_auto_preview and self._import_changed:
             self._refresh_preview()
+
+    def _import_cancelled(self) -> None:
+        self._preview_timer.stop()
 
     def _import_status(self, text: str) -> None:
         ui = getattr(self, "ui", None)
