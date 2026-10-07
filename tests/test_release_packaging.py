@@ -16,13 +16,15 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_candidate(directory: Path, version: str) -> set[str]:
+def _write_candidate(directory: Path, version: str, prefix: str = "current/") -> set[str]:
     directory.mkdir()
     portable = directory / f"FileToolbox-v{version}-win-x64.zip"
     with zipfile.ZipFile(portable, "w") as package:
-        package.writestr("FileToolbox.exe", b"smoke")
-        package.writestr("pypandoc/files/pandoc.exe", b"pandoc")
-        package.writestr("pypandoc/files/COPYRIGHT.txt", b"license")
+        if prefix == "current/":
+            package.writestr("FileToolbox.exe", b"launcher")
+        package.writestr(f"{prefix}FileToolbox.exe", b"smoke")
+        package.writestr(f"{prefix}pypandoc/files/pandoc.exe", b"pandoc")
+        package.writestr(f"{prefix}pypandoc/files/COPYRIGHT.txt", b"license")
     full = directory / f"FileToolbox-{version}-full.nupkg"
     with zipfile.ZipFile(full, "w") as package:
         package.writestr("package/services/metadata/core-properties/x.psmdcp", b"meta")
@@ -105,8 +107,9 @@ def _write_candidate(directory: Path, version: str) -> set[str]:
     return payloads | {"checksums.txt", "build-identity.json", "SBOM.spdx.json"}
 
 
-def test_release_smoke_accepts_exact_velopack_asset_set(tmp_path: Path) -> None:
-    expected = _write_candidate(tmp_path / "artifacts", "1.2.3")
+@pytest.mark.parametrize("prefix", ["current/", "", "FileToolbox/"])
+def test_release_smoke_accepts_exact_velopack_asset_set(tmp_path: Path, prefix: str) -> None:
+    expected = _write_candidate(tmp_path / "artifacts", "1.2.3", prefix)
 
     release_smoke.check_release_smoke(tmp_path / "artifacts", "1.2.3")
 
@@ -128,10 +131,13 @@ def test_release_smoke_rejects_missing_pandoc_runtime(tmp_path: Path, missing: s
     _write_candidate(artifacts, "1.2.3")
     portable = artifacts / "FileToolbox-v1.2.3-win-x64.zip"
     with zipfile.ZipFile(portable, "w") as package:
-        package.writestr("FileToolbox.exe", b"smoke")
+        package.writestr("FileToolbox.exe", b"launcher")
+        package.writestr("current/FileToolbox.exe", b"smoke")
         for name in ("pandoc.exe", "COPYRIGHT.txt"):
             if name != missing:
-                package.writestr(f"pypandoc/files/{name}", b"present")
+                package.writestr(f"current/pypandoc/files/{name}", b"present")
+        # 启动器旁的同名文件不能代替实际应用目录中的资源。
+        package.writestr(f"pypandoc/files/{missing}", b"wrong location")
     with pytest.raises(ValueError, match=missing):
         release_smoke.check_release_smoke(artifacts, "1.2.3")
 
