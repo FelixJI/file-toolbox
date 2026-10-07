@@ -1,10 +1,11 @@
 """历史记录对话框:查看各工具操作历史(基于 JsonHistoryStore)。
 
-rename 历史额外提供「撤销」按钮:由核心验证记录并持久化逐项恢复进度。
-其余工具(PDF/文件夹/发票/考勤)操作不可逆，仅展示记录。
+工具的摘要展示来自统一工具登记(common/tool_registry):登记项提供
+history_key/summary 回调,本对话框不按工具写摘要分支。rename 历史额外
+提供「撤销」按钮(既有特例):由核心验证记录并持久化逐项恢复进度;
+其余工具操作不可逆，仅展示记录。
 """
 
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -18,76 +19,26 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from file_toolbox.common import tool_registry
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.batch_rename import FileRenameService
 
 
 def _summary_label(tool: str, data: dict[str, Any]) -> str:
-    """根据工具类型与记录数据,生成一行摘要。"""
+    """薄兼容入口:按历史键查登记,摘要由登记回调产生(新工具零改动)。"""
     if not isinstance(data, dict):
         return "记录数据无效"
-    if tool == "rename":
-        mapping = data.get("rename_map", {})
-        n = len(mapping) if isinstance(mapping, dict) else 0
-        remaining = data.get("undo_remaining")
-        suffix = f", 剩余 {len(remaining)} 个待撤销" if isinstance(remaining, list) else ""
-        return f"{n} 个文件" + suffix
-    if tool == "replace":
-        n = len(data.get("files", []))
-        return f"{n} 个文件"
-    if tool == "pdf":
-        files = data.get("files", [])
-        ok = data.get("success", 0)
-        return f"{ok}/{len(files)} 个成功"
-    if tool == "mkdir":
-        created = data.get("created", 0)
-        skipped = data.get("skipped", 0)
-        strategy = data.get("strategy", "?")
-        root = data.get("root", "")
-        return f"新建 {created}, 跳过 {skipped} [{strategy}] {root}"
-    if tool == "invoice":
-        inv = data.get("invoice_count", 0)
-        files = data.get("file_count", 0)
-        fmt = data.get("fmt", "?")
-        return f"{inv} 张发票 / {files} 文件 [{fmt}]"
-    if tool == "excel_merge":
-        sheets = data.get("sheet_count", 0)
-        files = data.get("file_count", 0)
-        naming = data.get("naming", "?")
-        output = Path(str(data.get("output", ""))).name
-        return f"{sheets} 工作表 / {files} 文件 [{naming}] → {output}"
-    if tool == "attendance":
-        employees = data.get("employee_count", 0)
-        year = data.get("year", "?")
-        month = data.get("month", "?")
-        output = Path(str(data.get("output", ""))).name
-        return f"{year}-{month} / {employees} 人 → {output}"
-    if tool == "pdf_sort":
-        pages = data.get("page_count", 0)
-        files = data.get("file_count", 0)
-        outputs = data.get("outputs", [])
-        order = data.get("order", "?")
-        return f"{pages} 页 / {files} 文件 [{order}] → {len(outputs)} 个输出"
-    if tool == "markdown_convert":
-        ok = data.get("success", 0)
-        files = data.get("file_count", 0)
-        target = data.get("target", "?")
-        mode = data.get("excel_mode")
-        suffix = f" [{mode}]" if mode else ""
-        return f"{ok}/{files} 个文件{suffix} → {target}"
-    if tool == "plan_schedule":
-        items = data.get("item_count", 0)
-        months = data.get("month_count", 0)
-        invalid = data.get("invalid_count", 0)
-        output = Path(str(data.get("output", ""))).name
-        return f"{items} 项点 / {months} 月(无效 {invalid}) → {output}"
+    spec = tool_registry.spec_by_history_key(tool)
+    if spec is not None and spec.summary is not None:
+        return spec.summary(data)
     return str(data)[:40]
 
 
 class HistoryDialog(QDialog):
     """历史记录查看对话框。传入 JsonHistoryStore 与工具名。
 
-    tool == "rename" 时额外显示「撤销」按钮(反向重命名)。
+    tool == "rename" 时额外显示「撤销」按钮(反向重命名),撤销执行由核心
+    校验并恢复尚未撤销的文件;该特例不随登记泛化。
     """
 
     def __init__(
@@ -98,15 +49,17 @@ class HistoryDialog(QDialog):
         self.resize(560, 440)
         self._history = history_store
         self._tool = tool
+        # rename 专属撤销(既有特例):由核心校验并恢复尚未撤销的文件。
+        self._undoable = tool == "rename"
 
         layout = QVBoxLayout(self)
         self.list_widget = QListWidget()
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         layout.addWidget(self.list_widget)
 
-        # rename 支持由核心校验并恢复尚未撤销的文件。
+        # 撤销按钮仅 rename 可见(专属特例:反向重命名恢复剩余文件)。
         self.btn_undo = QPushButton("撤销选中项(反向重命名)")
-        self.btn_undo.setVisible(tool == "rename")
+        self.btn_undo.setVisible(self._undoable)
         self.btn_undo.clicked.connect(self._undo_selected)
         layout.addWidget(self.btn_undo)
 
@@ -123,7 +76,7 @@ class HistoryDialog(QDialog):
             self.list_widget.addItem("(无历史记录)")
             self.btn_undo.setEnabled(False)
             return
-        self.btn_undo.setEnabled(self._tool == "rename")
+        self.btn_undo.setEnabled(self._undoable)
         for r in reversed(records):
             undone = "[已撤销] " if r.get("undone") else ""
             summary = _summary_label(self._tool, r.get("data", {}))
@@ -135,7 +88,7 @@ class HistoryDialog(QDialog):
 
     def _undo_selected(self) -> None:
         """恢复选中记录的剩余文件;全部完成后才标记已撤销。"""
-        if self._tool != "rename":
+        if not self._undoable:
             return
         item = self.list_widget.currentItem()
         if item is None:
