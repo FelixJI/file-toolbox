@@ -49,7 +49,7 @@ _BUILD = _ROOT / "build"
 _ENTRY = _ROOT / "file_toolbox" / "gui_entry.py"
 _PRODUCT = "FileToolbox"
 _REPOSITORY = "FelixJI/file-toolbox"
-_VPK_VERSION = "1.2.0"
+_VPK_VERSION = "1.2.161"
 
 cli = typer.Typer(add_completion=False, help="file-toolbox Nuitka 打包")
 
@@ -247,6 +247,8 @@ def _velopack_command(dotnet: str, product_dir: Path, version: str, output_dir: 
         f"vpk@{_VPK_VERSION}",
         "--",
         "pack",
+        "--runtime",
+        "win-x64",
         "--packId",
         _PRODUCT,
         "--packVersion",

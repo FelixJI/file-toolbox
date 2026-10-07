@@ -1,4 +1,4 @@
-"""Velopack 1.2.0 的生产 ``UpdateCoordinator`` Adapter。"""
+"""Velopack 的生产 ``UpdateCoordinator`` Adapter。"""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def _default_manager_factory(source: str) -> _Manager:
 def _is_layout_error(error: BaseException) -> bool:
     """是否为"本机没有有效 Velopack 安装布局"错误(与网络失败区分)。
 
-    SDK 1.2.0 的错误文本 ``This application is not properly installed: Could not
+    SDK 的布局错误文本 ``This application is not properly installed: Could not
     auto-locate app manifest``;按特征片段匹配,避免绑定完整措辞。
     """
 
