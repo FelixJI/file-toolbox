@@ -2,14 +2,12 @@
 
 import stat
 from copy import deepcopy
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QWidget
 
-from file_toolbox.common.file_utils import format_datetime, format_file_size
 from file_toolbox.core.batch_rename import FileRenameService
 from file_toolbox.gui.workers.file_scan_worker import ScannedFile
 
@@ -53,11 +51,7 @@ class RenamePreviewWorker(QThread):
                     try:
                         info = path.stat()
                         cached = (
-                            ScannedFile(
-                                path,
-                                format_file_size(info.st_size),
-                                format_datetime(datetime.fromtimestamp(info.st_mtime)),
-                            )
+                            ScannedFile.from_stat(path, info)
                             if stat.S_ISREG(info.st_mode)
                             else ScannedFile(path, "未知", "未知")
                         )

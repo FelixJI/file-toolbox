@@ -4,6 +4,7 @@ import stat
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from os import stat_result
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -18,6 +19,16 @@ class ScannedFile:
     size: str = ""
     modified: str = ""
     error: str = ""
+
+    @classmethod
+    def from_stat(cls, path: Path, info: stat_result) -> "ScannedFile":
+        error = ""
+        try:
+            modified = format_datetime(datetime.fromtimestamp(info.st_mtime))
+        except (OverflowError, ValueError, OSError) as exc:
+            modified = "未知"
+            error = f"修改时间不可用: {exc}"
+        return cls(path, format_file_size(info.st_size), modified, error)
 
 
 class FileScanWorker(QThread):
@@ -83,11 +94,9 @@ class FileScanWorker(QThread):
                         and not stat.S_ISREG(info.st_mode)
                     ):
                         continue
-                    item = ScannedFile(
-                        path,
-                        format_file_size(info.st_size) if info else "",
-                        format_datetime(datetime.fromtimestamp(info.st_mtime)) if info else "",
-                    )
+                    item = ScannedFile.from_stat(path, info) if info else ScannedFile(path)
+                    if item.error:
+                        self.failed.emit(self.generation, f"{path}: {item.error}")
                 except OSError as exc:
                     self.failed.emit(self.generation, f"{path}: {exc}")
                     if self.check_files or self.folder:

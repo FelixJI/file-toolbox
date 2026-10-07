@@ -588,3 +588,73 @@ def test_rename_preflight_cancel_does_not_start_another_preview(isolated, tmp_pa
         page._task.cancel()
         wait_page(page)
         page.close()
+
+
+@pytest.mark.parametrize("timestamp", [1e30, float("nan")])
+@pytest.mark.parametrize("folder_scan", [False, True])
+def test_invalid_timestamp_keeps_pending_file_and_later_candidates(
+    isolated, tmp_path, monkeypatch, timestamp, folder_scan
+):
+    files = [tmp_path / f"stamp{i}.txt" for i in range(3)]
+    for path in files:
+        path.write_text("synthetic")
+    original = Path.stat
+
+    def bad_time(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path == files[1]:
+            return SimpleNamespace(st_mode=info.st_mode, st_size=info.st_size, st_mtime=timestamp)
+        return info
+
+    monkeypatch.setattr(Path, "stat", bad_time)
+    parent = QWidget()
+    worker = FileScanWorker(
+        0,
+        [] if folder_scan else files,
+        tmp_path if folder_scan else None,
+        False,
+        lambda p: p.suffix == ".txt",
+        [],
+        False,
+        True,
+        True,
+        parent,
+    )
+    batches, errors = [], []
+    worker.batch.connect(lambda generation, batch: batches.extend(batch))
+    worker.failed.connect(lambda generation, message: errors.append(message))
+    worker.run()
+    assert {item.path for item in batches} == set(files)
+    item = next(item for item in batches if item.path == files[1])
+    assert item.size == "9 B" and item.modified == "未知" and item.error
+    assert len(errors) == 1 and str(files[1]) in errors[0]
+    parent.close()
+
+
+@pytest.mark.parametrize("timestamp", [1e30, float("nan")])
+def test_rename_uncached_invalid_timestamp_preserves_preview(
+    isolated, tmp_path, monkeypatch, timestamp
+):
+    source = tmp_path / "timestamp.txt"
+    source.write_text("synthetic")
+    original = Path.stat
+
+    def bad_time(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path == source:
+            return SimpleNamespace(st_mode=info.st_mode, st_size=info.st_size, st_mtime=timestamp)
+        return info
+
+    parent = QWidget()
+    service = FileRenameService(JsonHistoryStore(tmp_path / "history"))
+    worker = RenamePreviewWorker(
+        service, [source], [{"type": "add_prefix", "params": {"text": "new_"}}], {}, parent
+    )
+    results, errors = [], []
+    worker.preview_ok.connect(lambda plan, rows: results.append(rows))
+    worker.failed.connect(errors.append)
+    monkeypatch.setattr(Path, "stat", bad_time)
+    worker.run()
+    assert not errors and len(results) == 1
+    assert results[0][0][0][2:4] == ["9 B", "未知"]
+    parent.close()
