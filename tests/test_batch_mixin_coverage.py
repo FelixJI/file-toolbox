@@ -11,8 +11,9 @@ import pytest
 
 pytest.importorskip("PySide6.QtWidgets")
 
+from gui_model_helpers import wait_page
 from PySide6.QtCore import QObject, QThread
-from PySide6.QtWidgets import QApplication, QFileDialog, QListWidget, QMessageBox, QTableWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QListView, QMessageBox, QTableWidget
 
 from file_toolbox.gui.batch_mixin import BatchDialogMixin, SignalManager
 
@@ -138,15 +139,16 @@ def test_is_file_supported_no_formats_allows_all(app):
 
 def test_select_files_adds_supported(app, monkeypatch, tmp_path):
     dlg = _TestDialog()
-    lw = QListWidget()
+    lw = QListView()
     f1 = tmp_path / "a.txt"
     f2 = tmp_path / "b.md"
     f1.write_text("x")
     f2.write_text("y")
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(f1), str(f2)], ""))
     dlg._select_files(lw, auto_preview=False)
+    wait_page(dlg)
     assert len(dlg.selected_files) == 2
-    assert lw.count() == 2
+    assert lw.model().rowCount() == 2
 
 
 def test_select_files_filters_unsupported(app, monkeypatch, tmp_path):
@@ -158,6 +160,7 @@ def test_select_files_filters_unsupported(app, monkeypatch, tmp_path):
     f2.write_text("y")
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(f1), str(f2)], ""))
     dlg._select_files(None, auto_preview=False)
+    wait_page(dlg)
     assert len(dlg.selected_files) == 1
     assert dlg.selected_files[0].name == "a.txt"
 
@@ -170,6 +173,7 @@ def test_select_files_dedup(app, monkeypatch, tmp_path):
     dlg.selected_files.append(f1)
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(f1)], ""))
     dlg._select_files(None, auto_preview=False)
+    wait_page(dlg)
     assert len(dlg.selected_files) == 1
 
 
@@ -178,6 +182,7 @@ def test_select_files_no_files_noop(app, monkeypatch):
     dlg = _TestDialog()
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([], ""))
     dlg._select_files(None, auto_preview=False)
+    wait_page(dlg)
     assert dlg.selected_files == []
 
 
@@ -190,6 +195,7 @@ def test_select_files_auto_preview_refreshes(app, monkeypatch):
     )
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([], ""))
     dlg._select_files(None, auto_preview=True)
+    wait_page(dlg)
     # 无文件 → added_count=0 → 不 refresh
     assert refreshed["n"] == 0
 
@@ -205,6 +211,7 @@ def test_select_files_with_files_auto_preview(app, monkeypatch, tmp_path):
     )
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(f1)], ""))
     dlg._select_files(None, auto_preview=True)
+    wait_page(dlg)
     assert refreshed["n"] == 1
 
 
@@ -220,6 +227,7 @@ def test_select_folder_with_files_auto_preview(app, monkeypatch, tmp_path):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
     dlg._select_folder(None, ask_recursive=True, auto_preview=True)
+    wait_page(dlg)
     assert refreshed["n"] == 1
 
 
@@ -236,8 +244,9 @@ def test_select_folder_non_recursive(app, monkeypatch, tmp_path):
     f2.write_text("y")
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
-    lw = QListWidget()
+    lw = QListView()
     dlg._select_folder(lw, ask_recursive=True, auto_preview=False)
+    wait_page(dlg)
     assert any(p.name == "a.txt" for p in dlg.selected_files)
     assert not any(p.name == "ignore.pdf" for p in dlg.selected_files)
 
@@ -252,6 +261,7 @@ def test_select_folder_recursive(app, monkeypatch, tmp_path):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     dlg._select_folder(None, ask_recursive=True, auto_preview=False)
+    wait_page(dlg)
     names = [p.name for p in dlg.selected_files]
     assert "a.txt" in names and "b.md" in names
 
@@ -261,6 +271,7 @@ def test_select_folder_cancelled(app, monkeypatch):
     dlg = _TestDialog()
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: "")
     dlg._select_folder(None, auto_preview=False)
+    wait_page(dlg)
     assert dlg.selected_files == []
 
 
@@ -277,6 +288,7 @@ def test_select_folder_no_ask_recursive(app, monkeypatch, tmp_path):
         lambda *a, **k: question_calls.append(1) or QMessageBox.StandardButton.No,
     )
     dlg._select_folder(None, ask_recursive=False, auto_preview=False)
+    wait_page(dlg)
     assert question_calls == []  # 未弹确认
     assert any(p.name == "a.txt" for p in dlg.selected_files)
 
@@ -299,6 +311,7 @@ def test_select_folder_recursive_no_formats(app, monkeypatch, tmp_path):
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     dlg._select_folder(None, ask_recursive=True, auto_preview=False)
+    wait_page(dlg)
     assert any(p.name == "a.xyz" for p in dlg.selected_files)
 
 
@@ -318,6 +331,7 @@ def test_select_folder_recursive_dir_named_as_format_not_collected(app, monkeypa
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     dlg._select_folder(None, ask_recursive=True, auto_preview=False)
+    wait_page(dlg)
     names = [p.name for p in dlg.selected_files]
     assert "real.txt" in names
     assert "notes.txt" not in names  # 目录不被误收
@@ -331,13 +345,13 @@ def test_select_folder_recursive_dir_named_as_format_not_collected(app, monkeypa
 def test_clear_files(app):
     dlg = _TestDialog()
     dlg.selected_files = [Path("a.txt")]
-    lw = QListWidget()
-    lw.addItem("a.txt")
+    lw = QListView()
+    lw.setModel(dlg._file_model)
     tw = QTableWidget()
     tw.setRowCount(2)
     dlg._clear_files(lw, tw)
     assert dlg.selected_files == []
-    assert lw.count() == 0
+    assert lw.model().rowCount() == 0
     assert tw.rowCount() == 0
 
 
@@ -361,6 +375,7 @@ def test_refresh_preview_starts_timer(app):
 def test_do_refresh_preview_default_noop(app):
     dlg = _TestDialog()
     dlg._do_refresh_preview()  # 默认空实现
+    wait_page(dlg)
 
 
 def test_stop_worker_none(app):
@@ -378,6 +393,7 @@ def test_stop_worker_running_with_cancel(app):
     worker.isRunning.return_value = True
     worker.wait.return_value = True  # 正常停止
     worker.cancel = MagicMock()  # 显式提供 cancel 属性
+    dlg._business_generation = dlg._import_generation
     dlg.worker = worker
     dlg._stop_worker()
     worker.cancel.assert_called_once()
@@ -394,6 +410,7 @@ def test_stop_worker_running_without_cancel(app):
     worker.isRunning.return_value = True
     # 不设置 cancel 属性(MagicMock spec=QThread 不会有)
     worker.wait.return_value = True
+    dlg._business_generation = dlg._import_generation
     dlg.worker = worker
     dlg._stop_worker()
     worker.quit.assert_not_called()
@@ -406,6 +423,7 @@ def test_stop_worker_not_running(app):
     dlg = _TestDialog()
     worker = MagicMock(spec=QThread)
     worker.isRunning.return_value = False
+    dlg._business_generation = dlg._import_generation
     dlg.worker = worker
     dlg._stop_worker()
     worker.quit.assert_not_called()
@@ -419,6 +437,7 @@ def test_stop_worker_never_terminates_or_waits_on_timeout(app):
     worker = MagicMock(spec=QThread)
     worker.isRunning.return_value = True
     worker.wait.return_value = False  # 若实现错误地等待,这里模拟超时
+    dlg._business_generation = dlg._import_generation
     dlg.worker = worker
     dlg._stop_worker(timeout_ms=10)
     worker.quit.assert_not_called()

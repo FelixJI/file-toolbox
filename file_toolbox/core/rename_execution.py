@@ -4,6 +4,7 @@ import ctypes
 import errno
 import os
 import sys
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,6 +36,7 @@ class RenameResult:
     successful: dict[Path, Path] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
     history_error: str | None = None
+    cancelled: bool = False
 
     @property
     def count(self) -> int:
@@ -49,19 +51,25 @@ def path_key(path: Path) -> str:
     return os.path.normcase(os.path.abspath(path))
 
 
-def plan_mapping(mapping: dict[Path, Path]) -> dict[Path, PlanEntry]:
+def plan_mapping(
+    mapping: dict[Path, Path], cancel_check: Callable[[], bool] | None = None
+) -> dict[Path, PlanEntry]:
     """只允许原目录内普通文件改名;批内重复目标全部拒绝。"""
     counts: dict[str, int] = {}
     for target in mapping.values():
+        if cancel_check and cancel_check():
+            return {}
         key = path_key(target)
         counts[key] = counts.get(key, 0) + 1
     result = {}
     for source, target in mapping.items():
+        if cancel_check and cancel_check():
+            break
         detail = ""
         if source == target:
             state = PlanState.NOOP
         elif (
-            source.parent.resolve() != target.parent.resolve()
+            (source.parent != target.parent and source.parent.resolve() != target.parent.resolve())
             or not target.name
             or any(c in target.name for c in "\\/:\x00")
             or (os.name == "nt" and os.path.isreserved(target.name))
@@ -116,12 +124,20 @@ def file_id(path: Path) -> list[int]:
     return [stat.st_dev, stat.st_ino]
 
 
-def execute(mapping: dict[Path, Path], store: JsonHistoryStore | None) -> RenameResult:
+def execute(
+    mapping: dict[Path, Path],
+    store: JsonHistoryStore | None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> RenameResult:
     result = RenameResult()
     identities: dict[str, list[int]] = {}
     lock = store.operation_lock("rename") if store else nullcontext()
     with lock:
-        for source, entry in plan_mapping(mapping).items():
+        plan = plan_mapping(mapping, cancel_check)
+        for source, entry in plan.items():
+            if cancel_check and cancel_check():
+                result.cancelled = True
+                break
             if entry.state == PlanState.NOOP:
                 continue
             if entry.state != PlanState.READY:
@@ -129,6 +145,9 @@ def execute(mapping: dict[Path, Path], store: JsonHistoryStore | None) -> Rename
                 continue
             try:
                 identity = file_id(source)
+                if cancel_check and cancel_check():
+                    result.cancelled = True
+                    break
                 rename_no_replace(source, entry.target)
             except PermissionError as exc:
                 result.errors.append(f"权限不足: {source} → {entry.target}: {exc}")
@@ -138,6 +157,8 @@ def execute(mapping: dict[Path, Path], store: JsonHistoryStore | None) -> Rename
                 continue
             result.successful[source] = entry.target
             identities[str(source.absolute())] = identity
+        if cancel_check and cancel_check():
+            result.cancelled = True
         if store and result.successful:
             try:
                 store.add_record(

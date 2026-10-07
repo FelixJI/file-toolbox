@@ -12,6 +12,7 @@ pytest.importorskip("PySide6.QtWidgets")
 
 from pathlib import Path
 
+from gui_model_helpers import wait_page
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from file_toolbox.common.history import JsonHistoryStore
@@ -164,7 +165,8 @@ def test_prompt_params_cancelled_returns_none(dlg, monkeypatch):
 
 def test_do_refresh_preview_empty(dlg):
     dlg._do_refresh_preview()
-    assert dlg.ui.table_preview.rowCount() == 0
+    wait_page(dlg)
+    assert dlg.ui.table_preview.model().rowCount() == 0
 
 
 def test_do_refresh_preview_invalid(dlg, monkeypatch):
@@ -175,6 +177,7 @@ def test_do_refresh_preview_invalid(dlg, monkeypatch):
         QMessageBox, "warning", lambda *a, **k: warned.append(1) or QMessageBox.StandardButton.Ok
     )
     dlg._do_refresh_preview()
+    wait_page(dlg)
     assert warned
 
 
@@ -184,7 +187,8 @@ def test_do_refresh_preview_renders(dlg, app, monkeypatch, tmp_path):
     dlg.selected_files = [f1]
     dlg.operations = [{"type": SIMPLE, "params": {"find": "hello", "replace": "hi"}}]
     dlg._do_refresh_preview()
-    assert _pump_until(app, lambda: dlg.ui.table_preview.rowCount() == 1), (
+    wait_page(dlg)
+    assert _pump_until(app, lambda: dlg.ui.table_preview.model().rowCount() == 1), (
         "预览 worker 应完成并渲染"
     )
 

@@ -10,14 +10,16 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QThread
-from PySide6.QtGui import QBrush, QCloseEvent, QColor
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
+from PySide6.QtGui import QCloseEvent, QColor
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QPushButton, QWidget
 
 from file_toolbox.common import settings
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.invoice.service import InvoiceService
 from file_toolbox.core.invoice.types import ParseResult
+from file_toolbox.gui.batch_mixin import FileImportMixin
 from file_toolbox.gui.controllers.invoice_controller import InvoiceController
+from file_toolbox.gui.file_models import table_model
 from file_toolbox.gui.generated.ui_invoice_dialog import Ui_InvoiceDialog
 from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.invoice_worker import InvoiceParseWorker
@@ -30,7 +32,7 @@ _LAST_OUTDIR_KEY = "invoice/last_output_dir"
 _logger = logging.getLogger(__name__)
 
 
-class InvoiceTab(QWidget):
+class InvoiceTab(QWidget, FileImportMixin):
     """发票识别 Tab。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -45,6 +47,13 @@ class InvoiceTab(QWidget):
         self._controller = InvoiceController()
         self._result: ParseResult | None = None
         self._files: list[Path] = []
+        self._init_import(self._files, self.ui.list_files, resolved=True, check_files=True)
+        self._scan_cancel = QPushButton("取消扫描", self)
+        layout = self.layout()
+        assert layout is not None
+        layout.addWidget(self._scan_cancel)
+        self._scan_cancel.hide()
+        self._scan_cancel.clicked.connect(self._task.cancel)
         self._connect()
 
     # 兼容旧 _parse_worker 字段:读写均转发 TaskLifecycle;只有真实
@@ -70,9 +79,12 @@ class InvoiceTab(QWidget):
         paths, _ = QFileDialog.getOpenFileNames(
             self, "选择发票文件", "", "发票文件 (*.zip *.xml *.ofd *.pdf)"
         )
-        for p in paths:
-            self._files.append(Path(p))
-            self.ui.list_files.addItem(Path(p).name)
+        if paths:
+            # 显式选择原本不滤后缀、不查存在、不去重；仅移入同一批次队列。
+            self._queue_import([Path(p) for p in paths], lambda p: True, unchecked=True)
+
+    def _is_source(self, path: Path) -> bool:
+        return path.suffix.lower() in _INVOICE_EXTS
 
     def _add_folder(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
@@ -88,22 +100,17 @@ class InvoiceTab(QWidget):
             )
             == QMessageBox.StandardButton.Yes
         )
-        root = Path(d)
-        candidates = root.rglob("*") if recursive else root.iterdir()
-        seen = {p.resolve() for p in self._files}
-        for p in candidates:
-            if not (p.is_file() and p.suffix.lower() in _INVOICE_EXTS):
-                continue
-            if p.resolve() in seen:
-                continue
-            seen.add(p.resolve())
-            self._files.append(p)
-            self.ui.list_files.addItem(p.name)
+        self._queue_import([], self._is_source, Path(d), recursive)
+
+    def _import_status(self, text: str) -> None:
+        self.ui.lbl_status.setText(text)
+
+    def _import_busy(self, busy: bool) -> None:
+        self._scan_cancel.setVisible(busy)
 
     def _clear(self) -> None:
-        self._files.clear()
-        self.ui.list_files.clear()
-        self.ui.table.setRowCount(0)
+        self._invalidate_import()
+        table_model(self.ui.table).replace_rows([])
         self._result = None
         self.ui.btn_export.setEnabled(False)
         self.ui.lbl_status.setText("就绪")
@@ -134,6 +141,7 @@ class InvoiceTab(QWidget):
         worker.finished_ok.connect(self._on_parse_ok)
         worker.failed.connect(self._on_parse_failed)
         worker.finished.connect(self._on_worker_finished)
+        self._business_generation = self._import_generation
         self._task.track(worker)  # 持有引用防 GC;在 start 前登记
         # 解析期间禁用相关按钮
         self.ui.btn_parse.setEnabled(False)
@@ -142,13 +150,13 @@ class InvoiceTab(QWidget):
         worker.start()
 
     def _on_parse_progress(self, current: int, total: int) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.lbl_status.setText(f"解析中… {current}/{total}")
 
     def _on_parse_ok(self, result: Any) -> None:
         """结果槽:只渲染结果;引用释放与启动按钮恢复等真实 finished。"""
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self._result = result
         self._populate_table()
@@ -164,7 +172,7 @@ class InvoiceTab(QWidget):
         )
 
     def _on_parse_failed(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         # 解析失败:按已有结果重置 btn_export(若曾解析成功则保留可导出状态)
         self.ui.btn_export.setEnabled(self._result is not None and bool(self._result.invoices))
@@ -177,6 +185,8 @@ class InvoiceTab(QWidget):
         if not self._task.finish(self.sender()):
             return
         self.ui.btn_parse.setEnabled(True)
+
+        self._resume_import()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """任务未结束时延迟关闭:协作取消后等真实 finished 异步重关。
@@ -194,25 +204,28 @@ class InvoiceTab(QWidget):
 
     def _populate_table(self) -> None:
         assert self._result is not None
-        self.ui.table.setRowCount(len(self._result.invoices))
-        for r, inv in enumerate(self._result.invoices):
-            values = [
-                inv.invoice_number,
-                inv.invoice_type,
-                inv.issue_date,
-                inv.seller_name,
-                inv.buyer_name,
-                inv.amount_with_tax,
-                inv.source_file,
-                inv.parse_method,
+        table_model(self.ui.table).replace_rows(
+            [
+                (
+                    [
+                        inv.invoice_number,
+                        inv.invoice_type,
+                        inv.issue_date,
+                        inv.seller_name,
+                        inv.buyer_name,
+                        inv.amount_with_tax,
+                        inv.source_file,
+                        inv.parse_method,
+                    ],
+                    _DUP_COLOR
+                    if inv.is_duplicate
+                    else _PDF_COLOR
+                    if inv.parse_method == "pdf"
+                    else None,
+                )
+                for inv in self._result.invoices
             ]
-            for c, val in enumerate(values):
-                item = QTableWidgetItem(val)
-                if inv.is_duplicate:
-                    item.setBackground(QBrush(_DUP_COLOR))
-                elif inv.parse_method == "pdf":
-                    item.setBackground(QBrush(_PDF_COLOR))
-                self.ui.table.setItem(r, c, item)
+        )
 
     # --- 导出 ---
     def _resolve_outdir(self) -> Path:

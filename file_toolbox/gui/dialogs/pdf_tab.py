@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QThread, Signal
@@ -11,7 +12,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QMessageBox,
-    QTableWidgetItem,
     QWidget,
 )
 
@@ -35,8 +35,10 @@ from file_toolbox.core.batch_pdf.constants import (
 from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.pdf_controller import PDFConfigState, PDFController
+from file_toolbox.gui.file_models import table_model
 from file_toolbox.gui.generated.ui_pdf_dialog import Ui_PDFGeneratorDialog
 from file_toolbox.gui.task_lifecycle import TaskLifecycle
+from file_toolbox.gui.workers.file_scan_worker import FileScanWorker, ScannedFile
 
 # 下拉框显示文本 -> 服务层期望的常量值
 _PAPER_AUTO = "自动"
@@ -87,6 +89,9 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self._init_batch_dialog()
         self.ui = Ui_PDFGeneratorDialog()
         self.ui.setupUi(self)
+        self._pdf_preview_pending = False
+        self._pdf_metadata_snapshot: list[Path] = []
+        self._pdf_display_files: list[Path] = []
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()
         self._svc = PDFGeneratorService(history_store=self._history)
@@ -335,12 +340,13 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         worker.failed.connect(self._on_generate_failed)
         worker.cleanup_warning.connect(self._on_cleanup_warning)
         worker.finished.connect(self._on_worker_finished)
+        self._business_generation = self._import_generation
         self._task.track(worker)
         self._set_ui_enabled(False)
         worker.start()
 
     def _on_progress(self, cur: int, total: int, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.label_progress.setText(self._controller.format_progress(cur, total, msg))
         pct = int(cur / total * 100) if total else 0
@@ -348,7 +354,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     def _on_generate_ok(self, results: list[dict[str, Any]]) -> None:
         """结果槽:只渲染结果;引用释放与控件恢复等真实 finished。"""
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self._render_results(results)
         ok, fail = self._controller.summarize_results(results)
@@ -361,7 +367,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             QMessageBox.warning(self, "部分失败", f"{fail} 个文件转换失败,详见预览表。")
 
     def _on_generate_failed(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.label_progress.setText("生成失败")
         self._refresh_engine_info_label()
@@ -369,7 +375,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             QMessageBox.critical(self, "生成失败", msg)
 
     def _on_cleanup_warning(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.label_progress.setText("任务结果已保留，资源清理失败")
         if not self._task.close_pending:
@@ -380,6 +386,9 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if not self._task.finish(self.sender()):
             return
         self._set_ui_enabled(True)
+        if not self._task.close_pending and not self._resume_import() and self._pdf_preview_pending:
+            self._pdf_preview_pending = False
+            self._do_refresh_preview()
 
     def _on_cancel(self) -> None:
         self._task.cancel()
@@ -387,59 +396,107 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
     # ---------- 预览 ----------
 
+    def _pdf_preview_rows(self, paths: list[Path]) -> list[tuple[list[str], None]]:
+        merge = self.ui.radio_merge.isChecked()
+        name = self.ui.edit_merge_filename.text().strip() or "合并文档.pdf"
+        return [
+            (
+                [
+                    path.name,
+                    name if merge else f"{path.stem}.pdf",
+                    self._file_metadata.get(path, ScannedFile(path)).size,
+                    "待转换",
+                ],
+                None,
+            )
+            for path in paths
+        ]
+
+    def _import_updated(self, batch: list[ScannedFile]) -> None:
+        self._update_status()
+        table_model(self.ui.table_files).append_rows(
+            self._pdf_preview_rows([i.path for i in batch])
+        )
+
+    def _after_import(self) -> None:
+        self._pdf_display_files = list(self.selected_files)
+        # 扫描已带元数据，首批直接可见；无需防抖后二次 stat。
+        self._pdf_preview_pending = False
+
     def _do_refresh_preview(self) -> None:
-        """刷新预览表(选文件/清空后由防抖定时器触发)。
-
-        把 selected_files 填入 table_files 4 列:
-          源文件 / 输出(预期 PDF 名) / 大小 / 状态(待转换)
-        合并模式输出列填合并文件名;分离模式填 {stem}.pdf。
-        """
-        from file_toolbox.common.file_utils import format_file_size
-
-        tbl = self.ui.table_files
-        tbl.setRowCount(0)  # 先清空
-        if not self.selected_files:
+        self._preview_timer.stop()
+        if self._task.busy:
+            self._pdf_preview_pending = True
             return
+        model = table_model(self.ui.table_files)
+        rows = self._pdf_preview_rows(self.selected_files)
+        if self._pdf_display_files == self.selected_files and model.rowCount() == len(rows):
+            model.update_rows(rows)
+        else:
+            model.replace_rows(rows)
+            self._pdf_display_files = list(self.selected_files)
+        missing = [p for p in self.selected_files if p not in self._file_metadata]
+        if not missing or self._task.close_pending:
+            return
+        worker = FileScanWorker(
+            self._import_generation,
+            missing,
+            None,
+            False,
+            lambda p: True,
+            [],
+            False,
+            False,
+            True,
+            self,
+        )
+        self._pdf_metadata_snapshot = list(self.selected_files)
+        worker.batch.connect(self._on_pdf_metadata)
+        worker.failed.connect(self._on_import_error)
+        worker.finished.connect(self._on_pdf_metadata_finished)
+        self._task.track(worker)
+        self._import_busy(True)
+        worker.start()
 
-        merge_mode = self.ui.radio_merge.isChecked()
-        merge_name = self.ui.edit_merge_filename.text().strip() or "合并文档.pdf"
+    def _on_pdf_metadata(self, generation: int, batch: list[ScannedFile]) -> None:
+        if (
+            self.sender() is not self.worker
+            or generation != self._import_generation
+            or self._task.close_pending
+        ):
+            return
+        self._file_metadata.update({i.path: i for i in batch})
+        model = table_model(self.ui.table_files)
+        positions = {p: n for n, p in enumerate(self._pdf_metadata_snapshot)}
+        changed = []
+        for item in batch:
+            row = positions[item.path]
+            if row < len(model.rows):
+                model.rows[row][0][2] = item.size
+                changed.append(row)
+        if changed:
+            model.dataChanged.emit(model.index(min(changed), 2), model.index(max(changed), 2))
 
-        tbl.setRowCount(len(self.selected_files))
-        for row, path in enumerate(self.selected_files):
-            tbl.setItem(row, 0, QTableWidgetItem(path.name))
-            # 输出列:合并模式 → 合并文件名;分离模式 → {stem}.pdf
-            out_name = merge_name if merge_mode else f"{path.stem}.pdf"
-            tbl.setItem(row, 1, QTableWidgetItem(out_name))
-            # 大小列:不存在则空
-            try:
-                size = format_file_size(path.stat().st_size)
-            except (OSError, ValueError):
-                size = ""
-            tbl.setItem(row, 2, QTableWidgetItem(size))
-            tbl.setItem(row, 3, QTableWidgetItem("待转换"))
+    def _on_pdf_metadata_finished(self) -> None:
+        if not self._task.finish(self.sender()):
+            return
+        self._import_busy(False)
+        if not self._task.close_pending and not self._resume_import() and self._pdf_preview_pending:
+            self._pdf_preview_pending = False
+            self._do_refresh_preview()
 
     def _render_results(self, results: list[dict[str, Any]]) -> None:
-        """把生成结果填入 table_files(复用预览表)。
-
-        结果数可能少于表行数(取消时):已处理的行更新为"成功"/"失败: xxx",
-        未处理的行保持"待转换"(预览态)。
-        """
-        tbl = self.ui.table_files
-        for row, r in enumerate(results):
-            if row >= tbl.rowCount():
+        model = table_model(self.ui.table_files)
+        rows = []
+        for row, result in enumerate(results):
+            if row >= len(model.rows):
                 break
-            # tbl.item() 在单元格未设置时返回 None;预览态行均填了 0/1/3 列,
-            # 但防御性判空以匹配 QTableWidgetItem | None 的类型契约。
-            item0 = tbl.item(row, 0)
-            if item0 is not None:
-                item0.setText(r["source"].name)
-            item1 = tbl.item(row, 1)
-            if item1 is not None:
-                item1.setText(r["output"].name)
-            status = "成功" if r["success"] else f"失败: {r['error']}"
-            item3 = tbl.item(row, 3)
-            if item3 is not None:
-                item3.setText(status)
+            values = list(model.rows[row][0])
+            values[0] = result["source"].name
+            values[1] = result["output"].name
+            values[3] = "成功" if result["success"] else f"失败: {result['error']}"
+            rows.append((values, None))
+        model.update_rows(rows)
 
     def _set_ui_enabled(self, enabled: bool) -> None:
         """生成进行中禁用选择/生成按钮,显示取消按钮;完成则反之。"""
@@ -461,6 +518,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         TaskLifecycle 在真实 finished 消费时完成。
         """
         if self._task.defer_close(event):
+            self._preview_timer.stop()
             self.ui.label_progress.setText("正在等待转换安全结束,完成后自动关闭…")
             return
         self._cleanup_batch_dialog()

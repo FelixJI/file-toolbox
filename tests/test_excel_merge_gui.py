@@ -13,6 +13,7 @@ import pytest
 # 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
+from gui_model_helpers import cell, color, header, wait_page
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
@@ -48,17 +49,15 @@ def tab(app):
 
 def test_tab_has_expected_table_headers(tab):
     """结果表格应预置 4 列业务表头,列数与表头一致。"""
-    assert tab.ui.table.columnCount() == len(HEADERS)
-    headers = [
-        tab.ui.table.horizontalHeaderItem(i).text() for i in range(tab.ui.table.columnCount())
-    ]
+    assert tab.ui.table.model().columnCount() == len(HEADERS)
+    headers = [header(tab.ui.table, i) for i in range(tab.ui.table.model().columnCount())]
     assert headers == HEADERS
 
 
 def test_tab_starts_empty(tab):
     """新建 Tab 无文件、无结果行、状态就绪。"""
-    assert tab.ui.list_files.count() == 0
-    assert tab.ui.table.rowCount() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
+    assert tab.ui.table.model().rowCount() == 0
     assert tab.ui.lbl_status.text() == "就绪"
 
 
@@ -140,8 +139,9 @@ def test_add_paths_dedupes_and_updates_status(tab, make_xlsx):
     b = make_xlsx("b.xlsx", {"S": [["v"]]})
 
     tab._add_paths([a, b, a])
+    wait_page(tab)
 
-    assert tab.ui.list_files.count() == 2
+    assert tab.ui.list_files.model().rowCount() == 2
     assert len(tab._files) == 2
     assert tab.ui.lbl_status.text() == "已选择 2 个文件"
 
@@ -151,18 +151,20 @@ def test_add_paths_ignores_unsupported(tab, tmp_path):
     txt = tmp_path / "n.txt"
     txt.write_text("x")
     tab._add_paths([txt, tmp_path / "missing.xlsx"])
-    assert tab.ui.list_files.count() == 0
+    wait_page(tab)
+    assert tab.ui.list_files.model().rowCount() == 0
 
 
 def test_clear_resets_everything(tab, make_xlsx):
     a = make_xlsx("a.xlsx", {"S": [["v"]]})
     tab._add_paths([a])
+    wait_page(tab)
     tab._populate_table(_result_with_failure())
 
     tab._clear()
 
-    assert tab.ui.list_files.count() == 0
-    assert tab.ui.table.rowCount() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
+    assert tab.ui.table.model().rowCount() == 0
     assert tab.ui.lbl_status.text() == "就绪"
 
 
@@ -181,13 +183,13 @@ def test_populate_table_merges_and_failures(tab):
     """结果表格:已合并行 + 失败行(浅黄底)。"""
     tab._populate_table(_result_with_failure())
 
-    assert tab.ui.table.rowCount() == 2
-    assert tab.ui.table.item(0, 2).text() == "a-S"
-    assert tab.ui.table.item(0, 3).text() == "已合并"
-    assert tab.ui.table.item(1, 0).text() == "bad.xlsx"
-    assert "无法读取" in tab.ui.table.item(1, 3).text()
-    assert tab.ui.table.item(1, 3).background().color().name().lower() == "#fff2cc"
-    assert tab.ui.table.item(0, 3).background().color().name().lower() != "#fff2cc"
+    assert tab.ui.table.model().rowCount() == 2
+    assert cell(tab.ui.table, 0, 2) == "a-S"
+    assert cell(tab.ui.table, 0, 3) == "已合并"
+    assert cell(tab.ui.table, 1, 0) == "bad.xlsx"
+    assert "无法读取" in cell(tab.ui.table, 1, 3)
+    assert color(tab.ui.table, 1, 3) == "#fff2cc"
+    assert color(tab.ui.table, 0, 3) != "#fff2cc"
 
 
 def test_resolve_outdir_chain(tab, make_xlsx, monkeypatch, tmp_path):
@@ -195,6 +197,7 @@ def test_resolve_outdir_chain(tab, make_xlsx, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     a = make_xlsx("a.xlsx", {"S": [["v"]]})
     tab._add_paths([a])
+    wait_page(tab)
     sub = tmp_path / "pick"
     sub.mkdir()
 
@@ -216,6 +219,7 @@ def test_close_event_cancels_running_worker(tab, monkeypatch):
     """关闭时协作取消,保留引用并等待真实 finished。"""
     worker = MagicMock()
     worker.isRunning.return_value = True
+    tab._business_generation = tab._import_generation
     tab._worker = worker
 
     event = QCloseEvent()
@@ -266,10 +270,12 @@ def test_add_files_via_dialog_and_browse(tab, monkeypatch, make_xlsx):
     )
 
     tab._add_files()
-    assert tab.ui.list_files.count() == 1
+    wait_page(tab)
+    assert tab.ui.list_files.model().rowCount() == 1
 
     tab._add_folder()  # 非递归:同目录下另一个 xlsx 被加入
-    assert tab.ui.list_files.count() == 2
+    wait_page(tab)
+    assert tab.ui.list_files.model().rowCount() == 2
 
     tab._browse_outdir()
     assert tab.ui.edit_outdir.text() == str(b.parent)
@@ -284,6 +290,7 @@ def test_merge_flow_success(tab, app, monkeypatch, make_xlsx, tmp_path):
     monkeypatch.setattr(QMessageBox, "information", lambda *_a, **_k: infos.append("info"))
     files = sorted(tmp_path.glob("*.xlsx"), key=lambda p: p.name)
     tab._add_paths(files)
+    wait_page(tab)
     tab.ui.edit_outdir.setText(str(tmp_path / "out"))
 
     tab._merge()
@@ -293,7 +300,7 @@ def test_merge_flow_success(tab, app, monkeypatch, make_xlsx, tmp_path):
     out = tmp_path / "out" / "合并结果.xlsx"
     assert out.is_file()
     assert tab.ui.btn_merge.isEnabled() is True
-    assert tab.ui.table.rowCount() == 2
+    assert tab.ui.table.model().rowCount() == 2
     assert "已合并 2 个工作表" in tab.ui.lbl_status.text()
     assert infos == ["info"]
     from file_toolbox.common import settings
@@ -308,6 +315,7 @@ def test_merge_flow_all_failed_warns(tab, app, monkeypatch, tmp_path):
     warns: list[str] = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: warns.append("warn"))
     tab._add_paths([bad])
+    wait_page(tab)
 
     tab._merge()
     _wait_worker_done(tab, app)
@@ -321,8 +329,10 @@ def test_merge_reentry_guard_while_running(tab, monkeypatch, make_xlsx):
     """worker 运行中重复点击不重复启动。"""
     a = make_xlsx("a.xlsx", {"S": [["v"]]})
     tab._add_paths([a])
+    wait_page(tab)
     running = MagicMock()
     running.isRunning.return_value = True
+    tab._business_generation = tab._import_generation
     tab._worker = running
 
     tab._merge()
@@ -335,6 +345,7 @@ def test_on_merge_failed_shows_critical(tab, monkeypatch):
     criticals: list[str] = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: criticals.append("crit"))
     worker = MagicMock()
+    tab._business_generation = tab._import_generation
     tab._worker = worker
     tab.ui.btn_merge.setEnabled(False)
 

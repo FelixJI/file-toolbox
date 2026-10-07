@@ -9,6 +9,7 @@ import pytest
 # 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
+from gui_model_helpers import cell, header, wait_page
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -142,8 +143,8 @@ def test_no_separate_preview_group(dlg):
 def test_table_files_exists_with_four_columns(dlg):
     """table_files(QTableWidget)存在,4 列。"""
     assert hasattr(dlg.ui, "table_files")
-    assert dlg.ui.table_files.columnCount() == 4
-    headers = [dlg.ui.table_files.horizontalHeaderItem(i).text() for i in range(4)]
+    assert dlg.ui.table_files.model().columnCount() == 4
+    headers = [header(dlg.ui.table_files, i) for i in range(4)]
     assert headers == ["源文件", "输出", "大小", "状态"]
 
 
@@ -175,14 +176,15 @@ def test_do_refresh_preview_populates_table(dlg, tmp_path):
     dlg.selected_files = [f1, f2]
 
     dlg._do_refresh_preview()
+    wait_page(dlg)
 
     tbl = dlg.ui.table_files
-    assert tbl.rowCount() == 2
-    assert tbl.item(0, 0).text() == "a.docx"
-    assert tbl.item(0, 1).text() == "a.pdf"  # 分离模式预期输出
-    assert tbl.item(0, 3).text() == "待转换"
-    assert tbl.item(1, 0).text() == "b.xlsx"
-    assert tbl.item(1, 1).text() == "b.pdf"
+    assert tbl.model().rowCount() == 2
+    assert cell(tbl, 0, 0) == "a.docx"
+    assert cell(tbl, 0, 1) == "a.pdf"  # 分离模式预期输出
+    assert cell(tbl, 0, 3) == "待转换"
+    assert cell(tbl, 1, 0) == "b.xlsx"
+    assert cell(tbl, 1, 1) == "b.pdf"
 
 
 def test_do_refresh_preview_merge_mode_uses_merge_filename(dlg, tmp_path):
@@ -194,18 +196,22 @@ def test_do_refresh_preview_merge_mode_uses_merge_filename(dlg, tmp_path):
     dlg.ui.radio_merge.setChecked(True)
 
     dlg._do_refresh_preview()
+    wait_page(dlg)
 
-    assert dlg.ui.table_files.item(0, 1).text() == "合并文档.pdf"
+    assert cell(dlg.ui.table_files, 0, 1) == "合并文档.pdf"
 
 
 def test_do_refresh_preview_empty_files_clears_table(dlg):
     """selected_files 空 → 表清空。"""
-    dlg.ui.table_files.setRowCount(3)  # 预置一些行
+    dlg.ui.table_files.model().replace_rows(
+        [(["" for _ in range(dlg.ui.table_files.model().columnCount())], None) for _ in range(3)]
+    )  # 预置一些行
     dlg.selected_files = []
 
     dlg._do_refresh_preview()
+    wait_page(dlg)
 
-    assert dlg.ui.table_files.rowCount() == 0
+    assert dlg.ui.table_files.model().rowCount() == 0
 
 
 def test_do_refresh_preview_missing_file_size_blank(dlg, tmp_path):
@@ -213,7 +219,8 @@ def test_do_refresh_preview_missing_file_size_blank(dlg, tmp_path):
 
     dlg.selected_files = [tmp_path / "no_such.docx"]
     dlg._do_refresh_preview()  # 不应抛
-    assert dlg.ui.table_files.item(0, 2).text() == ""
+    wait_page(dlg)
+    assert cell(dlg.ui.table_files, 0, 2) == ""
 
 
 def test_clear_files_resets_table(dlg, tmp_path):
@@ -223,12 +230,13 @@ def test_clear_files_resets_table(dlg, tmp_path):
     f.write_bytes(b"x")
     dlg.selected_files = [f]
     dlg._do_refresh_preview()
-    assert dlg.ui.table_files.rowCount() == 1
+    wait_page(dlg)
+    assert dlg.ui.table_files.model().rowCount() == 1
 
     dlg._on_clear_files()
 
     assert dlg.selected_files == []
-    assert dlg.ui.table_files.rowCount() == 0
+    assert dlg.ui.table_files.model().rowCount() == 0
 
 
 # ---------- 生成:worker 接入 ----------
@@ -316,12 +324,13 @@ def test_on_generate_ok_renders_results_and_restores_ui(dlg, tmp_path, monkeypat
         {"source": Path("b.docx"), "output": Path("b.pdf"), "success": False, "error": "boom"},
     ]
     worker = _SignalWorkerStub()
+    dlg._business_generation = dlg._import_generation
     dlg._task.track(worker)
     worker.finished_ok.connect(dlg._on_generate_ok)
     worker.finished.connect(dlg._on_worker_finished)
     # 真实流程中 _generate 前 _do_refresh_preview 已填好预览行,这里同构预置
     dlg.selected_files = [Path("a.docx"), Path("b.docx")]
-    dlg._do_refresh_preview()
+    dlg.ui.table_files.model().replace_rows(dlg._pdf_preview_rows(dlg.selected_files))
     # 预置 UI 禁用态
     dlg.ui.btn_generate.setEnabled(False)
     dlg.ui.btn_cancel.setVisible(True)
@@ -329,9 +338,9 @@ def test_on_generate_ok_renders_results_and_restores_ui(dlg, tmp_path, monkeypat
     worker.finished_ok.emit(results)
 
     tbl = dlg.ui.table_files
-    assert tbl.rowCount() == 2
-    assert tbl.item(0, 3).text() == "成功"
-    assert tbl.item(1, 3).text() == "失败: boom"
+    assert tbl.model().rowCount() == 2
+    assert cell(tbl, 0, 3) == "成功"
+    assert cell(tbl, 1, 3) == "失败: boom"
     assert not dlg.ui.btn_generate.isEnabled(), "结果信号不得恢复启动按钮"
     assert dlg.worker is worker, "结果信号不得提前释放线程引用"
 
@@ -351,6 +360,7 @@ def test_on_generate_failed_restores_ui(dlg, monkeypatch):
         lambda *a, **k: None,
     )
     worker = _SignalWorkerStub()
+    dlg._business_generation = dlg._import_generation
     dlg._task.track(worker)
     worker.failed.connect(dlg._on_generate_failed)
     worker.finished.connect(dlg._on_worker_finished)
@@ -377,14 +387,15 @@ def test_render_results_keeps_pending_status_for_unprocessed(dlg, tmp_path):
     # 表里 3 行(预览态),但只拿到 1 个结果(取消)
     dlg.selected_files = [Path("a.docx"), Path("b.docx"), Path("c.docx")]
     dlg._do_refresh_preview()
+    wait_page(dlg)
     results = [{"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""}]
 
     dlg._render_results(results)
 
     tbl = dlg.ui.table_files
-    assert tbl.item(0, 3).text() == "成功"
-    assert tbl.item(1, 3).text() == "待转换"  # 未处理
-    assert tbl.item(2, 3).text() == "待转换"
+    assert cell(tbl, 0, 3) == "成功"
+    assert cell(tbl, 1, 3) == "待转换"  # 未处理
+    assert cell(tbl, 2, 3) == "待转换"
 
 
 # ---------- 停止 worker:不强制 terminate(COM 安全) ----------
@@ -434,6 +445,7 @@ def test_stop_worker_requests_cooperative_stop_without_blocking(dlg):
       - 引用不清空——线程释放只由真实 finished(task.finish)消费。
     """
     worker = _FakeWorkerStub(wait_returns=True)
+    dlg._business_generation = dlg._import_generation
     dlg.worker = worker
 
     dlg._stop_worker(timeout_ms=2000)
@@ -449,6 +461,7 @@ def test_stop_worker_keeps_stopped_worker_for_pending_finished(dlg):
     """线程已停止但排队的 finished 未消费:不请求停止,引用仍留给 finish 消费。"""
     worker = _FakeWorkerStub(wait_returns=False)
     worker._running = False
+    dlg._business_generation = dlg._import_generation
     dlg.worker = worker
 
     dlg._stop_worker(timeout_ms=100)
@@ -467,6 +480,7 @@ def test_stop_worker_noop_when_no_worker(dlg):
 
     stopped = _FakeWorkerStub(wait_returns=True)
     stopped._running = False  # 已停止
+    dlg._business_generation = dlg._import_generation
     dlg.worker = stopped
     dlg._stop_worker()
     assert not stopped.cancel_called  # isRunning()=False 分支不调 cancel
@@ -582,6 +596,7 @@ def test_generate_short_circuits_when_worker_running(dlg, monkeypatch, tmp_path)
 
     # 预置一个"运行中"的旧 worker
     pre_existing = _RunningWorkerStub()
+    dlg._business_generation = dlg._import_generation
     dlg.worker = pre_existing
 
     started = []
@@ -610,11 +625,12 @@ def test_on_generate_ok_partial_failure_warns_and_finish_restores(dlg, tmp_path,
         lambda *a, **k: warned.append(True),
     )
     worker = _SignalWorkerStub()
+    dlg._business_generation = dlg._import_generation
     dlg._task.track(worker)
     worker.finished_ok.connect(dlg._on_generate_ok)
     worker.finished.connect(dlg._on_worker_finished)
     dlg.selected_files = [Path("a.docx")]
-    dlg._do_refresh_preview()
+    dlg.ui.table_files.model().replace_rows(dlg._pdf_preview_rows(dlg.selected_files))
     dlg.ui.btn_generate.setEnabled(False)
     dlg.ui.btn_cancel.setVisible(True)
 
@@ -623,7 +639,7 @@ def test_on_generate_ok_partial_failure_warns_and_finish_restores(dlg, tmp_path,
     )
 
     assert warned, "部分失败应在结果槽弹出警告"
-    assert dlg.ui.table_files.item(0, 3).text() == "失败: boom"
+    assert cell(dlg.ui.table_files, 0, 3) == "失败: boom"
     assert not dlg.ui.btn_generate.isEnabled(), "结果信号不得恢复启动按钮"
     assert dlg.worker is worker, "结果信号不得提前释放线程引用"
 
@@ -633,7 +649,7 @@ def test_on_generate_ok_partial_failure_warns_and_finish_restores(dlg, tmp_path,
     assert dlg.ui.btn_generate.isEnabled() is True
     assert dlg.worker is None
     # 表已被结果态填充(_render_results 先于警告执行)
-    assert dlg.ui.table_files.item(0, 3).text() == "失败: boom"
+    assert cell(dlg.ui.table_files, 0, 3) == "失败: boom"
 
 
 # ---------- 取消(覆盖 314-316) ----------
@@ -664,6 +680,7 @@ class _SignalWorkerStub(QThread):
 def test_on_cancel_calls_worker_cancel_and_sets_label(dlg):
     """worker 非 None 且有 cancel → 调 cancel(),label 设为"正在取消..."。"""
     worker = _CancellableWorkerStub()
+    dlg._business_generation = dlg._import_generation
     dlg.worker = worker
 
     dlg._on_cancel()
@@ -691,7 +708,8 @@ def test_render_results_breaks_when_results_exceed_table_rows(dlg, tmp_path):
     # 预置 1 行预览态
     dlg.selected_files = [Path("a.docx")]
     dlg._do_refresh_preview()
-    assert dlg.ui.table_files.rowCount() == 1
+    wait_page(dlg)
+    assert dlg.ui.table_files.model().rowCount() == 1
 
     results = [
         {"source": Path("a.docx"), "output": Path("a.pdf"), "success": True, "error": ""},
@@ -701,8 +719,8 @@ def test_render_results_breaks_when_results_exceed_table_rows(dlg, tmp_path):
     dlg._render_results(results)  # 内部 row=1 时 break,不抛 IndexError
 
     tbl = dlg.ui.table_files
-    assert tbl.item(0, 3).text() == "成功"  # 第 1 行已更新
-    assert tbl.rowCount() == 1  # 表行数未被扩
+    assert cell(tbl, 0, 3) == "成功"  # 第 1 行已更新
+    assert tbl.model().rowCount() == 1  # 表行数未被扩
 
 
 # ---------- 引擎检测:非 NO_COM 路径(信号桥回显) ----------
@@ -935,13 +953,15 @@ def test_set_ui_enabled_toggles_cancel_button_visibility(dlg):
 
 
 def test_cleanup_warning_keeps_completed_rows(dlg, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
+    from PySide6.QtWidgets import QMessageBox
 
-    dlg.ui.table_files.setRowCount(1)
-    dlg.ui.table_files.setItem(0, 3, QTableWidgetItem("成功"))
+    dlg.ui.table_files.model().replace_rows(
+        [(["" for _ in range(dlg.ui.table_files.model().columnCount())], None) for _ in range(1)]
+    )
+    dlg.ui.table_files.model().rows[0][0][3] = "成功"
     warnings = []
     monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args[2]))
     dlg._on_cleanup_warning("已完成的输出保留；资源清理失败: controlled failure")
-    assert dlg.ui.table_files.item(0, 3).text() == "成功"
+    assert cell(dlg.ui.table_files, 0, 3) == "成功"
     assert dlg.ui.label_progress.text() == "任务结果已保留，资源清理失败"
     assert "controlled failure" in warnings[0]

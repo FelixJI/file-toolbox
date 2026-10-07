@@ -9,8 +9,8 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QThread
-from PySide6.QtGui import QBrush, QCloseEvent, QColor
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
+from PySide6.QtGui import QCloseEvent, QColor
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QPushButton, QWidget
 
 from file_toolbox.common import settings
 from file_toolbox.common.history import JsonHistoryStore
@@ -21,7 +21,9 @@ from file_toolbox.core.excel_merge import (
     MergeOptions,
     MergeResult,
 )
+from file_toolbox.gui.batch_mixin import FileImportMixin
 from file_toolbox.gui.controllers.excel_merge_controller import ExcelMergeController
+from file_toolbox.gui.file_models import table_model
 from file_toolbox.gui.generated.ui_excel_merge_dialog import Ui_ExcelMergeDialog
 from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.excel_merge_worker import ExcelMergeWorker
@@ -32,7 +34,7 @@ _LAST_OUTDIR_KEY = "excel_merge/last_output_dir"
 _logger = logging.getLogger(__name__)
 
 
-class ExcelMergeTab(QWidget):
+class ExcelMergeTab(QWidget, FileImportMixin):
     """Excel 合并 Tab。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -46,6 +48,13 @@ class ExcelMergeTab(QWidget):
         self._svc = ExcelMergeService(history_store=self._history)
         self._controller = ExcelMergeController()
         self._files: list[Path] = []
+        self._init_import(self._files, self.ui.list_files, resolved=True, check_files=True)
+        self._scan_cancel = QPushButton("取消扫描", self)
+        layout = self.layout()
+        assert layout is not None
+        layout.addWidget(self._scan_cancel)
+        self._scan_cancel.hide()
+        self._scan_cancel.clicked.connect(self._task.cancel)
         self._connect()
 
     # 兼容旧 _worker 字段:读写均转发 TaskLifecycle;只有真实
@@ -77,19 +86,7 @@ class ExcelMergeTab(QWidget):
         return path.suffix.lower() in SUPPORTED_SUFFIXES and not path.name.startswith("~$")
 
     def _add_paths(self, paths: list[Path]) -> None:
-        """按去重后的顺序追加受支持文件到列表。"""
-        seen = {p.resolve() for p in self._files}
-        added = 0
-        for p in paths:
-            rp = p.resolve()
-            if not (p.is_file() and self._is_source(p)) or rp in seen:
-                continue
-            seen.add(rp)
-            self._files.append(p)
-            self.ui.list_files.addItem(p.name)
-            added += 1
-        if added:
-            self.ui.lbl_status.setText(f"已选择 {len(self._files)} 个文件")
+        self._queue_import(paths, self._is_source)
 
     def _add_files(self) -> None:
         exts = " ".join(f"*{ext}" for ext in SUPPORTED_SUFFIXES)
@@ -110,14 +107,17 @@ class ExcelMergeTab(QWidget):
             )
             == QMessageBox.StandardButton.Yes
         )
-        root = Path(d)
-        candidates = root.rglob("*") if recursive else root.iterdir()
-        self._add_paths([p for p in candidates if p.is_file()])
+        self._queue_import([], self._is_source, Path(d), recursive)
+
+    def _import_status(self, text: str) -> None:
+        self.ui.lbl_status.setText(text)
+
+    def _import_busy(self, busy: bool) -> None:
+        self._scan_cancel.setVisible(busy)
 
     def _clear(self) -> None:
-        self._files.clear()
-        self.ui.list_files.clear()
-        self.ui.table.setRowCount(0)
+        self._invalidate_import()
+        table_model(self.ui.table).replace_rows([])
         self.ui.lbl_status.setText("就绪")
 
     def _browse_outdir(self) -> None:
@@ -164,18 +164,19 @@ class ExcelMergeTab(QWidget):
         worker.failed.connect(self._on_merge_failed)
         worker.warning.connect(self._on_history_warning)
         worker.finished.connect(self._on_worker_finished)
+        self._business_generation = self._import_generation
         self._task.track(worker)  # 持有引用防 GC;在 start 前登记
         self.ui.btn_merge.setEnabled(False)
         self.ui.lbl_status.setText("合并中…")
         worker.start()
 
     def _on_progress(self, current: int, total: int, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.lbl_status.setText(self._controller.format_progress(current, total, msg))
 
     def _on_merge_ok(self, result: MergeResult) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self._populate_table(result)
         summary = self._controller.summarize(result)
@@ -197,14 +198,14 @@ class ExcelMergeTab(QWidget):
             QMessageBox.warning(self, "偏好保存失败", preference_warning)
 
     def _on_history_warning(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         if not self._task.close_pending:
             title = "历史保存失败" if msg.startswith("历史保存失败:") else "合并收尾告警"
             QMessageBox.warning(self, title, msg)
 
     def _on_merge_failed(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.lbl_status.setText("合并失败")
         if not self._task.close_pending:
@@ -216,19 +217,17 @@ class ExcelMergeTab(QWidget):
             ([m.file, m.sheet, m.target_name, "已合并"], False) for m in result.sheets
         ]
         rows += [([f.file, "", "", f"失败:{f.error}"], True) for f in result.failed]
-        self.ui.table.setRowCount(len(rows))
-        for r, (values, is_failed) in enumerate(rows):
-            for c, val in enumerate(values):
-                item = QTableWidgetItem(val)
-                if is_failed:
-                    item.setBackground(QBrush(_FAIL_COLOR))
-                self.ui.table.setItem(r, c, item)
+        table_model(self.ui.table).replace_rows(
+            [(values, _FAIL_COLOR if failed else None) for values, failed in rows]
+        )
 
     def _on_worker_finished(self) -> None:
         """结果不释放线程;只消费当前 worker 的真实 finished,恢复按钮/续接关闭。"""
         if not self._task.finish(self.sender()):
             return
         self.ui.btn_merge.setEnabled(True)
+
+        self._resume_import()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """协作取消后异步等待 finished,保留窗口及正在写入的线程。"""

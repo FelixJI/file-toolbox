@@ -9,6 +9,7 @@ pytest.importorskip("PySide6.QtWidgets")
 
 from pathlib import Path
 
+from gui_model_helpers import cell, wait_page
 from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
 
 from file_toolbox.gui.dialogs.rename_tab import FileRenamerDialog
@@ -20,7 +21,7 @@ def app():
 
 
 @pytest.fixture
-def dlg(app, tmp_path):
+def dlg(app, tmp_path, monkeypatch):
     """每个测试用独立 tmp_path 的历史/模板存储,避免跨测试残留。
 
     构造后同步替换界面与核心服务的历史依赖,模板也使用 tmp_path。
@@ -29,6 +30,8 @@ def dlg(app, tmp_path):
     from file_toolbox.core.batch_rename import FileRenameService
     from file_toolbox.core.rename_template import RenameTemplateService
 
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Ok)
     d = FileRenamerDialog()
     d._history = JsonHistoryStore(tmp_path)
     d._svc = FileRenameService(d._history)
@@ -165,7 +168,8 @@ def test_prompt_operation_params_passes_existing(dlg, monkeypatch):
 def test_do_refresh_preview_empty(dlg):
     """无文件/操作 → 清空预览(行 140-142)。"""
     dlg._do_refresh_preview()
-    assert dlg.ui.table_preview.rowCount() == 0
+    wait_page(dlg)
+    assert dlg.ui.table_preview.model().rowCount() == 0
 
 
 def test_do_refresh_preview_invalid_op(dlg, monkeypatch):
@@ -177,6 +181,7 @@ def test_do_refresh_preview_invalid_op(dlg, monkeypatch):
         QMessageBox, "warning", lambda *a, **k: warned.append(a) or QMessageBox.StandardButton.Ok
     )
     dlg._do_refresh_preview()
+    wait_page(dlg)
     assert warned
 
 
@@ -187,9 +192,10 @@ def test_do_refresh_preview_renders(dlg, monkeypatch, tmp_path):
     dlg.selected_files = [f1]
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
     dlg._do_refresh_preview()
-    assert dlg.ui.table_preview.rowCount() == 1
-    assert dlg.ui.table_preview.item(0, 0).text() == "a.txt"
-    assert dlg.ui.table_preview.item(0, 1).text() == "P_a.txt"
+    wait_page(dlg)
+    assert dlg.ui.table_preview.model().rowCount() == 1
+    assert cell(dlg.ui.table_preview, 0, 0) == "a.txt"
+    assert cell(dlg.ui.table_preview, 0, 1) == "P_a.txt"
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +211,11 @@ def test_execute_no_files_warns(dlg, monkeypatch):
         "information",
         lambda *a, **k: info_calls.append(a) or QMessageBox.StandardButton.Ok,
     )
+    dlg._do_refresh_preview()
+    wait_page(dlg)
+    wait_page(dlg)
     dlg._execute()
+    wait_page(dlg)
     assert info_calls
 
 
@@ -222,7 +232,11 @@ def test_execute_confirm_and_rename(dlg, monkeypatch, tmp_path):
         "information",
         lambda *a, **k: info_calls.append(str(a)) or QMessageBox.StandardButton.Ok,
     )
+    dlg._do_refresh_preview()
+    wait_page(dlg)
+    wait_page(dlg)
     dlg._execute()
+    wait_page(dlg)
     assert (tmp_path / "P_a.txt").exists()
     assert info_calls
 
@@ -237,21 +251,25 @@ def test_execute_syncs_files_and_preview_to_new_paths(dlg, monkeypatch, tmp_path
     f1 = tmp_path / "a.txt"
     f1.write_text("x")
     dlg.selected_files = [f1]
-    dlg.ui.list_files.addItem(str(f1))
+    dlg._file_model.replace_paths(list(dlg.selected_files))
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    dlg._do_refresh_preview()
+    wait_page(dlg)
+    wait_page(dlg)
     dlg._execute()
+    wait_page(dlg)
 
     new_path = tmp_path / "P_a.txt"
     assert new_path.exists()
     assert dlg.selected_files == [new_path]
-    assert dlg.ui.list_files.item(0).text() == str(new_path)
+    assert dlg.ui.list_files.model().data(dlg.ui.list_files.model().index(0, 0)) == str(new_path)
     # 预览基于新路径:旧文件名不再出现,状态不再误报冲突,大小/时间不再"未知"
-    assert dlg.ui.table_preview.item(0, 0).text() == "P_a.txt"
-    assert "冲突" not in dlg.ui.table_preview.item(0, 4).text()
-    assert dlg.ui.table_preview.item(0, 2).text() != "未知"
-    assert dlg.ui.table_preview.item(0, 3).text() != "未知"
+    assert cell(dlg.ui.table_preview, 0, 0) == "P_a.txt"
+    assert "冲突" not in cell(dlg.ui.table_preview, 0, 4)
+    assert cell(dlg.ui.table_preview, 0, 2) != "未知"
+    assert cell(dlg.ui.table_preview, 0, 3) != "未知"
 
 
 def test_execute_failure_keeps_old_paths(dlg, monkeypatch, tmp_path):
@@ -259,19 +277,25 @@ def test_execute_failure_keeps_old_paths(dlg, monkeypatch, tmp_path):
     f1 = tmp_path / "a.txt"
     f1.write_text("x")
     dlg.selected_files = [f1]
-    dlg.ui.list_files.addItem(str(f1))
+    dlg._file_model.replace_paths(list(dlg.selected_files))
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
     from file_toolbox.core.rename_execution import RenameResult
 
     monkeypatch.setattr(
-        dlg._svc, "execute_rename_result", lambda m: RenameResult(errors=["权限不足: a.txt"])
+        dlg._svc,
+        "execute_rename_result",
+        lambda m, cancel_check=None: RenameResult(errors=["权限不足: a.txt"]),
     )
+    dlg._do_refresh_preview()
+    wait_page(dlg)
+    wait_page(dlg)
     dlg._execute()
+    wait_page(dlg)
     assert f1.exists()
     assert dlg.selected_files == [f1]
-    assert dlg.ui.list_files.item(0).text() == str(f1)
+    assert dlg.ui.list_files.model().data(dlg.ui.list_files.model().index(0, 0)) == str(f1)
 
 
 def test_sync_selected_paths_partial_success(dlg, tmp_path):
@@ -281,12 +305,12 @@ def test_sync_selected_paths_partial_success(dlg, tmp_path):
     new1.write_text("1")  # 已改名成功:仅新路径存在
     old2.write_text("2")  # 改名失败:old2 仍在,new2 不存在
     dlg.selected_files = [old1, old2]
-    dlg.ui.list_files.addItem(str(old1))
-    dlg.ui.list_files.addItem(str(old2))
+    dlg._file_model.replace_paths(list(dlg.selected_files))
+    dlg._file_model.replace_paths(list(dlg.selected_files))
     dlg._sync_selected_paths_after_rename({old1: new1})
     assert dlg.selected_files == [new1, old2]
-    assert dlg.ui.list_files.item(0).text() == str(new1)
-    assert dlg.ui.list_files.item(1).text() == str(old2)
+    assert dlg.ui.list_files.model().data(dlg.ui.list_files.model().index(0, 0)) == str(new1)
+    assert dlg.ui.list_files.model().data(dlg.ui.list_files.model().index(1, 0)) == str(old2)
 
 
 def test_sync_selected_paths_nothing_renamed_is_noop(dlg, tmp_path):
@@ -294,10 +318,10 @@ def test_sync_selected_paths_nothing_renamed_is_noop(dlg, tmp_path):
     f1 = tmp_path / "a.txt"
     f1.write_text("x")
     dlg.selected_files = [f1]
-    dlg.ui.list_files.addItem(str(f1))
+    dlg._file_model.replace_paths(list(dlg.selected_files))
     dlg._sync_selected_paths_after_rename({})
     assert dlg.selected_files == [f1]
-    assert dlg.ui.list_files.item(0).text() == str(f1)
+    assert dlg.ui.list_files.model().data(dlg.ui.list_files.model().index(0, 0)) == str(f1)
 
 
 def test_execute_declined(dlg, monkeypatch, tmp_path):
@@ -307,7 +331,11 @@ def test_execute_declined(dlg, monkeypatch, tmp_path):
     dlg.selected_files = [f1]
     dlg.operations = [{"type": "add_prefix", "params": {"text": "P_"}}]
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    dlg._do_refresh_preview()
+    wait_page(dlg)
+    wait_page(dlg)
     dlg._execute()
+    wait_page(dlg)
     assert not (tmp_path / "P_a.txt").exists()
 
 
@@ -327,7 +355,11 @@ def test_execute_no_ready_files(dlg, monkeypatch, tmp_path):
     )
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    dlg._do_refresh_preview()
+    wait_page(dlg)
+    wait_page(dlg)
     dlg._execute()
+    wait_page(dlg)
     assert warned
 
 
@@ -351,7 +383,11 @@ def test_execute_invalid_operations_warns(dlg, monkeypatch, tmp_path):
         lambda *a, **k: questioned.append(1) or QMessageBox.StandardButton.Yes,
     )
     monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: QMessageBox.StandardButton.Ok)
+    dlg._do_refresh_preview()
+    wait_page(dlg)
+    wait_page(dlg)
     dlg._execute()
+    wait_page(dlg)
     assert warned and any("无效" in w for w in warned)
     assert questioned == []  # 未进入确认分支
 

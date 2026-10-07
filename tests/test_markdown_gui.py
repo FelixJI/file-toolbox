@@ -15,6 +15,7 @@ import pytest
 # 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
+from gui_model_helpers import cell, color, wait_page
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
@@ -99,8 +100,8 @@ def _wait_worker_done(tab, app, timeout_ms: int = 10000) -> None:
 
 def test_tab_starts_empty(tab):
     """新建 Tab 无文件、无结果行、状态就绪、取消不可用。"""
-    assert tab.ui.list_files.count() == 0
-    assert tab.ui.table.rowCount() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
+    assert tab.ui.table.model().rowCount() == 0
     assert tab.ui.lbl_status.text() == "就绪"
     assert tab.ui.btn_cancel.isEnabled() is False
     assert tab.ui.btn_convert.isEnabled() is True
@@ -149,8 +150,9 @@ def test_add_paths_dedupes_and_updates_status(tab, tmp_path):
     b = _mk(tmp_path, "b.md")
 
     tab._add_paths([a, b, a])
+    wait_page(tab)
 
-    assert tab.ui.list_files.count() == 2
+    assert tab.ui.list_files.model().rowCount() == 2
     assert len(tab._files) == 2
     assert tab.ui.lbl_status.text() == "已选择 2 个文件"
 
@@ -158,12 +160,13 @@ def test_add_paths_dedupes_and_updates_status(tab, tmp_path):
 def test_clear_resets_everything(tab, tmp_path):
     a = _mk(tmp_path, "a.md")
     tab._add_paths([a])
+    wait_page(tab)
     tab._populate_table(ConversionResult([ConversionItem(source=a, output=None, error="x")]))
 
     tab._clear()
 
-    assert tab.ui.list_files.count() == 0
-    assert tab.ui.table.rowCount() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
+    assert tab.ui.table.model().rowCount() == 0
     assert tab.ui.lbl_status.text() == "就绪"
 
 
@@ -184,6 +187,7 @@ def test_convert_passes_contract_args(tab, tmp_path):
     """输出目录留空 → None;填写 → Path;目标/模式按索引映射传给 service。"""
     a = _mk(tmp_path, "a.md")
     tab._add_paths([a])
+    wait_page(tab)
     fake = _FakeService(result=ConversionResult())
     tab._svc = fake
 
@@ -200,6 +204,7 @@ def test_convert_passes_contract_args(tab, tmp_path):
 
     b = _mk(tmp_path, "b.md")
     tab._add_paths([b])
+    wait_page(tab)
     out = tmp_path / "out"
     tab.ui.edit_outdir.setText(str(out))
     tab._convert()
@@ -219,6 +224,7 @@ def test_convert_locks_controls_but_keeps_cancel(tab, tmp_path):
 
     tab._svc = _BlockService()
     tab._add_paths([_mk(tmp_path, "a.md")])
+    wait_page(tab)
     tab._convert()
     assert tab.ui.btn_convert.isEnabled() is False
     assert tab.ui.btn_add_files.isEnabled() is False
@@ -234,7 +240,9 @@ def test_convert_locks_controls_but_keeps_cancel(tab, tmp_path):
 
 def test_convert_reentry_guard_while_running(tab, tmp_path):
     tab._add_paths([_mk(tmp_path, "a.md")])
+    wait_page(tab)
     running = MagicMock()
+    tab._business_generation = tab._import_generation
     tab._worker = running
     tab._convert()
     assert tab._worker is running
@@ -256,18 +264,19 @@ def test_convert_flow_populates_success_failure_skip(tab, app, tmp_path):
     )
     tab._svc = _FakeService(result=result)
     tab._add_paths([a, b, c])
+    wait_page(tab)
 
     tab._convert()
     _wait_worker_done(tab, app)
 
-    assert tab.ui.table.rowCount() == 3
-    assert tab.ui.table.item(0, 1).text() == "成功"
-    assert tab.ui.table.item(0, 2).text() == str(out)
-    assert tab.ui.table.item(1, 1).text() == "失败"
-    assert "无法解析" in tab.ui.table.item(1, 3).text()
-    assert tab.ui.table.item(1, 3).background().color().name().lower() == "#fff2cc"
-    assert tab.ui.table.item(2, 1).text() == "已跳过"
-    assert tab.ui.table.item(2, 3).text() == "输出已存在,跳过覆盖"
+    assert tab.ui.table.model().rowCount() == 3
+    assert cell(tab.ui.table, 0, 1) == "成功"
+    assert cell(tab.ui.table, 0, 2) == str(out)
+    assert cell(tab.ui.table, 1, 1) == "失败"
+    assert "无法解析" in cell(tab.ui.table, 1, 3)
+    assert color(tab.ui.table, 1, 3) == "#fff2cc"
+    assert cell(tab.ui.table, 2, 1) == "已跳过"
+    assert cell(tab.ui.table, 2, 3) == "输出已存在,跳过覆盖"
     assert tab.ui.lbl_status.text() == "转换完成:成功 1、跳过 1、失败 1"
 
 
@@ -283,6 +292,7 @@ def test_cancel_flow_keeps_partial_outputs_visible(tab, app, monkeypatch, tmp_pa
     )
     tab._svc = _FakeService(result=result, block_until_cancel=True)
     tab._add_paths([a, b])
+    wait_page(tab)
 
     tab._convert()
     worker = tab._worker
@@ -297,8 +307,8 @@ def test_cancel_flow_keeps_partial_outputs_visible(tab, app, monkeypatch, tmp_pa
     assert tab.ui.btn_cancel.isEnabled() is False  # 取消请求后防重复点击
     _wait_worker_done(tab, app)
 
-    assert tab.ui.table.rowCount() == 2
-    assert tab.ui.table.item(0, 1).text() == "成功"
+    assert tab.ui.table.model().rowCount() == 2
+    assert cell(tab.ui.table, 0, 1) == "成功"
     assert tab.ui.lbl_status.text().startswith("已取消")
     assert warns == ["w"]
 
@@ -313,16 +323,18 @@ def test_history_warning_keeps_business_result(tab, app, monkeypatch, tmp_path):
 
     tab._svc = _FakeService(error=OperationResultError(result, "历史保存失败:boom"))
     tab._add_paths([a])
+    wait_page(tab)
     worker = MarkdownConvertWorker(tab._svc, [a], None, "docx", "tables", parent=tab)
     worker.finished_ok.connect(tab._on_convert_ok)
     worker.failed.connect(tab._on_convert_failed)
     worker.warning.connect(tab._on_history_warning)
+    tab._business_generation = tab._import_generation
     tab._worker = worker
     worker.run()  # 同步执行:信号在本线程直接投递
     app.processEvents()
 
-    assert tab.ui.table.rowCount() == 1
-    assert tab.ui.table.item(0, 1).text() == "成功"
+    assert tab.ui.table.model().rowCount() == 1
+    assert cell(tab.ui.table, 0, 1) == "成功"
     assert warns and "历史保存失败" in warns[0]
     tab._worker = None
     worker.deleteLater()
@@ -332,6 +344,7 @@ def test_on_convert_failed_shows_critical(tab, monkeypatch):
     criticals: list[str] = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: criticals.append("c"))
     worker = MagicMock()
+    tab._business_generation = tab._import_generation
     tab._worker = worker
     tab._set_running(True)
 
@@ -349,6 +362,7 @@ def test_on_convert_failed_shows_critical(tab, monkeypatch):
 def test_close_event_cancels_running_worker(tab):
     """关闭时协作取消,保留引用并等待真实 finished。"""
     worker = MagicMock()
+    tab._business_generation = tab._import_generation
     tab._worker = worker
 
     event = QCloseEvent()
@@ -448,6 +462,7 @@ def test_result_before_finished_blocks_reentry_and_stale_signals(tab, app, monke
         result=ConversionResult([ConversionItem(source=a, output=tmp_path / "a.docx")])
     )
     tab._add_paths([a])
+    wait_page(tab)
     tab._convert()
     worker = tab._worker
     assert isinstance(worker, HeldWorker) and worker.isRunning()
@@ -478,14 +493,14 @@ def test_result_before_finished_blocks_reentry_and_stale_signals(tab, app, monke
     late.warning.connect(tab._on_history_warning)
     late.progress.connect(tab._on_progress)
     late.finished.connect(tab._on_worker_finished)
-    previous = tab.ui.lbl_status.text(), tab.ui.table.rowCount()
+    previous = tab.ui.lbl_status.text(), tab.ui.table.model().rowCount()
     late.finished_ok.emit(None)
     late.failed.emit("stale failure")
     late.warning.emit("stale warning")
     late.progress.emit(9, 9, "stale progress")
     late.finished.emit()
     app.processEvents()
-    assert (tab.ui.lbl_status.text(), tab.ui.table.rowCount()) == previous
+    assert (tab.ui.lbl_status.text(), tab.ui.table.model().rowCount()) == previous
     assert tab._worker is worker
 
     # 真实 finished 到达后才释放线程引用并恢复控件
@@ -521,6 +536,7 @@ def test_deferred_close_waits_for_real_finished_and_keeps_outputs(tab, app, monk
     )
     tab._svc = _FakeService(result=result)
     tab._add_paths([a, b])
+    wait_page(tab)
     tab._convert()
     worker = tab._worker
     assert worker is not None
@@ -536,10 +552,10 @@ def test_deferred_close_waits_for_real_finished_and_keeps_outputs(tab, app, monk
 
     # 取消路径:结果先到 → 已完成产物保留展示,收尾弹窗被抑制
     deadline = time.monotonic() + 5
-    while tab.ui.table.rowCount() == 0 and time.monotonic() < deadline:
+    while tab.ui.table.model().rowCount() == 0 and time.monotonic() < deadline:
         app.processEvents()
-    assert tab.ui.table.rowCount() == 2
-    assert tab.ui.table.item(0, 1).text() == "成功"
+    assert tab.ui.table.model().rowCount() == 2
+    assert cell(tab.ui.table, 0, 1) == "成功"
     assert tab._worker is worker
 
     release.set()

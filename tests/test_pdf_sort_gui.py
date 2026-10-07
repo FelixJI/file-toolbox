@@ -13,6 +13,7 @@ import pytest
 # 不触发 libEGL/libGL 原生库加载;真实 import QtWidgets 才会,缺库时应跳过而非收集失败。
 pytest.importorskip("PySide6.QtWidgets")
 
+from gui_model_helpers import cell, header, wait_page
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
@@ -62,17 +63,15 @@ def tab(app):
 
 def test_tab_has_expected_table_headers(tab):
     """结果表格应预置 5 列业务表头,列数与表头一致。"""
-    assert tab.ui.table.columnCount() == len(HEADERS)
-    headers = [
-        tab.ui.table.horizontalHeaderItem(i).text() for i in range(tab.ui.table.columnCount())
-    ]
+    assert tab.ui.table.model().columnCount() == len(HEADERS)
+    headers = [header(tab.ui.table, i) for i in range(tab.ui.table.model().columnCount())]
     assert headers == HEADERS
 
 
 def test_tab_starts_empty(tab):
     """新建 Tab 无文件、无结果行、状态就绪。"""
-    assert tab.ui.list_files.count() == 0
-    assert tab.ui.table.rowCount() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
+    assert tab.ui.table.model().rowCount() == 0
     assert tab.ui.lbl_status.text() == "就绪"
     assert tab.ui.edit_pattern.text() == ""
 
@@ -148,8 +147,9 @@ def test_add_paths_dedupes_and_updates_status(tab, make_text_pdf):
     b = make_text_pdf("b.pdf", ["Date: 2024-01-01"])
 
     tab._add_paths([a, b, a])
+    wait_page(tab)
 
-    assert tab.ui.list_files.count() == 2
+    assert tab.ui.list_files.model().rowCount() == 2
     assert len(tab._files) == 2
     assert tab.ui.lbl_status.text() == "已选择 2 个文件"
 
@@ -160,20 +160,24 @@ def test_add_paths_ignores_unsupported(tab, tmp_path):
     txt.write_text("x")
 
     tab._add_paths([txt, tmp_path / "ghost.pdf", tmp_path])
+    wait_page(tab)
 
-    assert tab.ui.list_files.count() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
 
 
 def test_clear_resets_everything(tab, make_text_pdf):
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
     tab._add_paths([a])
-    tab.ui.table.setRowCount(2)
+    wait_page(tab)
+    tab.ui.table.model().replace_rows(
+        [(["" for _ in range(tab.ui.table.model().columnCount())], None) for _ in range(2)]
+    )
 
     tab._clear()
 
     assert tab._files == []
-    assert tab.ui.list_files.count() == 0
-    assert tab.ui.table.rowCount() == 0
+    assert tab.ui.list_files.model().rowCount() == 0
+    assert tab.ui.table.model().rowCount() == 0
     assert tab.ui.lbl_status.text() == "就绪"
 
 
@@ -181,6 +185,7 @@ def test_resolve_outdir_prefers_edit_text(tab, make_text_pdf):
     """输出框内容优先于上次目录与源文件目录。"""
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
     tab._add_paths([a])
+    wait_page(tab)
     tab.ui.edit_outdir.setText("C:/some/dir")
 
     assert tab._resolve_outdir() == Path("C:/some/dir")
@@ -194,6 +199,7 @@ def test_resolve_outdir_falls_back_to_first_source(tab, make_text_pdf, monkeypat
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
 
     tab._add_paths([a])
+    wait_page(tab)
 
     assert tab._resolve_outdir() == a.parent
 
@@ -211,6 +217,7 @@ def test_sort_warns_when_no_pattern(tab, make_text_pdf, monkeypatch):
     """匹配格式为空 → 警告弹窗,不启动 worker。"""
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
     tab._add_paths([a])
+    wait_page(tab)
     warned: list[str] = []
     monkeypatch.setattr(QMessageBox, "warning", lambda _parent, _title, msg: warned.append(msg))
 
@@ -224,6 +231,7 @@ def test_sort_warns_when_pattern_invalid(tab, make_text_pdf, monkeypatch):
     """非法正则 → 警告弹窗提示无效,不启动 worker。"""
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
     tab._add_paths([a])
+    wait_page(tab)
     tab.ui.edit_pattern.setText("([0-9")
     warned: list[str] = []
     monkeypatch.setattr(QMessageBox, "warning", lambda _parent, _title, msg: warned.append(msg))
@@ -238,6 +246,7 @@ def test_sort_starts_worker_single_file(tab, make_text_pdf, monkeypatch):
     """单文件:启动 worker,输出为 outdir/主名_排序.pdf;按钮禁用。"""
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
     tab._add_paths([a])
+    wait_page(tab)
     tab.ui.edit_pattern.setText("Date")
     created = {}
     monkeypatch.setattr(
@@ -261,6 +270,7 @@ def test_sort_starts_worker_multiple_files_as_dir(tab, make_text_pdf, monkeypatc
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
     b = make_text_pdf("b.pdf", ["Date: 2024-01-01"])
     tab._add_paths([a, b])
+    wait_page(tab)
     tab.ui.edit_pattern.setText("Date")
     created = {}
     monkeypatch.setattr(
@@ -280,9 +290,11 @@ def test_sort_guard_while_worker_running(tab, make_text_pdf, monkeypatch):
     """worker 运行中重复点击不重复启动。"""
     a = make_text_pdf("a.pdf", ["Date: 2024-01-01"])
     tab._add_paths([a])
+    wait_page(tab)
     tab.ui.edit_pattern.setText("Date")
     worker = MagicMock()
     worker.isRunning.return_value = True
+    tab._business_generation = tab._import_generation
     tab._worker = worker
 
     tab._sort()  # 应直接返回,不再创建新 worker
@@ -314,8 +326,8 @@ def test_on_sort_ok_populates_table_and_status(tab, monkeypatch):
 
     assert tab._worker is None
     assert tab.ui.btn_sort.isEnabled() is False  # 结果 slot 不释放线程或恢复启动
-    assert tab.ui.table.rowCount() == 4
-    row = lambda r: [tab.ui.table.item(r, c).text() for c in range(5)]  # noqa: E731
+    assert tab.ui.table.model().rowCount() == 4
+    row = lambda r: [cell(tab.ui.table, r, c) for c in range(5)]  # noqa: E731
     assert row(0) == ["a.pdf", "1", "2", "2024-02-01", "已排序"]
     assert row(1) == ["a.pdf", "2", "1", "2024-01-01", "已排序"]
     assert row(2) == ["a.pdf", "3", "3", "—", "未匹配"]
@@ -334,7 +346,7 @@ def test_on_sort_ok_marks_unchanged_rows(tab, monkeypatch):
 
     tab._on_sort_ok(result)
 
-    assert tab.ui.table.item(0, 4).text() == "顺序未变,已排序"
+    assert cell(tab.ui.table, 0, 4) == "顺序未变,已排序"
     assert tab.ui.lbl_status.text() == "1 个文件顺序未变,未写出输出"
 
 
@@ -355,6 +367,7 @@ def test_close_event_stops_running_worker(tab, monkeypatch):
     """关闭时请求取消并拒绝关闭,不在 GUI 线程同步等待。"""
     worker = MagicMock()
     worker.isRunning.return_value = True
+    tab._business_generation = tab._import_generation
     tab._worker = worker
 
     event = QCloseEvent()
@@ -385,6 +398,7 @@ def test_add_files_dialog_appends_pdfs(tab, make_text_pdf, monkeypatch):
     )
 
     tab._add_files()
+    wait_page(tab)
 
     assert [p.name for p in tab._files] == ["a.pdf", "b.pdf"]
     assert "已选择 2 个文件" in tab.ui.lbl_status.text()
@@ -406,6 +420,7 @@ def test_add_folder_recursive_and_flat_modes(tab, make_text_pdf, monkeypatch, tm
     )
 
     tab._add_folder()
+    wait_page(tab)
 
     assert {p.name for p in tab._files} == {"top.pdf", "nested.pdf"}
 
@@ -416,6 +431,7 @@ def test_add_folder_recursive_and_flat_modes(tab, make_text_pdf, monkeypatch, tm
     )
 
     tab._add_folder()
+    wait_page(tab)
 
     assert [p.name for p in tab._files] == ["top.pdf"]
 
@@ -427,6 +443,7 @@ def test_add_folder_cancelled_keeps_list_empty(tab, monkeypatch):
     )
 
     tab._add_folder()
+    wait_page(tab)
 
     assert tab._files == []
 
@@ -479,7 +496,7 @@ def test_cancelled_partial_result_shows_outputs_and_warning(tab, monkeypatch, tm
         cancelled=True,
     )
     tab._on_sort_ok(result)
-    assert tab.ui.table.rowCount() == 2
+    assert tab.ui.table.model().rowCount() == 2
     assert "已取消" in tab.ui.lbl_status.text() and "已写出 1" in tab.ui.lbl_status.text()
     assert warnings[0][0] == "排序已取消"
     assert "未生成输出" not in str(warnings)
@@ -503,6 +520,7 @@ def test_sort_worker_history_warning_reaches_view_without_losing_result(
     service.sort.side_effect = HistorySaveError(result, OSError("history denied"))
     tab._svc = service
     tab._add_paths([source])
+    wait_page(tab)
     tab.ui.edit_pattern.setText("Date")
     warnings = []
     monkeypatch.setattr(
@@ -513,6 +531,6 @@ def test_sort_worker_history_warning_reaches_view_without_losing_result(
     assert [title for title, _msg in warnings] == ["排序已取消", "历史保存失败"]
     assert "history denied" in warnings[1][1]
     assert "已取消" in tab.ui.lbl_status.text() and "已写出 1" in tab.ui.lbl_status.text()
-    assert tab.ui.table.rowCount() == 1 and not tab.ui.btn_sort.isEnabled()
+    assert tab.ui.table.model().rowCount() == 1 and not tab.ui.btn_sort.isEnabled()
     tab._worker = None  # 本用例同步调用 run;真实 finished 见隔离回归。
     service.sort.assert_called_once()

@@ -7,9 +7,20 @@ from pathlib import Path
 from typing import Any, cast
 
 from PySide6.QtCore import QObject, QThread, QTimer
-from PySide6.QtWidgets import QFileDialog, QListWidget, QMessageBox, QTableWidget, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QListView,
+    QListWidget,
+    QMessageBox,
+    QTableView,
+    QTableWidget,
+    QWidget,
+)
 
 from file_toolbox.common.file_utils import format_file_size, get_file_info
+from file_toolbox.gui.file_models import FileListModel, table_model
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
+from file_toolbox.gui.workers.file_scan_worker import FileScanWorker, ScannedFile
 
 # 预览防抖 / worker 停止超时(毫秒)
 PREVIEW_DEBOUNCE_MS = 200
@@ -39,7 +50,145 @@ class SignalManager(QObject):
         self._connections.clear()
 
 
-class BatchDialogMixin:
+class FileImportMixin:
+    """七个文件入口的扫描队列，沿用页面唯一 TaskLifecycle。"""
+
+    _task: TaskLifecycle
+
+    def _init_import(
+        self,
+        files: list[Path],
+        view: QListView | None = None,
+        full_path: bool = False,
+        resolved: bool = False,
+        check_files: bool = False,
+        metadata: bool = False,
+    ) -> None:
+        self._import_files = files
+        self._file_model = FileListModel(files, full_path, cast(QObject, self))
+        if view is not None:
+            view.setUniformItemSizes(True)
+            view.setModel(self._file_model)
+        self._import_generation = 0
+        self._business_generation = 0
+        self._import_pending: FileScanWorker | None = None
+        self._import_resolved = resolved
+        self._import_check_files = check_files
+        self._import_metadata = metadata
+        self._file_metadata: dict[Path, ScannedFile] = {}
+        self._import_errors: list[str] = []
+
+    def _queue_import(
+        self,
+        paths: list[Path],
+        supported: Callable[[Path], bool],
+        folder: Path | None = None,
+        recursive: bool = False,
+        *,
+        unchecked: bool = False,
+    ) -> None:
+        if self._task.close_pending:
+            return
+        self._import_generation += 1
+        self._import_errors.clear()
+        if self._import_pending is not None:
+            self._import_pending.deleteLater()
+        self._import_pending = FileScanWorker(
+            self._import_generation,
+            paths,
+            folder,
+            recursive,
+            supported,
+            [],
+            self._import_resolved and not unchecked,
+            self._import_check_files and not unchecked,
+            self._import_metadata and not unchecked,
+            cast(QWidget, self),
+        )
+        self._import_pending.deduplicate = not unchecked
+        if isinstance(self._task.worker, FileScanWorker):
+            self._task.cancel()
+        self._resume_import()
+
+    def _resume_import(self) -> bool:
+        if self._task.busy or self._import_pending is None:
+            return False
+        worker = self._import_pending
+        self._import_pending = None
+        worker.existing = list(self._import_files)
+        worker.batch.connect(self._on_import_batch)
+        worker.failed.connect(self._on_import_error)
+        worker.finished.connect(self._on_import_finished)
+        self._task.track(worker)
+        self._import_busy(True)
+        worker.start()
+        return True
+
+    def _on_import_batch(self, generation: int, batch: list[ScannedFile]) -> None:
+        sender = cast(QObject, self).sender()
+        if (
+            sender is not self._task.worker
+            or generation != self._import_generation
+            or self._task.close_pending
+        ):
+            return
+        self._file_metadata.update({item.path: item for item in batch})
+        self._file_model.append_paths([item.path for item in batch])
+        self._import_updated(batch)
+
+    def _on_import_error(self, generation: int, message: str) -> None:
+        if (
+            cast(QObject, self).sender() is not self._task.worker
+            or generation != self._import_generation
+            or self._task.close_pending
+        ):
+            return
+        self._import_errors.append(message)
+        logging.getLogger(type(self).__module__).warning("文件扫描失败: %s", message)
+        self._import_status(f"扫描失败: {message}")
+
+    def _on_import_finished(self) -> None:
+        if not self._task.finish(cast(QObject, self).sender()):
+            return
+        self._import_busy(False)
+        if not self._task.close_pending and not self._resume_import():
+            self._after_import()
+            if self._import_errors:
+                self._import_status(
+                    f"已选择 {len(self._import_files)} 个文件，扫描错误 "
+                    f"{len(self._import_errors)} 项: {self._import_errors[-1]}"
+                )
+
+    def _invalidate_import(self) -> None:
+        self._import_generation += 1
+        self._import_errors.clear()
+        if self._import_pending is not None:
+            self._import_pending.deleteLater()
+            self._import_pending = None
+        self._task.cancel()
+        self._file_metadata.clear()
+        self._file_model.replace_paths([])
+
+    def _accept_business_result(self) -> bool:
+        return self._task.accepts(cast(QObject, self).sender()) and (
+            cast(QObject, self).sender() is None
+            or self._business_generation == self._import_generation
+        )
+
+    def _import_updated(self, batch: list[ScannedFile]) -> None:
+        self._import_status(f"已选择 {len(self._import_files)} 个文件")
+
+    def _import_status(self, text: str) -> None:
+        pass
+
+    def _import_busy(self, busy: bool) -> None:
+        pass
+
+    def _after_import(self) -> None:
+        pass
+
+
+class BatchDialogMixin(FileImportMixin):
     """批处理对话框混入类，提供文件选择、预览刷新和工作线程管理功能"""
 
     SUPPORTED_FORMATS: set[str] = set()
@@ -53,13 +202,29 @@ class BatchDialogMixin:
     # 声明类级类型,避免 mypy 从 self.worker = None 推断出过于窄的 None 类型。
     worker: QThread | None
 
+    @property
+    def selected_files(self) -> list[Path]:
+        return self._selected_files
+
+    @selected_files.setter
+    def selected_files(self, files: list[Path]) -> None:
+        if hasattr(self, "_file_model"):
+            self._file_model.replace_paths(files)
+        else:
+            self._selected_files = files
+
     def _init_batch_dialog(self) -> None:
         """初始化批处理对话框功能（在__init__中调用）"""
         # logger 兜底:实例属性而非 @property——property 与 Qt 元类在解释器退出期
         # GC 交互有堆损坏风险(见 pdf_tab 中放弃 LoggableMixin 的同类注释)。
         if not hasattr(self, "logger"):
             self.logger = logging.getLogger(type(self).__module__)
-        self.selected_files: list[Path] = []
+        self.selected_files = []
+        self._import_auto_preview = True
+        self._import_added = False
+        if not hasattr(self, "_task"):
+            self._task = TaskLifecycle(cast(QWidget, self))
+        self._init_import(self.selected_files, metadata=True)
         self.worker = None
         # 本 mixin 总是被混入 QDialog(本身是 QObject)。用 cast 如实表达
         # "运行期 self 即为 QWidget"这一契约,以满足 Qt API 的类型要求。
@@ -93,29 +258,23 @@ class BatchDialogMixin:
         return file_path.suffix.lower() in self.SUPPORTED_FORMATS
 
     def _select_files(
-        self, list_widget: QListWidget | None = None, auto_preview: bool = True
+        self, list_widget: QListView | QListWidget | None = None, auto_preview: bool = True
     ) -> None:
         """选择文件"""
         files, _ = QFileDialog.getOpenFileNames(
             cast(QWidget, self), "选择文件", "", self._get_file_filter()
         )
         if files:
-            added_count = 0
-            for file_path in files:
-                path = Path(file_path)
-                if self._is_file_supported(path) and path not in self.selected_files:
-                    self.selected_files.append(path)
-                    if list_widget:
-                        list_widget.addItem(str(path))
-                    added_count += 1
-            if added_count > 0:
-                self._update_status()
-                if auto_preview:
-                    self._refresh_preview()
+            if isinstance(list_widget, QListView):
+                list_widget.setModel(self._file_model)
+                self._file_model.full_path = True
+            self._import_auto_preview = auto_preview
+            self._import_added = False
+            self._queue_import([Path(p) for p in files], self._is_file_supported)
 
     def _select_folder(
         self,
-        list_widget: QListWidget | None = None,
+        list_widget: QListView | QListWidget | None = None,
         ask_recursive: bool = True,
         auto_preview: bool = True,
     ) -> None:
@@ -137,34 +296,43 @@ class BatchDialogMixin:
             )
             recursive = reply == QMessageBox.StandardButton.Yes
 
-        # 统一谓词:`_is_file_supported` 已含临时文件过滤(_is_temp_file)与后缀校验
-        # (SUPPORTED_FORMATS 为空时放行所有非临时文件),故三分支合并为一。
-        # 此处显式 is_file() 兼具修复旧递归分支漏检——曾把名为 x.pdf 的目录误收入。
-        it = folder_path.rglob("*") if recursive else folder_path.iterdir()
-        files = [f for f in it if f.is_file() and self._is_file_supported(f)]
+        if isinstance(list_widget, QListView):
+            list_widget.setModel(self._file_model)
+            self._file_model.full_path = True
+        self._import_auto_preview = auto_preview
+        self._import_added = False
+        self._queue_import([], self._is_file_supported, folder_path, recursive)
 
-        added_count = 0
-        for file_path in files:
-            if file_path not in self.selected_files:
-                self.selected_files.append(file_path)
-                if list_widget:
-                    list_widget.addItem(str(file_path))
-                added_count += 1
+    def _import_updated(self, batch: list[ScannedFile]) -> None:
+        self._update_status()
+        self._import_added = True
 
-        if added_count > 0:
-            self._update_status()
-            if auto_preview:
-                self._refresh_preview()
+    def _after_import(self) -> None:
+        if self._import_auto_preview and self._import_added:
+            self._refresh_preview()
+
+    def _import_status(self, text: str) -> None:
+        ui = getattr(self, "ui", None)
+        if ui is not None:
+            ui.label_status.setText(text)
+
+    def _import_busy(self, busy: bool) -> None:
+        ui = getattr(self, "ui", None)
+        if ui is not None:
+            ui.btn_cancel.setVisible(busy)
 
     def _clear_files(
-        self, list_widget: QListWidget | None = None, table_widget: QTableWidget | None = None
+        self,
+        list_widget: QListView | QListWidget | None = None,
+        table_widget: QTableView | QTableWidget | None = None,
     ) -> None:
         """清空文件列表"""
-        self.selected_files.clear()
-        if list_widget:
-            list_widget.clear()
-        if table_widget:
+        self._preview_timer.stop()
+        self._invalidate_import()
+        if isinstance(table_widget, QTableWidget):
             table_widget.setRowCount(0)
+        elif table_widget is not None:
+            table_model(table_widget).replace_rows([])
         self._update_status()
 
     def _refresh_preview(self) -> None:

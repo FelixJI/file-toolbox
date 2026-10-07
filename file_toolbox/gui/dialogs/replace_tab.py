@@ -9,7 +9,6 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QDialog,
     QMessageBox,
-    QTableWidgetItem,
     QWidget,
 )
 
@@ -19,6 +18,7 @@ from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.operation_params import OperationParamCollector
 from file_toolbox.gui.controllers.qt_prompter import QInputDialogPrompter
 from file_toolbox.gui.controllers.replace_controller import ReplaceController
+from file_toolbox.gui.file_models import table_model
 from file_toolbox.gui.generated.ui_replace_dialog import Ui_ContentReplaceDialog
 from file_toolbox.gui.task_lifecycle import TaskLifecycle
 
@@ -35,6 +35,9 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self._init_batch_dialog()
         self.ui = Ui_ContentReplaceDialog()
         self.ui.setupUi(self)
+        self.ui.list_files.setUniformItemSizes(True)
+        self.ui.list_files.setModel(self._file_model)
+        self._file_model.full_path = True
         self._controller = ReplaceController()
         # history_store 先于 svc 创建并注入:CLI 与 GUI 共用同一记录路径(记录下沉 service)
         self._history = JsonHistoryStore()
@@ -128,7 +131,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
     # 的变更挂起为 _preview_pending,同样等真实 finished 后重跑。
     def _do_refresh_preview(self) -> None:
         if not self.selected_files or not self.operations:
-            self.ui.table_preview.setRowCount(0)
+            table_model(self.ui.table_preview).replace_rows([])
             if self._task.busy:
                 # 清空发生在老预览运行中:挂起待刷新,老结果返回时被丢弃,
                 # 空表不会被旧结果覆盖
@@ -158,6 +161,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self.ui.label_status.setText("正在预览匹配...")
         self.ui.progress_bar.setRange(0, 0)  # 不定态:预览无逐文件进度回调
         self.ui.progress_bar.setVisible(True)
+        self._business_generation = self._import_generation
         self._task.track(worker)
         worker.start()
 
@@ -168,7 +172,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             self._refresh_preview()
 
     def _on_preview_ok(self, result: dict[Path, dict[str, Any]]) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         if self._preview_pending:
             # 运行期间操作/文件已变:这份结果过期,丢弃;真实 finished 后用
@@ -177,12 +181,17 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self._render_preview(result)
 
     def _render_preview(self, result: dict[Path, dict[str, Any]]) -> None:
-        tbl = self.ui.table_preview
-        tbl.setRowCount(len(result))
-        for row, (f, info) in enumerate(result.items()):
-            tbl.setItem(row, 0, QTableWidgetItem(f.name))
-            tbl.setItem(row, 1, QTableWidgetItem(str(info["match_count"])))
-            tbl.setItem(row, 2, QTableWidgetItem(info["status"]))
+        table_model(self.ui.table_preview).replace_rows(
+            [
+                ([path.name, str(info["match_count"]), info["status"], "", ""], None)
+                for path, info in result.items()
+            ]
+        )
+
+    def _refresh_preview(self) -> None:
+        if self._task.busy:
+            self._preview_pending = True
+        super()._refresh_preview()
 
     def _execute(self) -> None:
         if not self.selected_files or not self.operations:
@@ -221,18 +230,19 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self.ui.progress_bar.setRange(0, len(self.selected_files))
         self.ui.progress_bar.setValue(0)
         self.ui.progress_bar.setVisible(True)
+        self._business_generation = self._import_generation
         self._task.track(worker)
         worker.start()
 
     def _on_execute_progress(self, processed: int, total: int) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.progress_bar.setMaximum(total)
         self.ui.progress_bar.setValue(processed)
 
     def _on_execute_ok(self, success: int, total: int, errors: list[str]) -> None:
         """结果槽:只展示结果;引用释放/控件恢复/预览重跑等真实 finished。"""
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         # 执行改写了文件:预览已过期,标记待刷新,真实 finished 后重跑。
         # 必须先于下方模态框设置——information 的嵌套事件循环可能先投递并消费
@@ -248,7 +258,7 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
             )
 
     def _on_worker_failed(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         if not self._task.close_pending:
             QMessageBox.critical(self, "替换失败", msg)
@@ -261,7 +271,8 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         self._restore_ui()
         if self._task.close_pending:
             return  # 关闭中:不重跑预览,交给 TaskLifecycle 续接关闭
-        self._rerun_pending_preview()
+        if not self._resume_import():
+            self._rerun_pending_preview()
 
     def _on_cancel(self) -> None:
         self._task.cancel()

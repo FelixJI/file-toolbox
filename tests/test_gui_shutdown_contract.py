@@ -196,6 +196,7 @@ def exercise(scenario):
                 tab._add_paths([Path("source.xlsx")])
                 start = tab._merge
                 button = tab.ui.btn_merge
+            pump_until(lambda: not tab._task.busy)  # 导入结束后才允许开始业务。
             tab.ui.edit_outdir.setText("output")
             start()
             worker = tab._worker

@@ -9,7 +9,6 @@
 ## 也不会自动接管(要改走 .ui 生成链路须先更新 regen_ui.py 登记)。
 ## 本文件与仓库普通代码一样遵守 Ruff/mypy 规则,由人工维护。
 ################################################################################
-
 from PySide6.QtCore import (
     QCoreApplication,
     QMetaObject,
@@ -29,11 +28,12 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QSizePolicy,
     QSpacerItem,
-    QTableWidget,
-    QTableWidgetItem,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
+
+from file_toolbox.gui.file_models import FileTableModel
 
 
 class Ui_PDFGeneratorDialog:
@@ -86,18 +86,11 @@ class Ui_PDFGeneratorDialog:
 
         self.filesLayout.addLayout(self.btnFileLayout)
 
-        self.table_files = QTableWidget(self.group_files)
+        self.table_files = QTableView(self.group_files)
+        self.table_files.setModel(
+            FileTableModel(["源文件", "输出", "大小", "状态"], self.table_files)
+        )
         self.table_files.setObjectName("table_files")
-        if self.table_files.columnCount() < 4:
-            self.table_files.setColumnCount(4)
-        __qtablewidgetitem_files0 = QTableWidgetItem()
-        self.table_files.setHorizontalHeaderItem(0, __qtablewidgetitem_files0)
-        __qtablewidgetitem_files1 = QTableWidgetItem()
-        self.table_files.setHorizontalHeaderItem(1, __qtablewidgetitem_files1)
-        __qtablewidgetitem_files2 = QTableWidgetItem()
-        self.table_files.setHorizontalHeaderItem(2, __qtablewidgetitem_files2)
-        __qtablewidgetitem_files3 = QTableWidgetItem()
-        self.table_files.setHorizontalHeaderItem(3, __qtablewidgetitem_files3)
         self.table_files.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table_files.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table_files.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -573,26 +566,6 @@ class Ui_PDFGeneratorDialog:
         )
         self.btn_browse_dir.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u6d4f\u89c8", None)
-        )
-        ___qtablewidgetitem = self.table_files.horizontalHeaderItem(0)
-        assert ___qtablewidgetitem is not None
-        ___qtablewidgetitem.setText(
-            QCoreApplication.translate("PDFGeneratorDialog", "\u6e90\u6587\u4ef6", None)
-        )
-        ___qtablewidgetitem1 = self.table_files.horizontalHeaderItem(1)
-        assert ___qtablewidgetitem1 is not None
-        ___qtablewidgetitem1.setText(
-            QCoreApplication.translate("PDFGeneratorDialog", "\u8f93\u51fa", None)
-        )
-        ___qtablewidgetitem2 = self.table_files.horizontalHeaderItem(2)
-        assert ___qtablewidgetitem2 is not None
-        ___qtablewidgetitem2.setText(
-            QCoreApplication.translate("PDFGeneratorDialog", "\u5927\u5c0f", None)
-        )
-        ___qtablewidgetitem3 = self.table_files.horizontalHeaderItem(3)
-        assert ___qtablewidgetitem3 is not None
-        ___qtablewidgetitem3.setText(
-            QCoreApplication.translate("PDFGeneratorDialog", "\u72b6\u6001", None)
         )
         self.label_progress.setText(QCoreApplication.translate("PDFGeneratorDialog", "0%", None))
         self.btn_refresh.setText(

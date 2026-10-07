@@ -13,6 +13,7 @@ Office 引用由 handler 在创建线程释放；service.close 仅清理本服�
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,7 @@ class ReplacePreviewWorker(QThread, LoggableMixin):
         super().__init__(parent)
         self._svc = svc
         self._files = list(files)
-        self._operations = list(operations)
+        self._operations = deepcopy(operations)
         self._cancel = False
 
     def cancel(self) -> None:
@@ -91,7 +92,7 @@ class ReplaceExecuteWorker(QThread, LoggableMixin):
         super().__init__(parent)
         self._svc = svc
         self._files = list(files)
-        self._operations = list(operations)
+        self._operations = deepcopy(operations)
         self._keep_new_format = keep_new_format
         self._cancel = False
 

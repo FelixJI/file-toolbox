@@ -11,8 +11,8 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QThread
-from PySide6.QtGui import QBrush, QCloseEvent, QColor
-from PySide6.QtWidgets import QFileDialog, QHeaderView, QMessageBox, QTableWidgetItem, QWidget
+from PySide6.QtGui import QCloseEvent, QColor
+from PySide6.QtWidgets import QFileDialog, QHeaderView, QMessageBox, QWidget
 
 from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.markdown_convert import (
@@ -20,6 +20,8 @@ from file_toolbox.core.markdown_convert import (
     ConversionResult,
     MarkdownConvertService,
 )
+from file_toolbox.gui.batch_mixin import FileImportMixin
+from file_toolbox.gui.file_models import FileTableModel, table_model
 from file_toolbox.gui.generated.ui_markdown_dialog import Ui_MarkdownConvertDialog
 from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.markdown_worker import MarkdownConvertWorker
@@ -39,7 +41,7 @@ _HINT_XLSX = (
 _logger = logging.getLogger(__name__)
 
 
-class MarkdownConvertTab(QWidget):
+class MarkdownConvertTab(QWidget, FileImportMixin):
     """Markdown 转换 Tab。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -48,6 +50,7 @@ class MarkdownConvertTab(QWidget):
         self._task = TaskLifecycle(self)
         self.ui = Ui_MarkdownConvertDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
+        self.ui.table.setModel(FileTableModel(["文件", "结果", "输出", "说明"], self))
         header = self.ui.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -55,6 +58,7 @@ class MarkdownConvertTab(QWidget):
         self._history = JsonHistoryStore()
         self._svc = MarkdownConvertService(history_store=self._history)
         self._files: list[Path] = []
+        self._init_import(self._files, self.ui.list_files, resolved=True, check_files=True)
         self._connect()
         self._sync_target_ui()
 
@@ -89,19 +93,7 @@ class MarkdownConvertTab(QWidget):
         return path.suffix.lower() in SUPPORTED_SUFFIXES and not path.name.startswith("~$")
 
     def _add_paths(self, paths: list[Path]) -> None:
-        """按去重后的顺序追加受支持文件到列表。"""
-        seen = {p.resolve() for p in self._files}
-        added = 0
-        for p in paths:
-            rp = p.resolve()
-            if not (p.is_file() and self._is_source(p)) or rp in seen:
-                continue
-            seen.add(rp)
-            self._files.append(p)
-            self.ui.list_files.addItem(p.name)
-            added += 1
-        if added:
-            self.ui.lbl_status.setText(f"已选择 {len(self._files)} 个文件")
+        self._queue_import(paths, self._is_source)
 
     def _add_files(self) -> None:
         exts = " ".join(f"*{ext}" for ext in SUPPORTED_SUFFIXES)
@@ -124,14 +116,17 @@ class MarkdownConvertTab(QWidget):
             )
             == QMessageBox.StandardButton.Yes
         )
-        root = Path(d)
-        candidates = root.rglob("*") if recursive else root.iterdir()
-        self._add_paths([p for p in candidates if p.is_file()])
+        self._queue_import([], self._is_source, Path(d), recursive)
+
+    def _import_status(self, text: str) -> None:
+        self.ui.lbl_status.setText(text)
+
+    def _import_busy(self, busy: bool) -> None:
+        self.ui.btn_cancel.setEnabled(busy)
 
     def _clear(self) -> None:
-        self._files.clear()
-        self.ui.list_files.clear()
-        self.ui.table.setRowCount(0)
+        self._invalidate_import()
+        table_model(self.ui.table).replace_rows([])
         self.ui.lbl_status.setText("就绪")
 
     def _browse_outdir(self) -> None:
@@ -180,6 +175,7 @@ class MarkdownConvertTab(QWidget):
         worker.failed.connect(self._on_convert_failed)
         worker.warning.connect(self._on_history_warning)
         worker.finished.connect(self._on_worker_finished)
+        self._business_generation = self._import_generation
         self._task.track(worker)  # 持有引用防 GC;在 start 前登记
         self._set_running(True)
         self.ui.lbl_status.setText("转换中…")
@@ -209,12 +205,12 @@ class MarkdownConvertTab(QWidget):
         self.ui.lbl_status.setText("正在取消,等待当前文件安全结束…")
 
     def _on_progress(self, current: int, total: int, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.lbl_status.setText(f"[{current}/{total}] {msg}")
 
     def _on_convert_ok(self, result: ConversionResult) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self._populate_table(result)
         summary = self._summarize(result)
@@ -255,23 +251,18 @@ class MarkdownConvertTab(QWidget):
                 rows.append(([item.source.name, "成功", str(item.output), ""], False))
             else:
                 rows.append(([item.source.name, "失败", "—", item.error], True))
-        self.ui.table.setRowCount(len(rows))
-        for r, (values, is_failed) in enumerate(rows):
-            for c, val in enumerate(values):
-                cell_item = QTableWidgetItem(val)
-                cell_item.setToolTip(val)
-                if is_failed:
-                    cell_item.setBackground(QBrush(_FAIL_COLOR))
-                self.ui.table.setItem(r, c, cell_item)
+        table_model(self.ui.table).replace_rows(
+            [(values, _FAIL_COLOR if failed else None) for values, failed in rows]
+        )
 
     def _on_history_warning(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         if not self._task.close_pending:
             QMessageBox.warning(self, "历史保存失败", msg)
 
     def _on_convert_failed(self, msg: str) -> None:
-        if not self._task.accepts(self.sender()):
+        if not self._accept_business_result():
             return
         self.ui.lbl_status.setText("转换失败")
         if not self._task.close_pending:
@@ -284,6 +275,8 @@ class MarkdownConvertTab(QWidget):
         self._set_running(False)
         # _set_running 会无条件恢复模式控件;Word 目标下须重新禁用 Excel 模式
         self._sync_target_ui()
+
+        self._resume_import()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """协作取消后异步等待 finished,保留窗口及正在写入的线程。"""
