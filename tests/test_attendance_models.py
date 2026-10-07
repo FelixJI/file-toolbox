@@ -78,7 +78,7 @@ def test_group_model_plain_columns_and_editable_fields(app):
     for column in (2, 3):
         assert model.flags(model.index(0, column)) & Qt.ItemFlag.ItemIsEditable
 
-    assert model.data(model.index(0, 1)) == "2"
+    assert model.data(model.index(0, 1)) == 2
     assert model.setData(model.index(0, 2), "自定义明细")
     assert model.rows()[0].detail_sheet == "自定义明细"
     # roster 模式专属列不可用
@@ -196,3 +196,21 @@ def test_models_clear_and_mode_reset(app):
     assert employee_model.rowCount() == 0
     assert employee_model.columnCount() == 4
     assert employee_model.headerData(2, Qt.Orientation.Horizontal) == "输出考勤组"
+
+
+@pytest.mark.parametrize("roster_mode,count_column", [(False, 1), (True, 2)])
+def test_group_count_sorts_numerically(app, roster_mode, count_column):
+    model = GroupPreviewModel()
+    model.set_rows(
+        (
+            GroupPreviewRow("十人组", "十明细", "十汇总", employee_count=10),
+            GroupPreviewRow("二人组", "二明细", "二汇总", employee_count=2),
+        ),
+        roster_mode=roster_mode,
+    )
+    proxy = QSortFilterProxyModel()
+    proxy.setSourceModel(model)
+    proxy.sort(count_column, Qt.SortOrder.AscendingOrder)
+    assert [proxy.data(proxy.index(row, 0)) for row in range(2)] == ["二人组", "十人组"]
+    proxy.sort(count_column, Qt.SortOrder.DescendingOrder)
+    assert [proxy.data(proxy.index(row, 0)) for row in range(2)] == ["十人组", "二人组"]

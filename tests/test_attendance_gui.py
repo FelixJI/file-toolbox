@@ -243,7 +243,7 @@ def test_roster_preview_keeps_mapping_for_fully_excluded_group(tab, tmp_path, mo
     tab._on_preview_ok(preview)
 
     assert tab._group_model.rowCount() == 2
-    assert tab._group_model.data(tab._group_model.index(1, 2)) == "0"
+    assert tab._group_model.data(tab._group_model.index(1, 2)) == 0
     assert tab._group_model.data(tab._group_model.index(1, 3)) == "出勤明细-劳务"
     monkeypatch.setattr(tab, "_preview", lambda: None)
     tab._apply_preview_adjustments()

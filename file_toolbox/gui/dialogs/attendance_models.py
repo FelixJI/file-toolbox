@@ -84,17 +84,17 @@ class GroupPreviewModel(QAbstractTableModel):
             return None
         row = self._rows[index.row()]
         if self._roster_mode:
-            values: tuple[str, ...] = (
+            values: tuple[str | int, ...] = (
                 row.attendance_group,
                 row.group_alias,
-                str(row.employee_count),
+                row.employee_count,
                 row.detail_sheet,
                 row.summary_sheet,
             )
         else:
             values = (
                 row.attendance_group,
-                str(row.employee_count),
+                row.employee_count,
                 row.detail_sheet,
                 row.summary_sheet,
             )
