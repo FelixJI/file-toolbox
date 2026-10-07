@@ -55,6 +55,9 @@ def test_command_includes_native_package_data_and_licenses() -> None:
     assert "--include-distribution-metadata=pypdfium2" in cmd
     assert "--include-package=velopack" in cmd
     assert "--include-package-data=velopack" in cmd
+    assert "--include-package=pypandoc" in cmd
+    assert "--include-distribution-metadata=pypandoc_binary" in cmd
+    assert any(flag.endswith("pandoc.nuitka-package.config.yml") for flag in cmd)
 
 
 def test_command_bundles_changelog_next_to_exe() -> None:

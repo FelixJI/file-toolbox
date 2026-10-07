@@ -332,6 +332,10 @@ def _nuitka_command(entry: Path, version: str, output_dir: Path) -> list[str]:
         # velopack:自更新原生绑定 DLL(包数据)
         "--include-package=velopack",
         "--include-package-data=velopack",
+        # Pandoc 是独立程序,通过 Nuitka 的 executable 声明随包,不能当普通数据遗漏。
+        "--include-package=pypandoc",
+        "--include-distribution-metadata=pypandoc_binary",
+        f"--user-package-configuration-file={_ROOT / '.ci' / 'pandoc.nuitka-package.config.yml'}",
         # CHANGELOG 随包:exe 同级,关于页 get_changelog() 回退链第 2 级
         f"--include-data-files={_ROOT / 'CHANGELOG.md'}=CHANGELOG.md",
         f"--output-dir={output_dir}",

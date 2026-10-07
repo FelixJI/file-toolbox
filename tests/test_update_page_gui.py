@@ -354,7 +354,7 @@ def test_banner_click_navigates_without_download(app, monkeypatch, tmp_path):
     win, coordinator = _window_with_available(app, monkeypatch, tmp_path)
     win._on_update_checked(_available("8.0.0"))
     win._update_banner.click()
-    assert win._tabs.currentIndex() == 9
+    assert win._tabs.currentIndex() == 10
     assert coordinator.download_calls == 0
     assert win._download_request is None
 
@@ -362,11 +362,11 @@ def test_banner_click_navigates_without_download(app, monkeypatch, tmp_path):
 def test_about_button_navigates_without_download(app, monkeypatch, tmp_path):
     """关于页"打开更新页面" → 仅导航;SDK 调用 0 次(AC1)。"""
     win, coordinator = _window_with_available(app, monkeypatch, tmp_path)
-    win._tabs.setCurrentIndex(10)  # 关于页
+    win._tabs.setCurrentIndex(11)  # 关于页
     about = win._about_tab
     assert about is not None
     about.btn_open_update_page.click()
-    assert win._tabs.currentIndex() == 9
+    assert win._tabs.currentIndex() == 10
     assert coordinator.download_calls == 0
 
 
@@ -374,14 +374,14 @@ def test_update_page_reachable_without_new_version(app, monkeypatch, tmp_path):
     """无新版/未检查时更新页仍可从正常导航进入(AC1)。"""
     monkeypatch.chdir(tmp_path)
     win = MainWindow(CountingCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     assert win._update_tab is not None
     assert win._update_tab.btn_download_update.isHidden() is True
 
 
 def test_check_result_displays_on_constructed_page(app, monkeypatch, tmp_path):
     win, _ = _window_with_available(app, monkeypatch, tmp_path)
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     win._update_worker.do_check()  # coordinator 注入 → AVAILABLE 8.0.0
     app.processEvents()
     assert "8.0.0" in win._update_tab._status_lbl.text()
@@ -392,7 +392,7 @@ def test_auto_result_replayed_on_lazy_construction(app, monkeypatch, tmp_path):
     """自动检查先于页面创建 → 构造后回放完整状态(AC3)。"""
     win, _ = _window_with_available(app, monkeypatch, tmp_path)
     win._on_update_checked(_available("8.0.0", notes="- 内容"))
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     assert "8.0.0" in win._update_tab._status_lbl.text()
     assert win._update_tab.btn_download_update.isHidden() is False
     assert "内容" in win._update_tab._notes_view.toPlainText()
@@ -439,7 +439,7 @@ def test_download_flow_locks_business_but_not_update_page(app, monkeypatch, tmp_
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Apply)
     win._update_worker.start()
     try:
-        win._tabs.setCurrentIndex(9)
+        win._tabs.setCurrentIndex(10)
         win._on_update_checked(_available("8.0.0"))
         win._start_download()
 
@@ -470,7 +470,7 @@ def test_page_switch_does_not_restart_transaction(app, monkeypatch, tmp_path):
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Apply)
     win._update_worker.start()
     try:
-        win._tabs.setCurrentIndex(9)
+        win._tabs.setCurrentIndex(10)
         win._on_update_checked(_available("8.0.0"))
         win._start_download()
         request = win._download_request
@@ -479,7 +479,7 @@ def test_page_switch_does_not_restart_transaction(app, monkeypatch, tmp_path):
 
         win._tabs.setCurrentIndex(0)
         app.processEvents()
-        win._tabs.setCurrentIndex(9)
+        win._tabs.setCurrentIndex(10)
         app.processEvents()
 
         assert win._download_request is request
@@ -499,7 +499,7 @@ def test_repeated_download_clicks_single_transaction(app, monkeypatch, tmp_path)
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Apply)
     win._update_worker.start()
     try:
-        win._tabs.setCurrentIndex(9)
+        win._tabs.setCurrentIndex(10)
         win._on_update_checked(_available("8.0.0"))
         win._start_download()
         _wait_until(lambda: coordinator.download_calls == 1)
@@ -520,7 +520,7 @@ def test_lazy_constructed_business_tab_stays_locked_during_download(app, monkeyp
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Apply)
     win._update_worker.start()
     try:
-        win._tabs.setCurrentIndex(9)
+        win._tabs.setCurrentIndex(10)
         win._on_update_checked(_available("8.0.0"))
         win._start_download()
         _wait_until(lambda: coordinator.download_calls == 1)
@@ -547,7 +547,7 @@ def test_uncertain_apply_result_shown_on_update_page(app, monkeypatch, tmp_path)
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
     win._update_worker.start()
     try:
-        win._tabs.setCurrentIndex(9)
+        win._tabs.setCurrentIndex(10)
         win._on_update_checked(_available("8.0.0"))
         win._start_download()
         request = win._download_request
@@ -576,7 +576,7 @@ def test_update_page_lazy_construction_replays_active_download(app, monkeypatch,
     win._last_progress = 62
     win._set_business_tabs_locked(True)
 
-    win._tabs.setCurrentIndex(9)
+    win._tabs.setCurrentIndex(10)
     app.processEvents()
 
     assert win._update_tab._progress.isHidden() is False

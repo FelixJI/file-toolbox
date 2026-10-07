@@ -1,0 +1,11 @@
+- module-name: 'pypandoc'
+  dlls:
+    - from_filenames:
+        relative_path: 'files'
+        prefixes:
+          - 'pandoc'
+        executable: 'yes'
+      when: 'win32'
+  data-files:
+    - patterns:
+        - 'files/COPYRIGHT.txt'

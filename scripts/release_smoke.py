@@ -118,6 +118,13 @@ def check_release_smoke(artifacts_dir: Path, version: str) -> None:
         names = package.namelist()
         if "FileToolbox.exe" not in names and "FileToolbox/FileToolbox.exe" not in names:
             raise ValueError("portable archive must contain FileToolbox.exe")
+        prefix = "" if "FileToolbox.exe" in names else "FileToolbox/"
+        # Velopack 根目录是启动器，应用及其资源位于 current/。
+        if "current/FileToolbox.exe" in names:
+            prefix = "current/"
+        for resource in ("pypandoc/files/pandoc.exe", "pypandoc/files/COPYRIGHT.txt"):
+            if prefix + resource not in names:
+                raise ValueError(f"portable archive must contain {resource}")
     full = artifacts_dir / f"FileToolbox-{version}-full.nupkg"
     with zipfile.ZipFile(full):
         pass

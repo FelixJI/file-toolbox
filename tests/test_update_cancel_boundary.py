@@ -209,7 +209,7 @@ def win(app, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     manager = Manager()
     window = MainWindow(coordinator(manager))
-    window._tabs.setCurrentIndex(9)  # 下载只能从独立更新页发起(#129)
+    window._tabs.setCurrentIndex(10)  # 下载只能从独立更新页发起(#129)
     window._pending_update = window._update_worker._coordinator.check()
     return window
 
@@ -364,7 +364,7 @@ def test_gui_update_excludes_new_business_until_result(app, monkeypatch, tmp_pat
     manager = Manager()
     window = MainWindow(coordinator(manager))
     window._tabs.setCurrentIndex(6)
-    window._tabs.setCurrentIndex(9)  # 构造更新页:下载的唯一发起入口
+    window._tabs.setCurrentIndex(10)  # 构造更新页:下载的唯一发起入口
     window._pending_update = window._update_worker._coordinator.check()
     entered, release = Event(), Event()
 
