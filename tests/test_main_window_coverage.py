@@ -13,7 +13,9 @@ from PySide6.QtCore import QMetaObject
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from file_toolbox.common.tool_registry import TOOL_SPECS, ToolCategory, ToolSpec
 from file_toolbox.gui import main_window as mw_mod
+from file_toolbox.gui.dialogs.mkdir_tab import BatchFolderCreatorDialog
 from file_toolbox.gui.dialogs.rename_tab import FileRenamerDialog
 from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
 from file_toolbox.gui.main_window import MainWindow
@@ -905,3 +907,160 @@ def test_failed_tab_restores_preexisting_update_message(win, monkeypatch, update
     win._lazy_specs[1] = (label, original, attr)
     win._tabs.setCurrentIndex(1)
     assert win.statusBar().currentMessage() == message
+
+
+# ---------------------------------------------------------------------------
+# 统一工具登记驱动:插入/重排 fixture 工具验证导航、历史、锁定与收尾
+# 不依赖数字索引或平行列表(Issue #138 AC1)
+# ---------------------------------------------------------------------------
+
+
+def _fixture_spec() -> ToolSpec:
+    """仅测试使用的业务工具:复用轻量 mkdir 页实现,证明登记一行即可接入。"""
+    return ToolSpec(
+        tool_id="fixture_tool",
+        label="夹具工具",
+        capability="夹具工具",
+        gui_module="file_toolbox.gui.dialogs.mkdir_tab",
+        gui_class="BatchFolderCreatorDialog",
+        attr="_fixture_tab",
+        category=ToolCategory.BUSINESS,
+        history_key="fixture_tool",
+    )
+
+
+def test_fixture_insertion_keeps_update_navigation_by_stable_id(app, monkeypatch, tmp_path):
+    """插入业务工具后:更新页按稳定 ID 定位,历史按钮/页面顺序随登记变化。"""
+    monkeypatch.chdir(tmp_path)
+    specs = list(TOOL_SPECS)
+    specs.insert(3, _fixture_spec())
+    win = MainWindow(LatestCoordinator(), specs=specs)
+
+    assert win._tabs.count() == 13
+    assert win._tabs.tabText(3) == "夹具工具"
+    assert win._tab_tools[3] == "fixture_tool"
+    # 更新/关于页被顺延,导航不依赖固定序号 10
+    assert win._update_tab_index == 11
+    win._open_update_page()
+    assert win._tabs.currentIndex() == 11
+    assert win.btn_history.isEnabled() is False
+    win._tabs.setCurrentIndex(3)
+    assert isinstance(win._fixture_tab, BatchFolderCreatorDialog)
+    assert win.btn_history.isEnabled() is True
+
+
+def test_fixture_history_opens_registered_tool(app, monkeypatch, tmp_path):
+    """历史按钮对应登记的实际工具:fixture 页打开 fixture_tool 历史。"""
+    monkeypatch.chdir(tmp_path)
+    specs = list(TOOL_SPECS)
+    specs.insert(0, _fixture_spec())
+    win = MainWindow(LatestCoordinator(), specs=specs)
+    opened: list[str] = []
+
+    class SpyDialog:
+        def __init__(self, _history, tool, _parent=None):
+            opened.append(tool)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr("file_toolbox.gui.dialogs.history_dialog.HistoryDialog", SpyDialog)
+    assert win._tabs.currentIndex() == 0
+    win._open_history_for_current_tab()
+    assert opened == ["fixture_tool"]
+
+
+def test_fixture_tab_locked_and_lazy_locked_by_registry(app, monkeypatch, tmp_path):
+    """业务锁覆盖 fixture 页:已构造页禁用,下载期间懒构造页也按锁初始化(AC4)。"""
+    monkeypatch.chdir(tmp_path)
+    specs = list(TOOL_SPECS)
+    specs.insert(3, _fixture_spec())
+
+    # 已构造后加锁 → 解锁
+    win = MainWindow(LatestCoordinator(), specs=specs)
+    win._tabs.setCurrentIndex(3)
+    win._set_business_tabs_locked(True)
+    assert win._fixture_tab.isEnabled() is False
+    win._set_business_tabs_locked(False)
+    assert win._fixture_tab.isEnabled() is True
+
+    # 锁定期间懒构造 → 构造即禁用,系统页不受影响
+    win2 = MainWindow(LatestCoordinator(), specs=specs)
+    win2._set_business_tabs_locked(True)
+    win2._tabs.setCurrentIndex(3)
+    assert win2._fixture_tab is not None and win2._fixture_tab.isEnabled() is False
+    win2._open_update_page()
+    assert win2._update_tab is not None and win2._update_tab.isEnabled() is True
+
+
+def test_fixture_tab_participates_in_shutdown(app, monkeypatch, tmp_path):
+    """关闭收尾来自登记:已实例化 fixture 页的 closeEvent 被调用(AC1)。"""
+    monkeypatch.chdir(tmp_path)
+    specs = list(TOOL_SPECS)
+    specs.insert(3, _fixture_spec())
+    win = MainWindow(LatestCoordinator(), specs=specs)
+    win._tabs.setCurrentIndex(3)
+    assert win._fixture_tab is not None
+    calls = []
+    monkeypatch.setattr(type(win._fixture_tab), "closeEvent", lambda self, event: calls.append(1))
+    win.closeEvent(QCloseEvent())
+    assert calls == [1]
+
+
+def test_system_pages_relocated_still_wired_by_stable_id(app, monkeypatch, tmp_path):
+    """系统页移动到不同位置后仍按稳定 ID 接线:导航/历史/锁定全部正确(AC1)。"""
+    from file_toolbox.gui.dialogs.about_tab import AboutTab
+
+    monkeypatch.chdir(tmp_path)
+    specs = list(TOOL_SPECS)
+    update = next(s for s in specs if s.tool_id == "update")
+    about = next(s for s in specs if s.tool_id == "about")
+    specs.remove(update)
+    specs.remove(about)
+    specs.insert(1, update)  # 更新页挪到首屏业务页(重命名)之后
+    specs.append(about)  # 关于页挪到最后
+    win = MainWindow(LatestCoordinator(), specs=specs)
+
+    # 业务首屏保持:首 Tab 仍是重命名并被构造
+    assert win._tabs.tabText(0) == "重命名"
+    assert isinstance(win._rename_tab, FileRenamerDialog)
+    assert win._update_tab_index == 1
+
+    # 更新页新位置:历史禁用,统一入口导航到位
+    win._tabs.setCurrentIndex(1)
+    assert win._update_tab is not None
+    assert win.btn_history.isEnabled() is False
+    win._tabs.setCurrentIndex(0)
+    win._open_update_page()
+    assert win._tabs.currentIndex() == 1
+
+    # 关于页新位置:「打开更新页面」按稳定 ID 导航到更新页
+    win._tabs.setCurrentIndex(win._tabs.count() - 1)
+    assert isinstance(win._about_tab, AboutTab)
+    win._about_tab.btn_open_update_page.click()
+    assert win._tabs.currentIndex() == 1
+
+    # 业务锁分类不随位置漂移:业务页禁用,系统页保持可用
+    win._set_business_tabs_locked(True)
+    assert win._rename_tab.isEnabled() is False
+    assert win._update_tab.isEnabled() is True and win._about_tab.isEnabled() is True
+
+
+def test_unopened_fixture_tab_survives_business_scan_and_close(app, monkeypatch, tmp_path):
+    """未打开的 fixture 页:登记属性已初始化为 None,业务检查/关闭不抛错(AC1/AC4)。"""
+    monkeypatch.chdir(tmp_path)
+    specs = list(TOOL_SPECS)
+    specs.insert(3, _fixture_spec())
+    win = MainWindow(LatestCoordinator(), specs=specs)
+    assert win._fixture_tab is None
+    assert win._running_business_workers() == []
+    event = QCloseEvent()
+    win.closeEvent(event)  # 不抛 AttributeError,且不把未构造页当作待收尾实例
+    assert event.isAccepted()
+
+
+def test_default_window_uses_production_registry(win):
+    """未注入 specs 时使用生产登记:属性/顺序与登记一致。"""
+    assert win._specs == TOOL_SPECS
+    assert [win._tabs.tabText(i) for i in range(win._tabs.count())] == [s.label for s in TOOL_SPECS]
+    assert win._update_tab_index == 10

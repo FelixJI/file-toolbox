@@ -343,3 +343,41 @@ def test_history_dialog_partial_undo_retry_and_repeat(app, tmp_path, monkeypatch
     assert messages[-1] == "该记录已经撤销。"
     assert len(questions) == 2
     dlg.close()
+
+
+# ---------------------------------------------------------------------------
+# 登记驱动的历史扩展(Issue #138 AC2):新工具摘要来自登记回调,对话框零改动
+# ---------------------------------------------------------------------------
+
+
+def test_registered_fixture_tool_summary_without_dialog_changes(app, tmp_path, monkeypatch):
+    """登记新工具(带 summary 回调)后,历史对话框按回调渲染且无撤销按钮。"""
+    from file_toolbox.common import tool_registry
+
+    def fixture_summary(data):
+        return f"fixture {data.get('n', 0)} 项"
+
+    fixture = tool_registry.ToolSpec(
+        tool_id="fixture_tool",
+        label="夹具工具",
+        capability="夹具工具",
+        gui_module="file_toolbox.gui.dialogs.mkdir_tab",
+        gui_class="BatchFolderCreatorDialog",
+        attr="_fixture_tab",
+        category=tool_registry.ToolCategory.BUSINESS,
+        history_key="fixture_tool",
+        summary=fixture_summary,
+    )
+    monkeypatch.setattr(tool_registry, "TOOL_SPECS", (*tool_registry.TOOL_SPECS, fixture))
+
+    store = _store_with_records(tmp_path, "fixture_tool", [{"n": 7}])
+    dlg = HistoryDialog(store, tool="fixture_tool")
+    assert "fixture 7 项" in dlg.list_widget.item(0).text()
+    assert dlg.btn_undo.isHidden()  # 非 rename 工具不提供撤销(既有特例)
+
+
+def test_summary_label_dispatches_via_registry(monkeypatch):
+    """_summary_label 薄兼容入口:非 dict 负载与未登记工具保持旧行为。"""
+    assert _summary_label("rename", "not-a-dict") == "记录数据无效"
+    unknown = {"key": "value"}
+    assert _summary_label("unknown_tool", unknown) == str(unknown)[:40]

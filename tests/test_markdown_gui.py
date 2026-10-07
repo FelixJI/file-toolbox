@@ -409,3 +409,181 @@ def test_main_window_registers_markdown_tab(app, monkeypatch, tmp_path):
     win._tabs.setCurrentIndex(10)
     assert win._tabs.tabText(10) == "更新"
     assert win.btn_history.isEnabled() is False
+
+
+# ==================== 公共任务生命周期契约(TaskLifecycle,真实 QThread) ====================
+
+
+def _latest_coordinator():
+    from file_toolbox.updater.models import UpdateCheckResult, UpdateCheckStatus
+
+    class _Latest:
+        def check(self):
+            return UpdateCheckResult(UpdateCheckStatus.LATEST)
+
+        def download_and_apply(self, *args, **kwargs):
+            raise AssertionError("不应触发下载")
+
+    return _Latest()
+
+
+def test_result_before_finished_blocks_reentry_and_stale_signals(tab, app, monkeypatch, tmp_path):
+    """真实线程:结果先发/finished 后到期间不可重入,旧线程信号被隔离(AC5)。"""
+    import threading
+
+    from PySide6.QtCore import QThread, Signal
+
+    release = threading.Event()
+    result_seen = threading.Event()
+
+    class HeldWorker(MarkdownConvertWorker):
+        def run(self):
+            super().run()  # 先真实投递结果信号,再保持线程存活(finished 后到)
+            result_seen.set()
+            assert release.wait(10)
+
+    monkeypatch.setattr("file_toolbox.gui.dialogs.markdown_tab.MarkdownConvertWorker", HeldWorker)
+    a = _mk(tmp_path, "a.md")
+    tab._svc = _FakeService(
+        result=ConversionResult([ConversionItem(source=a, output=tmp_path / "a.docx")])
+    )
+    tab._add_paths([a])
+    tab._convert()
+    worker = tab._worker
+    assert isinstance(worker, HeldWorker) and worker.isRunning()
+    assert result_seen.wait(5)
+
+    deadline = time.monotonic() + 5
+    while tab.ui.lbl_status.text() != "转换完成:成功 1" and time.monotonic() < deadline:
+        app.processEvents()
+    assert tab.ui.lbl_status.text() == "转换完成:成功 1"
+    assert tab._worker is worker, "结果信号不得提前释放线程"
+    assert tab.ui.btn_convert.isEnabled() is False, "真实 finished 前不得恢复启动"
+
+    # 不可重入:结果已到但线程未结束,再次点击不能开新任务
+    tab._add_paths([_mk(tmp_path, "b.md")])
+    tab._convert()
+    assert tab._worker is worker
+    assert len(tab._svc.calls) == 1
+
+    class LateSignals(QThread):
+        finished_ok = Signal(object)
+        failed = Signal(str)
+        warning = Signal(str)
+        progress = Signal(int, int, str)
+
+    late = LateSignals(tab)
+    late.finished_ok.connect(tab._on_convert_ok)
+    late.failed.connect(tab._on_convert_failed)
+    late.warning.connect(tab._on_history_warning)
+    late.progress.connect(tab._on_progress)
+    late.finished.connect(tab._on_worker_finished)
+    previous = tab.ui.lbl_status.text(), tab.ui.table.rowCount()
+    late.finished_ok.emit(None)
+    late.failed.emit("stale failure")
+    late.warning.emit("stale warning")
+    late.progress.emit(9, 9, "stale progress")
+    late.finished.emit()
+    app.processEvents()
+    assert (tab.ui.lbl_status.text(), tab.ui.table.rowCount()) == previous
+    assert tab._worker is worker
+
+    # 真实 finished 到达后才释放线程引用并恢复控件
+    release.set()
+    assert worker.wait(5000)
+    deadline = time.monotonic() + 5
+    while tab._worker is not None and time.monotonic() < deadline:
+        app.processEvents()
+    assert tab._worker is None
+    assert tab.ui.btn_convert.isEnabled() is True
+    assert tab.ui.btn_cancel.isEnabled() is False
+
+
+def test_deferred_close_waits_for_real_finished_and_keeps_outputs(tab, app, monkeypatch, tmp_path):
+    """协作关闭:取消请求后等待真实 finished;已完成产物保留在表格(AC5)。"""
+    import threading
+
+    release = threading.Event()
+    result_seen = threading.Event()
+
+    class HeldWorker(MarkdownConvertWorker):
+        def run(self):
+            super().run()
+            result_seen.set()
+            assert release.wait(10)
+
+    monkeypatch.setattr("file_toolbox.gui.dialogs.markdown_tab.MarkdownConvertWorker", HeldWorker)
+    a, b = _mk(tmp_path, "a.md"), _mk(tmp_path, "b.md")
+    out = tmp_path / "a.docx"
+    result = ConversionResult(
+        [ConversionItem(source=a, output=out), ConversionItem(source=b, skipped=True)],
+        cancelled=True,
+    )
+    tab._svc = _FakeService(result=result)
+    tab._add_paths([a, b])
+    tab._convert()
+    worker = tab._worker
+    assert worker is not None
+    tab.show()
+    assert result_seen.wait(5)
+
+    event = QCloseEvent()
+    before = time.monotonic()
+    tab.closeEvent(event)
+    assert not event.isAccepted()
+    assert time.monotonic() - before < 0.5, "关闭不得阻塞事件循环"
+    assert tab.isVisible() and tab.close_pending is True
+
+    # 取消路径:结果先到 → 已完成产物保留展示,收尾弹窗被抑制
+    deadline = time.monotonic() + 5
+    while tab.ui.table.rowCount() == 0 and time.monotonic() < deadline:
+        app.processEvents()
+    assert tab.ui.table.rowCount() == 2
+    assert tab.ui.table.item(0, 1).text() == "成功"
+    assert tab._worker is worker
+
+    release.set()
+    assert worker.wait(5000)
+    deadline = time.monotonic() + 5
+    while tab.isVisible() and time.monotonic() < deadline:
+        app.processEvents()
+    assert not tab.isVisible()
+    assert tab.close_pending is False and tab._worker is None
+
+
+def test_markdown_tab_disabled_when_lazily_built_during_download(app, monkeypatch, tmp_path):
+    """下载锁期间懒构造的业务页(Markdown)按锁状态禁用,更新页保持可用(AC4)。"""
+    monkeypatch.chdir(tmp_path)
+    from file_toolbox.gui.main_window import MainWindow
+
+    win = MainWindow(_latest_coordinator())
+    win._set_business_tabs_locked(True)
+    win._tabs.setCurrentIndex(9)
+    assert win._markdown_tab is not None and win._markdown_tab.isEnabled() is False
+    win._open_update_page()
+    assert win._update_tab is not None and win._update_tab.isEnabled() is True
+
+
+def test_running_markdown_worker_blocks_update_start(app, monkeypatch, tmp_path):
+    """Markdown 任务运行中经 _task 登记:更新提交被安全拒绝(主窗口互斥)。"""
+    from PySide6.QtCore import QThread
+
+    from file_toolbox.gui.main_window import MainWindow
+    from file_toolbox.updater.models import UpdateCheckResult, UpdateCheckStatus
+
+    monkeypatch.chdir(tmp_path)
+    win = MainWindow(_latest_coordinator())
+    win._tabs.setCurrentIndex(9)
+    assert win._markdown_tab is not None
+    thread = QThread(win._markdown_tab)  # 父子关系使其进入 findChildren 收尾扫描
+    thread.start()
+    try:
+        assert thread in win._running_business_workers()
+        warned: list[str] = []
+        monkeypatch.setattr(QMessageBox, "warning", lambda *_a: warned.append("w"))
+        win._pending_update = UpdateCheckResult(UpdateCheckStatus.AVAILABLE, version="9.9.9")
+        win._start_download()
+        assert warned == ["w"] and win._download_request is None
+    finally:
+        thread.quit()
+        assert thread.wait(5000)

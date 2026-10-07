@@ -7,11 +7,13 @@ import sys
 from pathlib import Path
 
 from file_toolbox import __version__
+from file_toolbox.common.tool_registry import TOOL_SPECS, ToolCategory
 
 APP_NAME = "File Toolbox"
-APP_DESCRIPTION = (
-    "批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、考勤汇总、"
-    "发票识别、Excel 合并、PDF 排序、计划排布、Markdown 转换"
+# 能力简介由统一工具登记派生(业务页 capability 按登记顺序拼接),
+# 不在这里维护第二份能力清单或硬编码总数。
+APP_DESCRIPTION = "批量文件工具箱:" + "、".join(
+    spec.capability for spec in TOOL_SPECS if spec.category is ToolCategory.BUSINESS
 )
 VERSION = __version__
 REPO_URL = "https://github.com/FelixJI/file-toolbox"

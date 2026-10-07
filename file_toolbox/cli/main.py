@@ -16,12 +16,17 @@ from file_toolbox.cli.plan_schedule_cmd import plan_schedule
 from file_toolbox.cli.rename_cmd import rename
 from file_toolbox.cli.replace_cmd import replace
 from file_toolbox.common.logging_config import configure_logging
+from file_toolbox.common.tool_registry import TOOL_SPECS
+
+# 能力说明由统一工具登记派生:仅列出具备真实 CLI 子命令的工具
+# (考勤汇总目前仅 GUI),不在此维护第二份能力清单。
+_CLI_CAPABILITIES = "、".join(spec.capability for spec in TOOL_SPECS if spec.cli_command)
 
 # OpParseError 属于用户输入错误,不应以 Python traceback 暴露给终端用户。
 # pretty_exceptions_enable=False 关闭 Typer 对它的彩色堆栈包装,改由这里统一处理。
 app = typer.Typer(
     name="file-toolbox",
-    help="批量文件工具箱:重命名、建文件夹、生成 PDF、内容替换、Excel 合并、PDF 排序、计划排布、Markdown 转换",
+    help=f"批量文件工具箱:{_CLI_CAPABILITIES}",
     invoke_without_command=True,
     pretty_exceptions_show_locals=False,
 )

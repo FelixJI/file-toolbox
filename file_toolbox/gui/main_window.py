@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from PySide6.QtCore import QByteArray, QMetaObject, QRect, Qt, QThread, QTimer
@@ -25,7 +26,15 @@ from file_toolbox.common.logging_config import configure_logging
 from file_toolbox.common.metadata import runtime_version
 from file_toolbox.common.paths import current_data_root_policy, use_data_root_policy
 from file_toolbox.common.runtime import is_packaged_runtime
+from file_toolbox.common.tool_registry import (
+    ABOUT_TOOL_ID,
+    TOOL_SPECS,
+    UPDATE_TOOL_ID,
+    ToolCategory,
+    ToolSpec,
+)
 from file_toolbox.gui.freeze_watchdog import FreezeWatchdog
+from file_toolbox.gui.tab_factory import create_tab
 from file_toolbox.gui.updater_widget import UpdateBanner, UpdateWorker
 from file_toolbox.updater import create_update_coordinator
 from file_toolbox.updater.coordinator import UpdateCoordinator, UpdateRequest
@@ -37,7 +46,7 @@ from file_toolbox.updater.models import (
 )
 
 if TYPE_CHECKING:
-    # Tab 类仅在类型标注中使用;运行时导入延迟到各 _make_*_tab 工厂,
+    # Tab 类仅在类型标注中使用;运行时导入延迟到 gui.tab_factory 懒工厂,
     # 避免 dialogs 包(及其重依赖 pypdfium2/pypdf/chardet/cattrs)进入启动链。
     from file_toolbox.gui.dialogs.about_tab import AboutTab
     from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab
@@ -56,80 +65,6 @@ _logger = logging.getLogger(__name__)
 
 # 窗口几何持久化 key(settings.json):base64(saveGeometry)。
 _GEOMETRY_KEY = "window/geometry"
-# 独立更新页在标签栏中的固定索引(10 个业务页之后、关于页之前)。
-_UPDATE_TAB_INDEX = 10
-
-
-def _make_rename_tab() -> FileRenamerDialog:
-    from file_toolbox.gui.dialogs.rename_tab import FileRenamerDialog
-
-    return FileRenamerDialog()
-
-
-def _make_mkdir_tab() -> BatchFolderCreatorDialog:
-    from file_toolbox.gui.dialogs.mkdir_tab import BatchFolderCreatorDialog
-
-    return BatchFolderCreatorDialog()
-
-
-def _make_pdf_tab() -> PDFGeneratorDialog:
-    from file_toolbox.gui.dialogs.pdf_tab import PDFGeneratorDialog
-
-    return PDFGeneratorDialog()
-
-
-def _make_replace_tab() -> ContentReplaceDialog:
-    from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
-
-    return ContentReplaceDialog()
-
-
-def _make_attendance_tab() -> AttendanceTab:
-    from file_toolbox.gui.dialogs.attendance_tab import AttendanceTab
-
-    return AttendanceTab()
-
-
-def _make_invoice_tab() -> InvoiceTab:
-    from file_toolbox.gui.dialogs.invoice_tab import InvoiceTab
-
-    return InvoiceTab()
-
-
-def _make_excel_merge_tab() -> ExcelMergeTab:
-    from file_toolbox.gui.dialogs.excel_merge_tab import ExcelMergeTab
-
-    return ExcelMergeTab()
-
-
-def _make_pdf_sort_tab() -> PdfSortTab:
-    from file_toolbox.gui.dialogs.pdf_sort_tab import PdfSortTab
-
-    return PdfSortTab()
-
-
-def _make_plan_schedule_tab() -> PlanScheduleTab:
-    from file_toolbox.gui.dialogs.plan_schedule_tab import PlanScheduleTab
-
-    return PlanScheduleTab()
-
-
-def _make_markdown_tab() -> MarkdownConvertTab:
-    from file_toolbox.gui.dialogs.markdown_tab import MarkdownConvertTab
-
-    return MarkdownConvertTab()
-
-
-def _make_update_tab() -> UpdateTab:
-    from file_toolbox.gui.dialogs.update_tab import UpdateTab
-
-    return UpdateTab()
-
-
-def _make_about_tab() -> AboutTab:
-    from file_toolbox.gui.dialogs.about_tab import AboutTab
-
-    return AboutTab()
 
 
 def _construct_tab(factory: Callable[[], QWidget], name: str) -> QWidget:
@@ -143,10 +78,24 @@ def _construct_tab(factory: Callable[[], QWidget], name: str) -> QWidget:
 class MainWindow(QMainWindow):
     """工具箱主窗口，10 个功能 Tab。"""
 
-    def __init__(self, coordinator: UpdateCoordinator | None = None) -> None:
+    def __init__(
+        self,
+        coordinator: UpdateCoordinator | None = None,
+        *,
+        specs: Sequence[ToolSpec] | None = None,
+    ) -> None:
+        """coordinator 可注入测试替身;specs 可注入 fixture 登记(测试缝隙)。"""
         super().__init__()
         self.setWindowTitle("File Toolbox")
         self._restore_window_geometry()
+        # 统一工具登记:页面顺序/名称/历史/分类的唯一来源;系统页按稳定 ID 定位,
+        # 不再依赖固定标签序号(插入/重排工具无需修改主窗口)。
+        self._specs: tuple[ToolSpec, ...] = tuple(TOOL_SPECS if specs is None else specs)
+        self._spec_by_index: dict[int, ToolSpec] = dict(enumerate(self._specs))
+        update_index = next(
+            (i for i, spec in enumerate(self._specs) if spec.tool_id == UPDATE_TOOL_ID), -1
+        )
+        self._update_tab_index = update_index
 
         self._history = JsonHistoryStore()
 
@@ -186,48 +135,26 @@ class MainWindow(QMainWindow):
         self._markdown_tab: MarkdownConvertTab | None = None
         self._update_tab: UpdateTab | None = None
         self._about_tab: AboutTab | None = None
+        # 登记驱动的实例槽:每个登记属性先置 None(含 fixture/新增工具),业务
+        # 检查/关闭收尾按登记遍历时,未构造页面不会因缺属性抛 AttributeError;
+        # 已知属性保留上方静态类型声明。
+        for spec in self._specs:
+            setattr(self, spec.attr, None)
         # 懒构造登记:index -> (标签文本, Tab 工厂, 属性名);占位页被真实 Tab 原位替换。
-        # 含首屏(重命名):由 __init__ 末尾的 _on_tab_changed 统一触发构造。
+        # 工厂由统一工具登记的模块/类名经 tab_factory 懒导入生成,主窗口不再为
+        # 每个工具手写工厂。含首屏(重命名):由 __init__ 末尾的 _on_tab_changed 统一触发。
         self._lazy_specs: dict[int, tuple[str, Callable[[], QWidget], str]] = {
-            index: (label, factory, attr)
-            for index, (label, factory, attr) in enumerate(
-                [
-                    ("重命名", _make_rename_tab, "_rename_tab"),
-                    ("建文件夹", _make_mkdir_tab, "_mkdir_tab"),
-                    ("生成PDF", _make_pdf_tab, "_pdf_tab"),
-                    ("内容替换", _make_replace_tab, "_replace_tab"),
-                    ("考勤汇总", _make_attendance_tab, "_attendance_tab"),
-                    ("发票识别", _make_invoice_tab, "_invoice_tab"),
-                    ("Excel合并", _make_excel_merge_tab, "_excel_merge_tab"),
-                    ("PDF排序", _make_pdf_sort_tab, "_pdf_sort_tab"),
-                    ("计划排布", _make_plan_schedule_tab, "_plan_schedule_tab"),
-                    ("Markdown转换", _make_markdown_tab, "_markdown_tab"),
-                    ("更新", _make_update_tab, "_update_tab"),
-                    ("关于", _make_about_tab, "_about_tab"),
-                ]
-            )
+            index: (spec.label, partial(create_tab, spec), spec.attr)
+            for index, spec in enumerate(self._specs)
         }
-        self._tab_attrs = tuple(spec[2] for spec in self._lazy_specs.values())
+        self._tab_attrs = tuple(spec.attr for spec in self._specs)
         self._closing_workers: set[QThread] = set()
         self._restart_pending = False
         self._close_requested = False
-        for label, _factory, _attr in self._lazy_specs.values():
-            tabs.addTab(QWidget(), label)
-        # 各 Tab 对应的历史工具名;"更新"/"关于"页无历史 → None(按钮禁用)
-        self._tab_tools: list[str | None] = [
-            "rename",
-            "mkdir",
-            "pdf",
-            "replace",
-            "attendance",
-            "invoice",
-            "excel_merge",
-            "pdf_sort",
-            "plan_schedule",
-            "markdown_convert",
-            None,
-            None,
-        ]
+        for spec in self._specs:
+            tabs.addTab(QWidget(), spec.label)
+        # 各 Tab 对应的历史工具名(来自登记的 history_key);系统页无历史 → None(按钮禁用)
+        self._tab_tools: list[str | None] = [spec.history_key for spec in self._specs]
         tabs.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(tabs, stretch=1)
 
@@ -289,21 +216,23 @@ class MainWindow(QMainWindow):
 
         blockSignals 防止 removeTab/insertTab 期间 currentChanged 跳到别的
         占位页触发连锁构造;结束后恢复原 currentIndex(即被构造的 Tab)。
+        业务锁/系统页接线按登记分类与稳定 ID 判定,不枚举具体工具属性名。
         """
 
-        spec = self._lazy_specs.get(index)
-        if spec is None:
+        lazy = self._lazy_specs.get(index)
+        tool_spec = self._spec_by_index.get(index)
+        if lazy is None or tool_spec is None:
             return
-        label, factory, attr = spec
+        label, factory, attr = lazy
         del self._lazy_specs[index]
         try:
             tab = _construct_tab(factory, label)
         except BaseException:
             # 构造期间移出登记避免重入;失败必须恢复,让下次切换可以重试。
-            self._lazy_specs[index] = spec
+            self._lazy_specs[index] = lazy
             raise
         setattr(self, attr, tab)
-        if attr not in ("_update_tab", "_about_tab") and self._business_tabs_locked:
+        if tool_spec.category is ToolCategory.BUSINESS and self._business_tabs_locked:
             # 下载期间允许切页查看,但懒构造的业务页必须按锁状态禁用,
             # 不能在下载中开始新的业务写入(#129 AC4)。
             tab.setEnabled(False)
@@ -313,7 +242,7 @@ class MainWindow(QMainWindow):
         self._tabs.insertTab(index, tab, label)
         self._tabs.setCurrentIndex(current)
         self._tabs.blockSignals(False)
-        if attr == "_update_tab":
+        if tool_spec.tool_id == UPDATE_TOOL_ID:
             # 更新页是唯一的更新主动作入口:请求信号接主窗口既有更新链
             update_tab = cast("UpdateTab", tab)
             update_tab.check_requested.connect(self._on_check_requested)
@@ -332,7 +261,7 @@ class MainWindow(QMainWindow):
                 update_tab.set_download_progress(self._last_progress)
                 if request.applying:
                     update_tab.enter_apply_phase()
-        elif attr == "_about_tab":
+        elif tool_spec.tool_id == ABOUT_TOOL_ID:
             # 关于页只保留"打开更新页面"导航,不再承载检查/下载动作
             about_tab = cast("AboutTab", tab)
             about_tab.open_update_page_requested.connect(self._open_update_page)
@@ -416,8 +345,13 @@ class MainWindow(QMainWindow):
             self._update_tab.display_check_result(result)
 
     def _open_update_page(self) -> None:
-        """横幅/关于页入口统一导航到独立更新页,绝不直接启动下载。"""
-        self._tabs.setCurrentIndex(_UPDATE_TAB_INDEX)
+        """横幅/关于页入口统一导航到独立更新页,绝不直接启动下载。
+
+        更新页位置由登记中的稳定 ID 解析(插入/重排工具后自动跟随),
+        不依赖固定标签序号。
+        """
+        if self._update_tab_index >= 0:
+            self._tabs.setCurrentIndex(self._update_tab_index)
 
     def _start_download(self) -> None:
         """更新页"下载并更新" → 确认后锁业务页并向 worker 投递下载请求。
@@ -505,16 +439,17 @@ class MainWindow(QMainWindow):
             self._update_tab.finish_download(restored=self._pending_update is not None)
 
     def _set_business_tabs_locked(self, locked: bool) -> None:
-        """下载期间锁定业务页(不能开始新的业务写入),更新/关于页保持可用。
+        """下载期间锁定业务页(不能开始新的业务写入),系统页保持可用。
 
-        不整体禁用 Tab 容器:页面可切换查看,更新页的进度与可取消阶段的取消
-        按钮必须保持可用。此后懒构造的业务页也按当前锁状态初始化。
+        业务/系统页集合来自统一登记的分类;不整体禁用 Tab 容器:页面可切换
+        查看,更新页的进度与可取消阶段的取消按钮必须保持可用。此后懒构造的
+        业务页也按当前锁状态初始化。
         """
         self._business_tabs_locked = locked
-        for attr in self._tab_attrs:
-            if attr in ("_update_tab", "_about_tab"):
+        for spec in self._specs:
+            if spec.category is not ToolCategory.BUSINESS:
                 continue
-            tab = getattr(self, attr)
+            tab = getattr(self, spec.attr, None)
             if tab is not None:
                 tab.setEnabled(not locked)
 

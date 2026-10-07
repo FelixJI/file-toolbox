@@ -3,13 +3,14 @@
 把 .md 批量转为 Word(.docx,经 Pandoc)或 Excel(.xlsx,表格独立工作表,
 可选正文工作表)。UI 布局由 generated/ui_markdown_dialog.py 的
 Ui_MarkdownConvertDialog(setupUi)构建,本类只做信号连接 + 业务编排
-(与其他 Tab 一致,不另设 controller 层)。
+(与其他 Tab 一致,不另设 controller 层)。任务结果/线程结束/异步关闭
+边界由 TaskLifecycle 统一管理(与 PDF 排序页同范式)。
 """
 
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread
 from PySide6.QtGui import QBrush, QCloseEvent, QColor
 from PySide6.QtWidgets import QFileDialog, QHeaderView, QMessageBox, QTableWidgetItem, QWidget
 
@@ -20,6 +21,7 @@ from file_toolbox.core.markdown_convert import (
     MarkdownConvertService,
 )
 from file_toolbox.gui.generated.ui_markdown_dialog import Ui_MarkdownConvertDialog
+from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.markdown_worker import MarkdownConvertWorker
 
 _FAIL_COLOR = QColor(255, 242, 204)  # 浅黄(失败行)
@@ -42,6 +44,8 @@ class MarkdownConvertTab(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 生命周期句柄:单一事实保存当前任务与延迟关闭,只在真实 finished 释放
+        self._task = TaskLifecycle(self)
         self.ui = Ui_MarkdownConvertDialog()
         self.ui.setupUi(self)  # type: ignore[no-untyped-call]  # generated UI code
         header = self.ui.table.horizontalHeader()
@@ -51,14 +55,23 @@ class MarkdownConvertTab(QWidget):
         self._history = JsonHistoryStore()
         self._svc = MarkdownConvertService(history_store=self._history)
         self._files: list[Path] = []
-        self._worker: MarkdownConvertWorker | None = None
-        self._close_pending = False
         self._connect()
         self._sync_target_ui()
 
+    # 兼容旧 _worker 字段:读写均转发 TaskLifecycle;只有真实
+    # finished(task.finish 精确身份校验)才清空,结果信号不提前释放引用。
+    @property
+    def _worker(self) -> QThread | None:
+        return self._task.worker
+
+    @_worker.setter
+    def _worker(self, value: QThread | None) -> None:
+        self._task.worker = value
+
     @property
     def close_pending(self) -> bool:
-        return self._close_pending
+        """是否正等待转换 worker 安全退出后重试关闭。"""
+        return self._task.close_pending
 
     def _connect(self) -> None:
         self.ui.btn_add_files.clicked.connect(self._add_files)
@@ -147,8 +160,9 @@ class MarkdownConvertTab(QWidget):
         if not self._files:
             QMessageBox.warning(self, "提示", "请先添加 Markdown 文件")
             return
-        # 避免重复启动(重复点击不泄漏多个 worker)
-        if self._worker is not None or self._close_pending:
+        # 避免重复启动(重复点击不泄漏多个 worker):任务未释放或延迟关闭中一律拒绝,
+        # 不以 isRunning() 为准——排队的 finished 尚未消费时同样不能开下一轮
+        if self._task.busy:
             return
         text = self.ui.edit_outdir.text().strip()
         # 输出目录留空:各源文件旁输出(None 由 service 解释)
@@ -166,7 +180,7 @@ class MarkdownConvertTab(QWidget):
         worker.failed.connect(self._on_convert_failed)
         worker.warning.connect(self._on_history_warning)
         worker.finished.connect(self._on_worker_finished)
-        self._worker = worker  # 持有引用防 GC
+        self._task.track(worker)  # 持有引用防 GC;在 start 前登记
         self._set_running(True)
         self.ui.lbl_status.setText("转换中…")
         worker.start()
@@ -187,26 +201,26 @@ class MarkdownConvertTab(QWidget):
         self.ui.btn_cancel.setEnabled(running)
 
     def _cancel_run(self) -> None:
-        worker = self._worker
+        worker = self._task.worker
         if worker is None:
             return
-        worker.cancel()
+        self._task.cancel()
         self.ui.btn_cancel.setEnabled(False)
         self.ui.lbl_status.setText("正在取消,等待当前文件安全结束…")
 
     def _on_progress(self, current: int, total: int, msg: str) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
         self.ui.lbl_status.setText(f"[{current}/{total}] {msg}")
 
     def _on_convert_ok(self, result: ConversionResult) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
         self._populate_table(result)
         summary = self._summarize(result)
         self.ui.lbl_status.setText(summary)
         outputs = [item.output for item in result.items if item.output is not None]
-        if self._close_pending:
+        if self._task.close_pending:
             return
         if result.cancelled:
             details = "\n".join(str(p) for p in outputs)
@@ -251,39 +265,29 @@ class MarkdownConvertTab(QWidget):
                 self.ui.table.setItem(r, c, cell_item)
 
     def _on_history_warning(self, msg: str) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
-        if not self._close_pending:
+        if not self._task.close_pending:
             QMessageBox.warning(self, "历史保存失败", msg)
 
     def _on_convert_failed(self, msg: str) -> None:
-        if self.sender() is not None and self.sender() is not self._worker:
+        if not self._task.accepts(self.sender()):
             return
         self.ui.lbl_status.setText("转换失败")
-        if not self._close_pending:
+        if not self._task.close_pending:
             QMessageBox.critical(self, "转换失败", msg)
 
     def _on_worker_finished(self) -> None:
-        """结果不释放线程;只消费当前 worker 的真实 finished。"""
-        worker = self._worker
-        if worker is None or self.sender() is not worker:
+        """结果不释放线程;只消费当前 worker 的真实 finished,恢复按钮/续接关闭。"""
+        if not self._task.finish(self.sender()):
             return
-        self._worker = None
-        worker.deleteLater()
         self._set_running(False)
         # _set_running 会无条件恢复模式控件;Word 目标下须重新禁用 Excel 模式
         self._sync_target_ui()
-        if self._close_pending:
-            self._close_pending = False
-            QTimer.singleShot(0, self.window().close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """协作取消后异步等待 finished,保留窗口及正在写入的线程。"""
-        if self._worker is not None:
-            if not self._close_pending:
-                self._worker.cancel()
-            self._close_pending = True
+        if self._task.defer_close(event):
             self.ui.lbl_status.setText("正在等待转换安全结束,完成后自动关闭…")
-            event.ignore()
             return
         super().closeEvent(event)

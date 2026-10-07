@@ -43,25 +43,25 @@ def test_python_requirement_matches_pyproject():
 
 
 def test_app_description_covers_all_capabilities():
-    """简介必须覆盖 GUI 全部业务 Tab:能力增删时漂移可被检测(#129 AC5)。
+    """简介必须覆盖 GUI 全部业务能力:能力增删时漂移可被检测(#129 AC5/#138 AC6)。
 
-    从主窗口真实标签栏派生业务页清单(排除"更新"/"关于"非业务页),逐项要求
-    出现在简介中——新增页面而忘记更新简介会在此失败,而非靠硬编码数量过关。
+    业务页清单、主窗口标签栏与简介均由统一工具登记派生,不硬编码总数;
+    三者交叉验证:标签栏与登记一一对应,简介覆盖每个业务页能力。
     """
     pytest.importorskip("PySide6.QtWidgets")
     from PySide6.QtWidgets import QApplication
 
+    from file_toolbox.common.tool_registry import TOOL_SPECS, ToolCategory
     from file_toolbox.gui.main_window import MainWindow
 
     QApplication.instance() or QApplication([])
     win = MainWindow(_LatestCoordinator())
 
-    business_labels = [
-        win._tabs.tabText(i)
-        for i in range(win._tabs.count())
-        if win._tabs.tabText(i) not in ("更新", "关于")
-    ]
-    assert len(business_labels) == 10  # 当前十项业务能力的回归锚点
+    # 主窗口标签栏与登记一一对应(顺序即登记顺序)
+    labels = [win._tabs.tabText(i) for i in range(win._tabs.count())]
+    assert labels == [spec.label for spec in TOOL_SPECS]
+    business_labels = [spec.label for spec in TOOL_SPECS if spec.category is ToolCategory.BUSINESS]
+    assert business_labels  # 登记为唯一事实源,不以固定数量代替一致性校验
     description = metadata.APP_DESCRIPTION.replace(" ", "")
     for label in business_labels:
         assert label.replace(" ", "") in description, f"简介未覆盖能力页 {label!r}"

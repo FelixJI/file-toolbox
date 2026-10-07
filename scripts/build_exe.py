@@ -305,6 +305,19 @@ def _run_velopack(product_dir: Path, version: str, output_dir: Path) -> list[Pat
     return copied
 
 
+def _gui_tab_modules() -> list[str]:
+    """从统一工具登记取全部 GUI 页模块(Nuitka 收包单一来源)。
+
+    懒工厂按模块名 importlib 导入,Nuitka 静态分析追不到,必须显式收包;
+    直接以脚本方式调用本文件(未安装项目)时回退到仓库源码树导入。
+    """
+    if str(_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ROOT))
+    from file_toolbox.common.tool_registry import TOOL_SPECS
+
+    return [spec.gui_module for spec in TOOL_SPECS]
+
+
 def _nuitka_command(entry: Path, version: str, output_dir: Path) -> list[str]:
     """构造 Nuitka standalone 编译命令(独立纯函数,供契约测试锁定关键旗标)。"""
     return [
@@ -318,6 +331,9 @@ def _nuitka_command(entry: Path, version: str, output_dir: Path) -> list[str]:
         # GUI 无黑框(等价旧 spec 的 console=False)
         "--windows-console-mode=disable",
         "--enable-plugin=pyside6",
+        # GUI 页面经统一工具登记懒导入(importlib),静态分析追不到;
+        # 从同一登记派生 --include-module 显式收包,不维护第二份手工 GUI 清单。
+        *(f"--include-module={gui_module}" for gui_module in _gui_tab_modules()),
         # pywin32:win32com 动态 Dispatch 按 ProgID 运行期解析,静态追不全 → 整包收;
         # pythoncom/pywintypes 是带 DLL 的顶层模块,standalone DLL 扫描据此收
         # pywin32_system32 下的 pythoncom3XX.dll / pywintypes3XX.dll

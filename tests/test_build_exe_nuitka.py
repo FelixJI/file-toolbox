@@ -77,3 +77,27 @@ def test_command_names_product_exe_and_version_resource() -> None:
     assert "--file-version=0.3.0" in cmd
     # 入口脚本在最后
     assert cmd[-1].endswith("gui_entry.py")
+
+
+def test_command_includes_gui_modules_from_registry() -> None:
+    """GUI 模块收包从统一工具登记派生,不再有第二份手工 GUI 清单(Issue #138)。
+
+    懒工厂按登记的模块名 importlib 导入,Nuitka 静态分析追不到;每个登记
+    gui_module 都必须生成对应 --include-module 旗标。
+    """
+    from file_toolbox.common.tool_registry import TOOL_SPECS
+
+    cmd = _cmd()
+    included = {
+        flag.removeprefix("--include-module=")
+        for flag in cmd
+        if flag.startswith("--include-module=")
+    }
+    for spec in TOOL_SPECS:
+        assert spec.gui_module in included, f"登记 GUI 模块未被收包: {spec.gui_module}"
+    # 除既有的 pythoncom/pywintypes 顶层模块外,不得冒出登记之外的 GUI 模块旗标
+    gui_flags = {f"--include-module={spec.gui_module}" for spec in TOOL_SPECS}
+    assert gui_flags <= set(cmd)
+    assert {m for m in included if m.startswith("file_toolbox.gui")} == {
+        spec.gui_module for spec in TOOL_SPECS
+    }
