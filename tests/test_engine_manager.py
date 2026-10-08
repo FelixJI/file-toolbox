@@ -28,13 +28,13 @@ def _reset_engine_manager_class_state():
     EngineManager._cached_engines = None
     EngineManager._cache_source = None
     EngineManager._flight_subscribers = None
-    EngineManager._cached_kind_availability = None
+    EngineManager._cached_kind_probes = None
     EngineManager._verified_kinds = {}
     yield
     EngineManager._cached_engines = None
     EngineManager._cache_source = None
     EngineManager._flight_subscribers = None
-    EngineManager._cached_kind_availability = None
+    EngineManager._cached_kind_probes = None
     EngineManager._verified_kinds = {}
 
 
@@ -55,6 +55,17 @@ def engine_cache_stub(monkeypatch):
         engine_cache, "save", lambda engines, *a, **k: state["saved"].append(dict(engines)) or True
     )
     return state
+
+
+def test_record_kind_success_validates_and_marks():
+    """P5:非 PDF 适配器的证据登记入口——非法 kind/engine fail closed,
+    合法登记写入同一 verified 存储(不新建缓存)。"""
+    with pytest.raises(ValueError, match="未知的 Office 应用类别"):
+        EngineManager.record_kind_success("wordx")
+    with pytest.raises(ValueError, match="未知的引擎套件"):
+        EngineManager.record_kind_success("word", "kingsoft")
+    EngineManager.record_kind_success("excel", "office")
+    assert EngineManager._verified_kinds == {"excel": "office"}
 
 
 def test_probe_registry_returns_true_when_key_exists(monkeypatch):

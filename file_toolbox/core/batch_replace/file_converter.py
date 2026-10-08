@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from file_toolbox.common.office_session import ComSession, dispose_office_app, init_office_app
+from file_toolbox.core.office_capability import record_office_session_success
+
+# 旧格式转换仅用 MS ProgID;Dispatch 成功后按 ProgID 登记对应 kind 的进程内证据
+_LEGACY_KIND_BY_PROG_ID = {"Word.Application": "word", "Excel.Application": "excel"}
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,8 @@ class FileConverterService:
             session.__enter__()
             try:
                 app = init_office_app(spec.prog_id)
+                # Dispatch 成功即最强证据:登记进程内 kind 证据(旧格式转换链)
+                record_office_session_success(_LEGACY_KIND_BY_PROG_ID[spec.prog_id], "office")
                 doc = spec.open_doc(app, str(src_path.absolute()))
                 spec.save_doc(doc, str(staged.absolute()), spec.file_format)
                 doc.Close(False)

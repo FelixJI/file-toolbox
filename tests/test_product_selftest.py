@@ -379,6 +379,19 @@ def _full_scene(portable: Path) -> tuple[dict[str, str], ps.SelftestReport]:
     return files, report
 
 
+def _full_missing_scene(portable: Path) -> ps.SelftestReport:
+    """full 一致性缺证据报告:纯场景 pass,Office 三场景 evidence_missing,exit 3。"""
+    _files, report = _run1_scene(portable)
+    report["mode"] = "full"
+    report["exit_code"] = ps.EXIT_EVIDENCE_MISSING
+    report["evidence_missing"] = True
+    report["scenarios"].extend(
+        _scenario_dict(name, "evidence_missing", "Office 预筛不可用")
+        for name in ("pdf_office", "replace_office", "attendance")
+    )
+    return report
+
+
 def _reopen_report_after_undo(portable: Path) -> ps.SelftestReport:
     """run2:撤销已发生(新名消失/原名恢复/历史标记 undone)后的报告。"""
     scene = portable / "selftest-work" / "scene"
@@ -738,12 +751,13 @@ def test_main_timeout_stops_before_reopen(monkeypatch, tmp_path, capsys):
 
 
 def test_main_evidence_missing_propagates(monkeypatch, tmp_path):
+    """exit 3 + 一致的缺证据报告(mode/根/标志/场景全核对)→ 如实透传 3(P3)。"""
     monkeypatch.setattr(ps, "SELFTEST_RUN_ROOT", tmp_path)
     calls: list[str] = []
 
     def fake_launch(exe, mode, report, *, visible, timeout_s, stdout_log):
         calls.append(mode)
-        _files, run1 = _run1_scene(exe.parent.parent)
+        run1 = _full_missing_scene(exe.parent.parent)
         report.write_text(json.dumps(run1, ensure_ascii=False), encoding="utf-8")
         return ps.EXIT_EVIDENCE_MISSING
 
@@ -752,3 +766,29 @@ def test_main_evidence_missing_propagates(monkeypatch, tmp_path):
     code = ps.main(["--zip", str(_portable_zip_with_exe(tmp_path)), "--mode", "full"])
     assert code == ps.EXIT_EVIDENCE_MISSING
     assert calls == ["full"]
+
+
+def test_main_evidence_missing_contradictory_report_fails(monkeypatch, tmp_path):
+    """P3 回归:exit 3 但报告声称 exit_code=0/全 pass(矛盾)→ 按失败(1),
+    不冒称"缺少证据"透传。"""
+    monkeypatch.setattr(ps, "SELFTEST_RUN_ROOT", tmp_path)
+
+    def fake_launch(exe, mode, report, *, visible, timeout_s, stdout_log):
+        _files, run1 = _run1_scene(exe.parent.parent)  # exit_code=0/全 pass 的矛盾报告
+        run1["mode"] = "full"
+        report.write_text(json.dumps(run1, ensure_ascii=False), encoding="utf-8")
+        return ps.EXIT_EVIDENCE_MISSING
+
+    monkeypatch.setattr(ps, "_launch_exe", fake_launch)
+    monkeypatch.chdir(tmp_path)
+    code = ps.main(["--zip", str(_portable_zip_with_exe(tmp_path)), "--mode", "full"])
+    assert code == ps.EXIT_FAIL
+
+
+def test_validate_report_accepts_consistent_evidence_missing(tmp_path):
+    """P3 单元:一致的缺证据报告(场景 evidence_missing + exit 3)通过校验。"""
+    portable = tmp_path / "portable"
+    report = _full_missing_scene(portable)
+    ps._validate_report(
+        report, expected_mode="full", child_code=ps.EXIT_EVIDENCE_MISSING, portable_root=portable
+    )

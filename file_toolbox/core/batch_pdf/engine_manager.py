@@ -115,6 +115,26 @@ class _ProbeOutcome:
     detail: str = ""
 
 
+@dataclass(frozen=True)
+class _KindProbes:
+    """单 kind 的两套件探测原始结果(按 kind memo 的存储形态)。
+
+    MS 与 WPS 的结论都保留(P4):MS 探测错误不再提前终止——支持 WPS 的
+    消费者在 WPS 注册命中时仍可得出可用,仅 MS 消费者保留原 MS 错误;选择
+    逻辑见 EngineManager._select_availability。
+    """
+
+    ms: _ProbeOutcome
+    wps: _ProbeOutcome
+
+    def outcome(self, engine: str) -> _ProbeOutcome:
+        return self.ms if engine == "office" else self.wps
+
+
+# 套件键与固定优先顺序(MS 优先;engines=None 视为全支持)
+_SUITES = ("office", "wps")
+
+
 def _probe_registry_outcome(prog_id: str) -> _ProbeOutcome:
     """注册表探测的完整三态结果(供按 kind 能力查询区分缺失/检测错误)。"""
     try:
@@ -147,9 +167,11 @@ class EngineManager(LoggableMixin):
     _flight_subscribers: list[Callable[[str], None]] | None = None
     # 按 kind 的能力预筛 memo(类变量,所有实例共享):None = 尚未查询过。
     # 与套件级 _cached_engines 互补:套件缓存以 Word/KWPS ProgID 判定 office/wps
-    # 套件,不能据此推断 Excel/PPT 的存在;按 kind 查询各自探测其 ProgID,
-    # 仅进程内 memo、不落盘(持久缓存仍由 engine_cache 承担)。
-    _cached_kind_availability: dict[str, KindAvailability] | None = None
+    # 套件,不能据此推断 Excel/PPT 的存在;按 kind 查询各自探测其两套件 ProgID,
+    # 仅进程内 memo、不落盘(持久缓存仍由 engine_cache 承担)。memo 存无约束的
+    # 原始双套件探测结果(_KindProbes),engines 约束在选择时应用,同一 kind 的
+    # 不同工具查询互不污染。
+    _cached_kind_probes: dict[str, _KindProbes] | None = None
     # 本进程经真实 Dispatch 成功过的 kind → 实际成功的套件(office/wps);
     # 转换期喂养,最强证据:绑定实际套件并可纠正旧预筛(含 missing/probe_error)。
     _verified_kinds: dict[str, str] = {}
@@ -235,46 +257,65 @@ class EngineManager(LoggableMixin):
         """
         cls._verified_kinds[kind] = engine
 
-    def _with_verified(self, availability: KindAvailability) -> KindAvailability:
-        """把进程内真实 Dispatch 证据叠加到预筛结果上(实际套件与状态优先)。"""
-        engine = EngineManager._verified_kinds.get(availability.kind)
-        if engine is None:
-            return availability
-        if (
-            availability.verified
-            and availability.state is ProbeState.AVAILABLE
-            and availability.engine == engine
-        ):
-            return availability
-        return KindAvailability(availability.kind, ProbeState.AVAILABLE, engine, "", True)
+    @classmethod
+    def record_kind_success(cls, kind: str, engine: str = "office") -> None:
+        """登记一次非 PDF 适配器的真实 Office COM 会话成功(能力层入口)。
 
-    def _availability_within(
-        self, prescreen: KindAvailability, engines: tuple[str, ...] | None
-    ) -> KindAvailability:
-        """在支持套件约束内选择实际可用性(F7);engines=None 保持既有叠加语义。
+        考勤等直接经 common.office_session 建 COM 会话的适配器在 Dispatch
+        成功后调用;与转换期 _mark_kind_verified 同一进程内证据存储(不落盘、
+        不新建缓存/回调框架)。kind 必须是 _APP_CONFIG 登记类别,engine 限
+        office/wps——成功的 Dispatch 是最强证据,可纠正旧预筛(含 probe_error)。
 
-        选择规则(复用同一份预筛 memo 与 verified 证据,不另建缓存):
-        1. verified 证据绑定的实际成功套件在集合内 → AVAILABLE+verified(实际
-           成功优先于预筛偏好,不因约束丢失 F4 的"实际套件"语义);
-        2. 预筛命中套件在集合内 → AVAILABLE(未验证,预筛结论);
-        3. 预筛命中套件不在集合内(如仅 MS 工具遇上 WPS winner)→ MISSING,
-           engine 保留检测到的套件名供展示层说明"检测到但不支持";
-        4. 预筛 missing/probe_error 且无集合内 verified 纠正 → 原样透传。
+        线程/IO 契约:classmethod 纯字典登记,不实例化 EngineManager、不
+        读写 engine_cache/settings(考勤等后台 worker 线程可直接调用,不涉及
+        数据根 policy 传播)。
         """
-        if engines is None:
-            return self._with_verified(prescreen)
-        verified_engine = EngineManager._verified_kinds.get(prescreen.kind)
-        if verified_engine is not None and verified_engine in engines:
-            return KindAvailability(prescreen.kind, ProbeState.AVAILABLE, verified_engine, "", True)
-        if (
-            prescreen.state is ProbeState.AVAILABLE
-            and prescreen.engine is not None
-            and prescreen.engine in engines
-        ):
-            return KindAvailability(prescreen.kind, ProbeState.AVAILABLE, prescreen.engine, "")
-        if prescreen.state is ProbeState.AVAILABLE:
-            return KindAvailability(prescreen.kind, ProbeState.MISSING, prescreen.engine)
-        return prescreen
+        if kind not in _APP_CONFIG:
+            raise ValueError(f"未知的 Office 应用类别: {kind!r}")
+        if engine not in _SUITES:
+            raise ValueError(f"未知的引擎套件: {engine!r}")
+        cls._mark_kind_verified(kind, engine)
+
+    def _select_availability(
+        self, kind: str, probes: _KindProbes, engines: tuple[str, ...] | None
+    ) -> KindAvailability:
+        """在支持套件约束内从双套件探测结果选择实际可用性(P4/F7 合并语义)。
+
+        规则(复用同一份按 kind memo 与 verified 证据,不另建缓存;
+        engines=None 视为两套件全支持):
+        1. verified 证据绑定的实际成功套件在集合内 → AVAILABLE+verified(实际
+           成功优先,不因约束丢失"实际套件"语义);
+        2. 集合内注册命中(MS 优先)→ AVAILABLE;同集合内另一套件探测失败时
+           详情保留该错误(不因回退命中丢弃);
+        3. 集合内无命中但有探测失败 → PROBE_ERROR(保留原错误,不冒称缺失,
+           也不把集合外命中丢成错误状态);
+        4. 集合内全部确定未注册而集合外有命中 → MISSING,engine 保留检测到的
+           套件名供展示层说明"检测到但该工具不支持";
+        5. 全部确定未注册 → MISSING。
+        """
+        allowed = (
+            _SUITES if engines is None else tuple(suite for suite in _SUITES if suite in engines)
+        )
+        verified = EngineManager._verified_kinds.get(kind)
+        if verified is not None and verified in allowed:
+            return KindAvailability(kind, ProbeState.AVAILABLE, verified, "", True)
+        for suite in allowed:
+            if probes.outcome(suite).registered is True:
+                detail = ""
+                for other in allowed:
+                    if other != suite and probes.outcome(other).registered is None:
+                        detail = probes.outcome(other).detail
+                return KindAvailability(kind, ProbeState.AVAILABLE, suite, detail)
+        for suite in allowed:
+            outcome = probes.outcome(suite)
+            if outcome.registered is None:
+                return KindAvailability(kind, ProbeState.PROBE_ERROR, detail=outcome.detail)
+        for suite in _SUITES:
+            if suite not in allowed and probes.outcome(suite).registered is True:
+                return KindAvailability(kind, ProbeState.MISSING, suite)
+        return KindAvailability(
+            kind, ProbeState.MISSING, detail=probes.ms.detail or probes.wps.detail
+        )
 
     def kind_availability(
         self, kind: str, *, refresh: bool = False, engines: tuple[str, ...] | None = None
@@ -284,38 +325,29 @@ class EngineManager(LoggableMixin):
         - 不启动任何 Office 进程;结果进程内 memo(refresh=True 强制重探)。
         - 各 kind 独立探测自己的 ms/wps ProgID:Word 缺失不能否定 Excel/PPT,
         - 探测 OSError 与"未注册"严格区分(PROBE_ERROR ≠ MISSING)。
-        - verified 由真实 Dispatch 成功喂养(见 _init_office_app_locked),
-          注册存在仅是预筛,不是真实转换验证。
+        - MS 探测错误不提前终止(P4):两套件结论都入 memo——支持 WPS 的调用
+          方在 WPS 注册命中时如实可用(错误保留在详情),仅 MS 的调用方保留
+          原 MS 探测错误,不把 WPS 成功或原错误丢成错误状态。
+        - verified 由真实 Dispatch 成功喂养(见 _init_office_app_locked /
+          record_kind_success),注册存在仅是预筛,不是真实转换验证。
         - engines(可选):调用工具的适配器实际支持的套件集合。提供时在集合
-          内选择实际可用性(见 _availability_within),memo 仍存无约束的原始
-          预筛结论,同一 kind 的不同工具查询互不污染。
+          内选择实际可用性(见 _select_availability)。
         """
         if kind not in _APP_CONFIG:
             raise ValueError(f"未知的 Office 应用类别: {kind!r}")
         if not refresh:
-            cached = EngineManager._cached_kind_availability
+            cached = EngineManager._cached_kind_probes
             if cached is not None and (hit := cached.get(kind)) is not None:
-                return self._availability_within(hit, engines)
+                return self._select_availability(kind, hit, engines)
         spec = _APP_CONFIG[kind]
-        outcome = _probe_registry_outcome(spec.ms_prog_id)
-        if outcome.registered is None:
-            result = KindAvailability(kind, ProbeState.PROBE_ERROR, detail=outcome.detail)
-        elif outcome.registered:
-            result = KindAvailability(kind, ProbeState.AVAILABLE, engine="office")
-        else:
-            wps = _probe_registry_outcome(spec.wps_prog_id)
-            if wps.registered is None:
-                result = KindAvailability(kind, ProbeState.PROBE_ERROR, detail=wps.detail)
-            elif wps.registered:
-                result = KindAvailability(kind, ProbeState.AVAILABLE, engine="wps")
-            else:
-                result = KindAvailability(
-                    kind, ProbeState.MISSING, detail=outcome.detail or wps.detail
-                )
-        memo = EngineManager._cached_kind_availability or {}
-        memo[kind] = result
-        EngineManager._cached_kind_availability = memo
-        return self._availability_within(result, engines)
+        probes = _KindProbes(
+            ms=_probe_registry_outcome(spec.ms_prog_id),
+            wps=_probe_registry_outcome(spec.wps_prog_id),
+        )
+        memo = EngineManager._cached_kind_probes or {}
+        memo[kind] = probes
+        EngineManager._cached_kind_probes = memo
+        return self._select_availability(kind, probes, engines)
 
     def record_engine_evidence(self, engine: str, available: bool) -> None:
         """记录一条来自真实转换的引擎证据,精确更新进程内缓存与持久缓存。

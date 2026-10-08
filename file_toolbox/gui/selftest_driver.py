@@ -74,6 +74,10 @@ ArtifactValue = str | list[str] | dict[str, str] | bool | int
 # 循环继续等真实 finished/关闭,绝不以返回/sys.exit 截断 QThread 生命周期;
 # 进程级超时由外层 product_selftest 负责(报告 owned PID 并保留现场,不杀)。
 _CLOSE_WAIT_S = 30.0
+# 取消场景的有界同步等待(秒):等待主线程真实执行按钮取消链后页面取消使
+# worker 标志置位;超时即放弃等待让 worker 继续真实转换,由输出断言暴露
+# 空取消(不悬挂 QThread)。
+_CANCEL_SYNC_TIMEOUT_S = 5.0
 # 自测数据根范围标记文件(语义标记 + 精确记录契约,非安全框架)
 _SELFTEST_SCOPE_FILE = "selftest-scope.json"
 
@@ -370,16 +374,24 @@ def _collect_worker_problems(worker: QObject | None, sink: list[str]) -> None:
         signal.connect(record)
 
 
-def _observe_task_problems(lifecycle: TaskLifecycle, sink: list[str]) -> None:
+def _observe_task_problems(
+    lifecycle: TaskLifecycle,
+    sink: list[str],
+    extra: Callable[[QThread], None] | None = None,
+) -> None:
     """经 TaskLifecycle.track 的 start 前统一注册点订阅问题信号(F6)。
 
     track 在 worker.start() 之前执行,订阅严格先于任何发射——工作线程可能在
     主线程连接前立即失败/立即清理告警,启动后再连接会丢这些信号;"start 后
     立即连接必先于发射"的时序假设不成立,必须经 start 前注册点订阅。
+    extra:同一时刻的附加观察(如 start 前连接进度),与本观察链组合,不另建
+    注册框架。
     """
 
     def observe(worker: QThread) -> None:
         _collect_worker_problems(worker, sink)
+        if extra is not None:
+            extra(worker)
 
     lifecycle.on_worker_tracked = observe
 
@@ -496,10 +508,19 @@ def _scenario_pdf_pure(ctx: _SelftestContext) -> ScenarioOutcome:
 
 
 def _scenario_pdf_cancel(ctx: _SelftestContext) -> ScenarioOutcome:
-    """任务取消真实路径:首个进度后经取消按钮请求取消,等真实 finished 收尾。
+    """任务取消真实路径:真实按钮→页面取消→worker 标志,确定性生效。
 
-    取消在文件边界生效:至少首个文件已转换、其余可能跳过——两种合法终态都
-    要求控件恢复、任务不忙,不得悬挂。
+    可控同步点(本自测限定,无泛化框架):progress 以 DirectConnection 在
+    worker 线程内同步处理——首个进度(每个文件开始前发射)把真实取消按钮的
+    click 以 QueuedConnection 投递到主线程执行(不在后台线程触碰 QWidget),
+    并有界等待页面取消链使 worker 标志置位后才放行;下一个文件边界的取消
+    检查因此确定命中,不依赖线程调度/样本量/延时。若取消链任一环退化(空
+    cancel/按钮无效),等待超时后 worker 继续真实转换全部文件,输出断言
+    使场景失败——不会悬挂 QThread。
+
+    fail closed:PASS 必须同时满足(1)实际观察到取消标志置位(空取消+
+    部分文件转换失败产生的伪部分输出不得误判为取消成功);(2)至少一个输出
+    且至少一个输入未处理。
     """
     from PIL import Image
 
@@ -515,32 +536,63 @@ def _scenario_pdf_cancel(ctx: _SelftestContext) -> ScenarioOutcome:
         images.append(path)
     tab = _switch_to_tab(ctx, "pdf", PDFGeneratorDialog)
     problems: list[str] = []
-    _observe_task_problems(tab._task, problems)  # track 时订阅:严格先于 start
-    tab.selected_files = images
-    tab._generate()
-    worker = tab._task.worker
-    if not isinstance(worker, PdfGenerateWorker):
-        return _fail("pdf_cancel", "worker 未启动或类型不符")
     requested: list[int] = []
+    cancel_observed = False
+    worker_ref: PdfGenerateWorker | None = None
 
-    def on_progress(current: int, total: int, message: str) -> None:
+    def on_progress(current: int, total: int, message: str) -> None:  # noqa: ARG001
+        """worker 线程内同步执行(有界):投递真实按钮点击并等页面取消链生效。"""
+        nonlocal cancel_observed
         if requested:
             return
         requested.append(current)
-        QTimer.singleShot(0, tab.ui.btn_cancel.click)
+        target = worker_ref
+        if target is None:
+            return
+        # 真实 UI 路径:click 槽在按钮所属主线程执行(→ _on_cancel → _task.cancel)
+        QMetaObject.invokeMethod(tab.ui.btn_cancel, "click", Qt.ConnectionType.QueuedConnection)
+        deadline = time.monotonic() + _CANCEL_SYNC_TIMEOUT_S
+        while not target._cancel and time.monotonic() < deadline:
+            time.sleep(0.005)
+        cancel_observed = target._cancel
 
-    worker.progress.connect(on_progress)
+    def observe_extra(worker: QThread) -> None:
+        nonlocal worker_ref
+        if isinstance(worker, PdfGenerateWorker):
+            worker_ref = worker
+            worker.progress.connect(on_progress, Qt.ConnectionType.DirectConnection)
+
+    _observe_task_problems(tab._task, problems, extra=observe_extra)  # track 时订阅:严格先于 start
+    tab.selected_files = images
+    tab._generate()
     _wait_until(ctx.app, lambda: not tab._task.busy, _WAIT_FAST_S)
+    if not requested:
+        return _fail("pdf_cancel", "未收到首个进度(start 前订阅失效或 worker 未发射)")
     outputs = sorted(path.name for path in work.glob("cancel-image-*.pdf"))
     if not outputs:
         return _fail("pdf_cancel", "取消场景无任何输出(首个文件应已完成)")
+    if len(outputs) >= len(images):
+        return _fail(
+            "pdf_cancel",
+            f"取消未在剩余文件边界生效:产出 {len(outputs)}/{len(images)},按钮→页面→worker"
+            f"取消链未生效(等待标志置位: {cancel_observed})",
+        )
+    if not cancel_observed:
+        return _fail(
+            "pdf_cancel",
+            "取消链未在有界等待内置位 worker 取消标志(按钮→页面→worker 任一环失效);"
+            "输出计数达标不构成取消成功",
+        )
     if not tab.ui.btn_generate.isEnabled():
         return _fail("pdf_cancel", "真实 finished 后控件未恢复")
     if problems:
         return _fail("pdf_cancel", "; ".join(problems))
     return _pass(
         "pdf_cancel",
-        detail=f"取消请求于文件 {requested[0]} 进度后生效,产出 {len(outputs)} 个",
+        detail=(
+            f"取消于文件 {requested[0]} 进度处经真实按钮链同步生效"
+            f"(标志置位: {cancel_observed}),产出 {len(outputs)}/{len(images)}"
+        ),
         artifacts={"outputs": outputs},
     )
 

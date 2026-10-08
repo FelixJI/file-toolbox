@@ -231,6 +231,8 @@ def _validate_report(
 
     任何不一致(含报告 exit_code 与子进程不符、场景缺失/重复/多余/未通过、
     数据根不在本次解包的 portable 根内)都拋 AssertionError,不进入读回。
+    child_code==EXIT_EVIDENCE_MISSING 时允许场景为 evidence_missing(P3:
+    真实缺证据报告可验后透传),其余非 pass 状态仍一律拒绝。
     """
     if report["mode"] != expected_mode:
         raise AssertionError(f"报告 mode 不符: {report['mode']!r} ≠ {expected_mode!r}")
@@ -257,7 +259,10 @@ def _validate_report(
     if sorted(names) != sorted(expected):
         raise AssertionError(f"场景集合不符: {sorted(names)} ≠ {sorted(expected)}")
     not_passed = [
-        (item["name"], item["status"]) for item in report["scenarios"] if item["status"] != "pass"
+        (item["name"], item["status"])
+        for item in report["scenarios"]
+        if item["status"] != "pass"
+        and not (child_code == EXIT_EVIDENCE_MISSING and item["status"] == "evidence_missing")
     ]
     if not_passed:
         raise AssertionError(f"存在未通过场景: {not_passed}")
@@ -543,8 +548,19 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_FAIL
     print(f"run1 scenarios: {_summarize(report)}")
     if code != EXIT_PASS:
-        # EVIDENCE_MISSING(3)如实透传;其它非零为失败
-        return EXIT_EVIDENCE_MISSING if code == EXIT_EVIDENCE_MISSING else EXIT_FAIL
+        if code != EXIT_EVIDENCE_MISSING:
+            return EXIT_FAIL
+        # 透传 3 前先验完整报告契约(P3):mode/数据根/退出码/标志/场景集合
+        # 一致性全部核对——允许真实 evidence_missing 报告,矛盾报告(如报告
+        # 声称 exit_code=0)一律按失败(1),不冒称"缺少证据"。
+        try:
+            _validate_report(
+                report, expected_mode=args.mode, child_code=code, portable_root=portable
+            )
+        except (AssertionError, OSError, KeyError, ValueError, json.JSONDecodeError) as error:
+            print(f"::error::evidence_missing 报告校验失败(按失败处理): {error}", file=sys.stderr)
+            return EXIT_FAIL
+        return EXIT_EVIDENCE_MISSING
     try:
         _validate_report(report, expected_mode=args.mode, child_code=code, portable_root=portable)
         checks = _verify_run1(report, args.mode)

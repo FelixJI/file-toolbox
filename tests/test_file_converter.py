@@ -19,6 +19,19 @@ import pytest
 
 from file_toolbox.core.batch_replace.file_converter import FileConverterService
 
+
+@pytest.fixture(autouse=True)
+def _reset_office_kind_evidence():
+    """隔离 EngineManager 类级 kind 证据(Dispatch 成功路径现在会登记)。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+    yield
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+
+
 # ---------------------------------------------------------------------------
 # is_conversion_needed
 # ---------------------------------------------------------------------------
@@ -39,6 +52,50 @@ from file_toolbox.core.batch_replace.file_converter import FileConverterService
 def test_is_conversion_needed(name: str, expected: bool):
     svc = FileConverterService()
     assert svc.is_conversion_needed(Path(name)) is expected
+
+
+# ---------------------------------------------------------------------------
+# Dispatch 成功登记进程内 kind 证据(P5 补齐:doc/xls 两链)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "method,suffix,collection,kind",
+    [
+        ("convert_doc_to_docx", ".doc", "Documents", "word"),
+        ("convert_xls_to_xlsx", ".xls", "Workbooks", "excel"),
+    ],
+)
+def test_legacy_dispatch_success_records_kind_evidence(
+    monkeypatch, tmp_path, method, suffix, collection, kind
+):
+    """旧格式转换链:MS Dispatch 成功 → 登记对应 kind/office 证据。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.core.batch_replace import file_converter
+
+    source = tmp_path / f"synthetic{suffix}"
+    source.write_bytes(b"legacy input")
+    output = tmp_path / "out"
+    app = MagicMock()
+    getattr(app, collection).Count = 0  # dispose 的 Quit 门控
+    document = getattr(app, collection).Open.return_value
+
+    def _save(path, **_):
+        Path(path).write_bytes(b"converted")
+
+    if kind == "word":
+        document.SaveAs2.side_effect = _save
+    else:
+        document.SaveAs.side_effect = _save
+    monkeypatch.setattr(file_converter, "init_office_app", lambda _pid: app)
+
+    converter = FileConverterService()
+    try:
+        success, result_path, error = getattr(converter, method)(source, output)
+        assert success and not error and result_path == output
+        assert EngineManager._verified_kinds == {kind: "office"}
+    finally:
+        converter.close(strict=True)
 
 
 # ---------------------------------------------------------------------------

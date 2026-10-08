@@ -535,6 +535,100 @@ def test_close_timeout_report_write_failure_keeps_waiting_and_fails(app, monkeyp
 
 
 # ---------------------------------------------------------------------------
+# P1/P2:取消场景 start 前订阅进度 + 空取消必败
+# ---------------------------------------------------------------------------
+
+
+def test_observe_task_problems_supports_extra_pre_start_observer(app):
+    """P1 回归:观察缝可组合附加订阅(如 start 前连接进度),仍在 start 前执行。"""
+    from PySide6.QtCore import QThread, Signal
+    from PySide6.QtWidgets import QWidget
+
+    from file_toolbox.gui import selftest_driver as driver
+    from file_toolbox.gui.task_lifecycle import TaskLifecycle
+
+    class _Worker(QThread):
+        progress = Signal(int, int, str)
+
+        def run(self) -> None:
+            self.progress.emit(0, 1, "immediate")  # 启动即发射:start 后连接必丢
+
+    seen: list[str] = []
+    lifecycle = TaskLifecycle(QWidget())
+
+    def extra(worker: QThread) -> None:
+        worker.progress.connect(lambda *args: seen.append("progress"))
+
+    driver._observe_task_problems(lifecycle, [], extra=extra)
+    worker = _Worker(lifecycle._owner)
+    lifecycle.track(worker)  # track 内先调观察缝(含 extra)再允许 start
+    worker.start()
+    assert worker.wait(5000)
+    app.processEvents()
+    assert seen == ["progress"]  # start 前已连接,立即发射不丢
+
+
+def test_pdf_cancel_fails_when_worker_cancel_is_noop(app, monkeypatch, tmp_path):
+    """P2 回归:cancel() 退化为空操作时取消场景必须失败(确定性,非概率)。
+
+    有界同步点等不到标志置位 → worker 继续真实转换全部文件 → 输出断言
+    判"取消未在剩余文件边界生效"。反向运行 5s 有界等待,不悬挂 QThread。
+    """
+    from file_toolbox.gui import selftest_driver as driver
+    from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
+
+    monkeypatch.setattr(PdfGenerateWorker, "cancel", lambda self: None)  # 空取消
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        driver, "_scenarios_for", lambda mode: [("pdf_cancel", driver._scenario_pdf_cancel)]
+    )
+    code = driver._execute_selftest(app, "pure", tmp_path / "cancel-noop-report.json")
+    payload = json.loads((tmp_path / "cancel-noop-report.json").read_text(encoding="utf-8"))
+    scenario = payload["scenarios"][0]
+    assert code == driver.EXIT_FAIL
+    assert scenario["name"] == "pdf_cancel"
+    assert scenario["status"] == "fail"
+    assert "取消未在剩余文件边界生效" in scenario["detail"]
+
+
+def test_pdf_cancel_fails_when_noop_cancel_and_partial_conversion_failure(
+    app, monkeypatch, tmp_path
+):
+    """P2 fail-closed 回归:空取消 + 部分文件转换失败(仅 1 输出)也必须失败。
+
+    旧断言只看 1<=outputs<3:取消链空操作且两个输入损坏时给不出取消证据,
+    输出计数恰好达标会被误判为取消成功;PASS 必须实际观察到标志置位。
+    """
+    from PIL import Image
+
+    from file_toolbox.gui import selftest_driver as driver
+    from file_toolbox.gui.workers.pdf_worker import PdfGenerateWorker
+
+    real_save = Image.Image.save
+
+    def corrupt_some(self, fp, format=None, **params):  # noqa: A002
+        name = str(fp)
+        if "cancel-image-1" in name or "cancel-image-2" in name:
+            Path(fp).write_bytes(b"not a png")  # 损坏输入:转换失败,无输出
+            return None
+        return real_save(self, fp, format=format, **params)
+
+    monkeypatch.setattr(PdfGenerateWorker, "cancel", lambda self: None)  # 空取消
+    monkeypatch.setattr(Image.Image, "save", corrupt_some)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        driver, "_scenarios_for", lambda mode: [("pdf_cancel", driver._scenario_pdf_cancel)]
+    )
+    code = driver._execute_selftest(app, "pure", tmp_path / "cancel-hole-report.json")
+    payload = json.loads((tmp_path / "cancel-hole-report.json").read_text(encoding="utf-8"))
+    scenario = payload["scenarios"][0]
+    assert code == driver.EXIT_FAIL
+    assert scenario["name"] == "pdf_cancel"
+    assert scenario["status"] == "fail"
+    assert "取消链未在有界等待内置位" in scenario["detail"]
+
+
+# ---------------------------------------------------------------------------
 # F6:结果输出成功但严格清理失败(cleanup_warning)→ 场景/总结果非零,产物保留
 # ---------------------------------------------------------------------------
 

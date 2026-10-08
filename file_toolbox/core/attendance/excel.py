@@ -26,6 +26,7 @@ from file_toolbox.core.attendance.types import (
     SourceAttendance,
     SourceLayout,
 )
+from file_toolbox.core.office_capability import record_office_session_success
 
 CancelCheck = Callable[[], bool]
 
@@ -482,6 +483,9 @@ def _excel_workbook(path: Path, *, read_only: bool) -> Iterator[tuple[Any, Any]]
         operation_error: Exception | None = None
         try:
             app = init_isolated_office_app("Excel.Application")
+            # Dispatch 成功即最强证据:登记到能力层(与 PDF 转换链同一进程内
+            # 存储),页面能力提示/自测前置据此展示"已验证"。
+            record_office_session_success("excel", "office")
             workbook = _open_workbook(app, path, read_only=read_only)
             yield app, workbook
         except Exception as exc:  # 保留业务错误，同时继续完整释放 COM

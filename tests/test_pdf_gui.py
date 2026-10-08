@@ -800,14 +800,14 @@ def test_engine_echo_error_terminal_state_delivered(dlg, monkeypatch):
 
 def _reset_engine_manager_class_state():
     """EngineManager 检测状态是类级共享,跨用例必须复位(与 test_engine_manager 的
-    autouse fixture 同责,本文件按需内联)。含按 kind 预筛 memo 与 verified 证据
-    (其它文件经真实 init_* 留下的 WPS 证据不得泄入本文件的能力展示断言)。"""
+    autouse fixture 同责,本文件按需内联)。含按 kind 双套件探测 memo 与 verified
+    证据(其它文件经真实 init_* 留下的 WPS/考勤证据不得泄入本文件的能力展示断言)。"""
     from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
     EngineManager._cached_engines = None
     EngineManager._cache_source = None
     EngineManager._flight_subscribers = None
-    EngineManager._cached_kind_availability = None
+    EngineManager._cached_kind_probes = None
     EngineManager._verified_kinds = {}
 
 

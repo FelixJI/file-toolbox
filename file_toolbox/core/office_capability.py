@@ -66,6 +66,9 @@ def office_kind_status(
     )
     if availability.state is ProbeState.AVAILABLE:
         engine = _ENGINE_LABELS.get(availability.engine or "", availability.engine or "?")
+        if availability.detail:
+            # 回退命中但另一套件探测失败(P4):如实保留探测错误,不因命中丢弃
+            engine = f"{engine};另一套件探测失败({availability.detail})"
         return CapabilityStatus(
             requirement=requirement,
             state=ProbeState.AVAILABLE,
@@ -85,6 +88,17 @@ def office_kind_status(
         state=availability.state,
         detail=availability.detail,
     )
+
+
+def record_office_session_success(kind: str, engine: str = "office") -> None:
+    """登记一次非 PDF 适配器的真实 Office COM 会话成功(能力层入口)。
+
+    考勤等直接经 common.office_session 建会话的适配器在 Dispatch 成功后调用;
+    复用 EngineManager 进程内 kind 证据(单一存储,不建第二份缓存/全局回调
+    框架),让页面能力提示与 full 自测前置读到"已验证"。kind/engine 语义
+    同 EngineManager.record_kind_success。
+    """
+    EngineManager.record_kind_success(kind, engine)
 
 
 def pandoc_status() -> CapabilityStatus:

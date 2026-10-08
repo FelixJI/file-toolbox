@@ -24,6 +24,18 @@ from file_toolbox.core.batch_replace.handlers.excel_handler import ExcelHandler
 from file_toolbox.core.batch_replace.handlers.word_handler import WordHandler
 
 
+@pytest.fixture(autouse=True)
+def _reset_office_kind_evidence():
+    """隔离 EngineManager 类级 kind 证据(Dispatch 成功路径现在会登记)。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+    yield
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+
+
 @pytest.fixture
 def word_handler() -> WordHandler:
     return WordHandler()
@@ -39,6 +51,83 @@ def _fake_owned_app(collection: str) -> MagicMock:
     app = MagicMock()
     getattr(app, collection).Count = 0
     return app
+
+
+# ===========================================================================
+# Dispatch 成功登记进程内 kind 证据(P5 补齐:预览/替换两链)
+# ===========================================================================
+
+
+def test_word_read_content_success_records_kind_evidence(word_handler, monkeypatch, tmp_path):
+    """预览读取链:Word Dispatch 成功 → 登记 word/office 证据。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.core.batch_replace.handlers import word_handler as module
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"fake")
+    app = _fake_owned_app("Documents")
+    monkeypatch.setattr(module, "init_office_app", lambda _pid: app)
+    monkeypatch.setattr(module, "open_office_document", lambda *a, **k: MagicMock())
+    monkeypatch.setattr(word_handler, "_extract_all_text", lambda _doc: "content")
+
+    assert word_handler.read_content(f) == "content"
+    assert EngineManager._verified_kinds == {"word": "office"}
+
+
+def test_word_batch_replace_success_records_kind_evidence(word_handler, monkeypatch, tmp_path):
+    """替换执行链:Word Dispatch 成功即登记证据(与匹配结果无关)。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.core.batch_replace.handlers import word_handler as module
+
+    f = tmp_path / "a.docx"
+    f.write_bytes(b"fake")
+    app = _fake_owned_app("Documents")
+    monkeypatch.setattr(module, "init_office_app", lambda _pid: app)
+    monkeypatch.setattr(module, "open_office_document", lambda *a, **k: MagicMock())
+    monkeypatch.setattr(word_handler, "_extract_all_text", lambda _doc: "no match here")
+
+    result = word_handler.batch_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "zzz", "replace": "x"}}]
+    )
+    assert result["errors"] == []
+    assert EngineManager._verified_kinds == {"word": "office"}
+
+
+def test_excel_read_content_success_records_kind_evidence(excel_handler, monkeypatch, tmp_path):
+    """预览读取链:Excel Dispatch 成功 → 登记 excel/office 证据。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.core.batch_replace.handlers import excel_handler as module
+
+    f = tmp_path / "a.xlsx"
+    f.write_bytes(b"fake")
+    app = _fake_owned_app("Workbooks")
+    wb = MagicMock()
+    wb.Worksheets = []  # 空表:无匹配,Dispatch 仍成功
+    monkeypatch.setattr(module, "init_office_app", lambda _pid: app)
+    monkeypatch.setattr(module, "open_office_document", lambda *a, **k: wb)
+
+    assert excel_handler.read_content(f) == ""
+    assert EngineManager._verified_kinds == {"excel": "office"}
+
+
+def test_excel_batch_replace_success_records_kind_evidence(excel_handler, monkeypatch, tmp_path):
+    """替换执行链:Excel Dispatch 成功即登记证据(与匹配结果无关)。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+    from file_toolbox.core.batch_replace.handlers import excel_handler as module
+
+    f = tmp_path / "a.xlsx"
+    f.write_bytes(b"fake")
+    app = _fake_owned_app("Workbooks")
+    wb = MagicMock()
+    wb.Worksheets = []
+    monkeypatch.setattr(module, "init_office_app", lambda _pid: app)
+    monkeypatch.setattr(module, "open_office_document", lambda *a, **k: wb)
+
+    result = excel_handler.batch_replace(
+        [f], [{"type": "simple_replace", "params": {"find": "zzz", "replace": "x"}}]
+    )
+    assert result["errors"] == []
+    assert EngineManager._verified_kinds == {"excel": "office"}
 
 
 def _stub_com_modules(

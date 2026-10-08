@@ -26,6 +26,7 @@ from file_toolbox.core.office_capability import (
     format_statuses,
     office_kind_status,
     pandoc_status,
+    record_office_session_success,
     tool_capability_statuses,
 )
 
@@ -33,10 +34,10 @@ from file_toolbox.core.office_capability import (
 @pytest.fixture(autouse=True)
 def _reset_kind_state():
     """隔离按 kind 的类级 memo/验证集合(与套件级状态互不影响)。"""
-    EngineManager._cached_kind_availability = None
+    EngineManager._cached_kind_probes = None
     EngineManager._verified_kinds = {}
     yield
-    EngineManager._cached_kind_availability = None
+    EngineManager._cached_kind_probes = None
     EngineManager._verified_kinds = {}
 
 
@@ -144,7 +145,11 @@ def test_kind_probe_error_is_not_missing(monkeypatch):
 
 
 def test_kind_availability_memo_and_refresh(monkeypatch):
-    """进程内 memo:二次查询不重探;refresh=True 强制重探。"""
+    """进程内 memo:二次查询不重探;refresh=True 强制重探。
+
+    memo 存双套件探测结果,选择层每次构造值相等的新对象(旧的同一对象断言
+    是旧 memo 实现细节,不重探才是契约)。
+    """
     probed = _patch_outcomes(
         monkeypatch,
         {"Word.Application": em._ProbeOutcome(False), "KWPS.Application": em._ProbeOutcome(True)},
@@ -153,7 +158,8 @@ def test_kind_availability_memo_and_refresh(monkeypatch):
     first = manager.kind_availability("word")
     assert first.engine == "wps"
     count = len(probed)
-    assert manager.kind_availability("word") is first  # memo 命中,同一对象
+    second = manager.kind_availability("word")
+    assert second == first  # memo 命中,值一致
     assert len(probed) == count
     manager.kind_availability("word", refresh=True)
     assert len(probed) == count + 2
@@ -506,6 +512,88 @@ def test_dual_suite_machine_keeps_ms_prescreen_for_ms_only_tools(monkeypatch):
     assert pdf_status.state is ProbeState.AVAILABLE
     assert pdf_status.detail == "WPS"
     assert pdf_status.verified is True  # 实际成功套件优先于预筛偏好
+
+
+# ---------------------------------------------------------------------------
+# P4:MS 探测错误不终止探测——支持集合内如实选择,不丢 WPS 成功/原 MS 错误
+# ---------------------------------------------------------------------------
+
+
+def _patch_ms_error_wps_registered(monkeypatch) -> list[str]:
+    return _patch_outcomes(
+        monkeypatch,
+        {
+            "Word.Application": em._ProbeOutcome(None, "denied"),
+            "KWPS.Application": em._ProbeOutcome(True),
+        },
+    )
+
+
+def test_ms_probe_error_still_probes_wps_for_supported_engines(monkeypatch):
+    """P4 回归:MS 探测 OSError 时仍探 WPS——支持 WPS 的调用方在 WPS 注册
+    命中时如实可用,详情保留 MS 探测错误;无约束查询同样可用,不把 WPS
+    成功丢成错误状态。"""
+    probed = _patch_ms_error_wps_registered(monkeypatch)
+    pdf_view = EngineManager().kind_availability("word", engines=("office", "wps"))
+    assert pdf_view.state is ProbeState.AVAILABLE
+    assert pdf_view.engine == "wps"
+    assert "denied" in pdf_view.detail  # 保留原 MS 探测错误
+    unrestricted = EngineManager().kind_availability("word")
+    assert unrestricted.state is ProbeState.AVAILABLE
+    assert unrestricted.engine == "wps"
+    assert "KWPS.Application" in probed  # WPS 实际被探测
+
+
+def test_ms_probe_error_kept_for_ms_only_tools(monkeypatch):
+    """P4 回归:仅 MS 工具在 MS 探测错误 + WPS 注册时保留原 PROBE_ERROR——
+    不冒称缺失( MISSING),也不丢原错误。"""
+    _patch_outcomes(
+        monkeypatch,
+        {
+            "Word.Application": em._ProbeOutcome(None, "denied"),
+            "KWPS.Application": em._ProbeOutcome(True),
+            "Excel.Application": em._ProbeOutcome(False),
+            "Ket.Application": em._ProbeOutcome(False),
+        },
+    )
+    replace_status = next(
+        status
+        for status in tool_capability_statuses("replace")
+        if status.requirement.startswith("Word")
+    )
+    assert replace_status.state is ProbeState.PROBE_ERROR
+    assert "denied" in replace_status.detail
+
+
+def test_office_kind_status_appends_fallback_probe_error(monkeypatch):
+    """P4 展示:回退命中但另一套件探测失败时,能力文案保留探测错误。"""
+    _patch_ms_error_wps_registered(monkeypatch)
+    status = office_kind_status("word", (".doc", ".docx"), engines=("office", "wps"))
+    assert status.state is ProbeState.AVAILABLE
+    assert "WPS" in status.detail and "denied" in status.detail
+
+
+# ---------------------------------------------------------------------------
+# P5:非 PDF 适配器经能力层登记真实 COM 成功证据
+# ---------------------------------------------------------------------------
+
+
+def test_record_office_session_success_feeds_verified_evidence(monkeypatch):
+    """P5 回归:考勤等适配器登记的 COM 成功 → 同一 verified 证据可纠正预筛
+    (含缺失),页面/自测前置读到"已验证";非法 kind/engine fail closed。"""
+    _patch_outcomes(
+        monkeypatch,
+        {"Excel.Application": em._ProbeOutcome(False), "Ket.Application": em._ProbeOutcome(False)},
+    )
+    record_office_session_success("excel", "office")
+    attendance = tool_capability_statuses("attendance")[0]
+    assert attendance.state is ProbeState.AVAILABLE
+    assert attendance.verified is True
+    assert attendance.detail == "MS Office"
+    with pytest.raises(ValueError, match="未知的 Office 应用类别"):
+        record_office_session_success("wordx")
+    with pytest.raises(ValueError, match="未知的引擎套件"):
+        record_office_session_success("word", "kingsoft")
 
 
 # ---------------------------------------------------------------------------

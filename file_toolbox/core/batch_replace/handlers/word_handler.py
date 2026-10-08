@@ -13,6 +13,7 @@ from file_toolbox.common.office_session import (
     init_office_app,
     open_office_document,
 )
+from file_toolbox.core.office_capability import record_office_session_success
 
 # 单个文件操作超时时间（秒）
 
@@ -48,6 +49,8 @@ class WordHandler(LoggableMixin):
         with ComSession():
             try:
                 word_app = init_office_app("Word.Application")
+                # Dispatch 成功即最强证据:登记进程内 kind 证据(预览读取链)
+                record_office_session_success("word", "office")
 
                 doc = open_office_document(word_app, "Documents", file_path, ReadOnly=True)
 
@@ -141,6 +144,8 @@ class WordHandler(LoggableMixin):
 
             try:
                 word_app = init_office_app("Word.Application")
+                # Dispatch 成功即最强证据:登记进程内 kind 证据(替换执行链)
+                record_office_session_success("word", "office")
 
                 # ScreenUpdating 是 batch_replace 的业务优化(批量替换时关闭屏幕刷新以
                 # 提速),init_office_app 不设此项——故在此单独保留。
