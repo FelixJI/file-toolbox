@@ -12,6 +12,18 @@ from file_toolbox.core.batch_pdf.converters.word_converter import WordConverter
 from file_toolbox.core.batch_replace.service import ContentReplaceService
 
 
+@pytest.fixture(autouse=True)
+def _reset_office_kind_evidence():
+    """隔离 EngineManager 类级 kind 证据(Dispatch 成功路径现在会登记)。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+    yield
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+
+
 def test_shared_powerpoint_keeps_global_ui_properties(monkeypatch):
     import win32com.client
 

@@ -31,6 +31,21 @@ from file_toolbox.core.attendance.types import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_office_kind_evidence():
+    """隔离 EngineManager 类级 kind 证据/双套件 memo。
+
+    会话成功会登记能力证据(P5),不重置会泄入其它文件的预筛/展示断言。
+    """
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+    yield
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+
+
 def _plan() -> AttendancePlan:
     return AttendancePlan(
         name="市场部",
@@ -65,6 +80,18 @@ def _patch_excel(monkeypatch, workbook):
         "file_toolbox.core.attendance.excel.init_isolated_office_app", lambda prog_id: app
     )
     return app
+
+
+def test_excel_session_success_records_office_evidence(monkeypatch, tmp_path):
+    """P5 回归:隔离 Excel 会话 Dispatch 成功 → 能力层登记 kind=excel 已验证。"""
+    from file_toolbox.core.attendance import excel as excel_module
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    _patch_excel(monkeypatch, MagicMock())
+    book = tmp_path / "source.xlsx"
+    book.write_bytes(b"fixture")
+    with excel_module._excel_workbook(book, read_only=True):
+        assert EngineManager._verified_kinds == {"excel": "office"}
 
 
 def _prepared(

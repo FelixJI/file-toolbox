@@ -753,7 +753,8 @@ def test_detect_engines_async_path_records_callback(dlg, monkeypatch):
     # 回调内部 emit _engine_detected(同线程直连到槽),文本立即生效
     captured["callback"]("检测到: Office")
     QApplication.processEvents()
-    assert dlg.ui.label_engine_info.text() == "检测到: Office"
+    # 检测结果为第一行,第二行为按文件类型的独立预筛结论
+    assert dlg.ui.label_engine_info.text().startswith("检测到: Office")
 
 
 def test_engine_echo_stale_generation_token_ignored(dlg, monkeypatch):
@@ -773,7 +774,7 @@ def test_engine_echo_stale_generation_token_ignored(dlg, monkeypatch):
 
     dlg._engine_detected.emit(2, "新结果: MS Office")
     QApplication.processEvents()
-    assert dlg.ui.label_engine_info.text() == "新结果: MS Office"
+    assert dlg.ui.label_engine_info.text().startswith("新结果: MS Office")
 
 
 def test_engine_echo_error_terminal_state_delivered(dlg, monkeypatch):
@@ -799,12 +800,15 @@ def test_engine_echo_error_terminal_state_delivered(dlg, monkeypatch):
 
 def _reset_engine_manager_class_state():
     """EngineManager 检测状态是类级共享,跨用例必须复位(与 test_engine_manager 的
-    autouse fixture 同责,本文件按需内联)。"""
+    autouse fixture 同责,本文件按需内联)。含按 kind 双套件探测 memo 与 verified
+    证据(其它文件经真实 init_* 留下的 WPS/考勤证据不得泄入本文件的能力展示断言)。"""
     from file_toolbox.core.batch_pdf.engine_manager import EngineManager
 
     EngineManager._cached_engines = None
     EngineManager._cache_source = None
     EngineManager._flight_subscribers = None
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
 
 
 def test_engine_echo_real_thread_reaches_label(app, monkeypatch, tmp_path):

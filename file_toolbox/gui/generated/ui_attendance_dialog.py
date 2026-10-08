@@ -606,6 +606,13 @@ class Ui_AttendanceDialog(object):
 
         self.verticalLayout.addLayout(self.layout_actions)
 
+        self.label_excel_status = QLabel(AttendanceDialog)
+        self.label_excel_status.setObjectName(u"label_excel_status")
+        self.label_excel_status.setStyleSheet(u"color: gray; font-size: 11px;")
+        self.label_excel_status.setWordWrap(True)
+
+        self.verticalLayout.addWidget(self.label_excel_status)
+
 
         self.retranslateUi(AttendanceDialog)
 
@@ -697,4 +704,5 @@ class Ui_AttendanceDialog(object):
         self.lbl_status.setText(QCoreApplication.translate("AttendanceDialog", u"\u5c31\u7eea", None))
         self.btn_preview.setText(QCoreApplication.translate("AttendanceDialog", u"\u9884\u89c8\u5e76\u6821\u9a8c", None))
         self.btn_generate.setText(QCoreApplication.translate("AttendanceDialog", u"\u751f\u6210\u5e76\u53e6\u5b58", None))
+        self.label_excel_status.setText(QCoreApplication.translate("AttendanceDialog", u"Excel \u80fd\u529b\uff1a\u5f85\u68c0\u6d4b", None))
     # retranslateUi

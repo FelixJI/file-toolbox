@@ -83,6 +83,12 @@ flowchart TD
 这条路线仅适合 Windows 环境。先找平台能力检测与适配器，再进入 COM 调用；测试应区分纯逻辑测试和
 需要真实 Microsoft Office 的集成验证。
 
+能力状态按操作/文件类型声明与查询：`common/tool_registry.py` 的 `office_needs`/
+`requires_pandoc` 是纯数据声明；`core/office_capability.py` 消费登记并输出
+可用/缺失/检测失败三态（复用 `core/batch_pdf/engine_manager.py` 的注册表预筛
+与真实 Dispatch 证据，不新造缓存）。预筛命中只展示"检测到"，不冒称真实
+COM 可用；各 kind 独立探测，Word 缺失不能否定 Excel/PPT。
+
 Markdown 转 Word / Excel 走 `core/markdown_convert.py`，使用内置 Pandoc 和
 `markdown-it-py` / `openpyxl`，不经过 COM。CLI 为 `markdown-convert`，GUI 为“Markdown转换”。
 
@@ -95,7 +101,11 @@ Markdown 转 Word / Excel 走 `core/markdown_convert.py`，使用内置 Pandoc �
 3. `.github/workflows/ci.yml`
 4. `.github/workflows/cd.yml`
 
-项目脚本定义命令语义，workflow 负责 runner、job 拓扑和产物交接。
+项目脚本定义命令语义，workflow 负责 runner、job 拓扑和产物交接。`scripts/product_selftest.py` 在
+`release_smoke` 中追加真实成品验证：解包便携 zip、两次启动 `current/FileToolbox.exe`
+（`--selftest pure|full|reopen`，仅显式参数分支才加载 `gui/selftest_driver.py`）并独立读回
+PDF/docx/xlsx/考勤/历史结果；本机无 Office 时 full 以退出码 3（EVIDENCE_MISSING）fail closed，
+不把缺失 skip 成 PASS。
 
 ## 建议的首次修改流程
 

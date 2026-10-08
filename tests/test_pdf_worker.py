@@ -303,3 +303,45 @@ def test_generation_and_cleanup_failure_keep_distinct_signals(app):
     worker.run()
     assert failures == ["controlled generation failure"]
     assert len(warnings) == 1 and "controlled cleanup failure" in warnings[0]
+
+
+# ---------- F8:worker 线程必须重入主线程捕获的数据根 policy ----------
+
+
+def test_worker_run_uses_captured_data_root_policy(app, monkeypatch, tmp_path):
+    """F8 回归:后台线程内访问数据根/写设置必须命中构造时捕获的 GUI policy 根。
+
+    ContextVar 不随线程继承:旧实现 worker 线程内 get_data_dir() 回落 CLI cwd
+    policy,真实转换的引擎证据会写到 cwd/.file_toolbox(源码 full3 实际越出
+    隔离根)。构造期在主线程设置 GUI policy、cwd 故意指向另一目录,后台线程
+    内的读/写必须落在 policy 根,cwd 根不得出现任何文件。
+    """
+    from pathlib import Path
+
+    from file_toolbox.common import settings
+    from file_toolbox.common.paths import GuiDataRootPolicy, current_data_root, use_data_root_policy
+
+    gui_root = tmp_path / "gui-root"
+    cwd_root = tmp_path / "cwd-root"
+    cwd_root.mkdir()
+    monkeypatch.chdir(cwd_root)
+    observed: dict[str, str] = {}
+
+    class _PolicyProbeService(_FakeService):
+        def batch_generate(self, files, config, progress_callback=None, cancel_check=None):
+            observed["data_root"] = str(current_data_root())
+            settings.set("pdf_worker_probe", "written-in-worker")
+            return self._results[: len(files)]
+
+    results = [_make_result("a.docx")]
+    svc = _PolicyProbeService(results)
+    with use_data_root_policy(GuiDataRootPolicy(gui_root)):
+        worker = PdfGenerateWorker(svc, [Path("a.docx")], {})
+
+    worker.start()
+    assert worker.wait(5000), "worker 未在 5s 内结束"
+    app.processEvents()
+
+    assert observed["data_root"] == str(gui_root / ".file_toolbox")
+    assert (gui_root / ".file_toolbox" / "settings.json").is_file()
+    assert not (cwd_root / ".file_toolbox").exists(), "worker 线程内的写入不得落到 cwd 根"

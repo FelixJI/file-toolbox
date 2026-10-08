@@ -46,6 +46,9 @@ from file_toolbox.updater.models import (
 )
 
 if TYPE_CHECKING:
+    # QApplication 仅在 run_gui 的 selftest 驱动签名标注中使用,运行时导入仍在函数内。
+    from PySide6.QtWidgets import QApplication
+
     # Tab 类仅在类型标注中使用;运行时导入延迟到 gui.tab_factory 懒工厂,
     # 避免 dialogs 包(及其重依赖 pypdfium2/pypdf/chardet/cattrs)进入启动链。
     from file_toolbox.gui.dialogs.about_tab import AboutTab
@@ -696,8 +699,14 @@ def _activate_window(window: QWidget) -> None:
     window.activateWindow()
 
 
-def run_gui() -> None:
-    """启动 GUI(供 cli gui 子命令调用)。"""
+def run_gui(*, selftest_driver: Callable[[QApplication], int] | None = None) -> None:
+    """启动 GUI(供 cli gui 子命令调用)。
+
+    selftest_driver 是成品自测(--selftest)的专用注入点:正常启动不传(默认
+    None)。传入时同样走真实启动链(日志/单实例/watchdog/QApplication),由
+    driver 自行运行主窗口场景并返回进程退出码;仅更新协调器在 driver 内经
+    MainWindow(coordinator=...) 注入 fake,不越出既有测试缝。
+    """
     import sys
 
     from PySide6.QtWidgets import QApplication
@@ -726,6 +735,11 @@ def run_gui() -> None:
         # settings/历史,也避免用户看到"程序打开了两次"。
         _logger.info("检测到已运行的 GUI 实例,本次启动退出")
         return
+    if selftest_driver is not None:
+        # 成品自测:真实 QApplication/watchdog/guard 已就绪,场景由 driver 在
+        # 真实事件循环中驱动;退出码由 driver 结果决定(经 sys.exit 生效)。
+        _logger.info("selftest 驱动接管主循环")
+        sys.exit(selftest_driver(cast("QApplication", app)))
     t0 = time.perf_counter()
     win = MainWindow()
     guard.activateRequested.connect(lambda: _activate_window(win))

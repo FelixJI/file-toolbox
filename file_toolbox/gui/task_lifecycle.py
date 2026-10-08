@@ -1,5 +1,7 @@
 """GUI 任务的结果、线程结束与异步关闭边界；业务结果仍由页面消费。"""
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QObject, QThread, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QWidget
@@ -12,6 +14,11 @@ class TaskLifecycle:
         self._owner = owner
         self.worker: QThread | None = None
         self.close_pending = False
+        # start 前观察缝(--selftest 驱动专用):track 是页面启动 worker 的唯一
+        # 统一注册点,在此回调订阅可严格先于 worker.start(),消除"启动后才连接"
+        # 的发射竞态(工作线程可能立即失败/立即清理告警)。正常 GUI 不设置
+        # (默认 None,零开销);不引入全局 QThread 拦截框架。
+        self.on_worker_tracked: Callable[[QThread], None] | None = None
 
     @property
     def busy(self) -> bool:
@@ -21,6 +28,9 @@ class TaskLifecycle:
         if self.busy:
             raise RuntimeError("上一任务尚未结束")
         self.worker = worker
+        observer = self.on_worker_tracked
+        if observer is not None:
+            observer(worker)
 
     def accepts(self, sender: QObject | None) -> bool:
         # 页面也允许同步调用结果槽；真实信号必须来自当前任务。

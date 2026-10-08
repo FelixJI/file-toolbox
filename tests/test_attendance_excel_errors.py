@@ -35,6 +35,18 @@ from file_toolbox.core.attendance.types import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_office_kind_evidence():
+    """隔离 EngineManager 类级 kind 证据/双套件 memo(会话成功会登记能力证据)。"""
+    from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+    yield
+    EngineManager._cached_kind_probes = None
+    EngineManager._verified_kinds = {}
+
+
 def _plan(**overrides) -> AttendancePlan:
     base = AttendancePlan(
         name="市场部",

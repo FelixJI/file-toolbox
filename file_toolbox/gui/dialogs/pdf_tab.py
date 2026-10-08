@@ -33,6 +33,7 @@ from file_toolbox.core.batch_pdf.constants import (
     SCALE_SHRINK_OVERSIZED,
 )
 from file_toolbox.core.batch_pdf.engine_manager import EngineManager
+from file_toolbox.core.office_capability import format_statuses, tool_capability_statuses
 from file_toolbox.gui.batch_mixin import BatchDialogMixin
 from file_toolbox.gui.controllers.pdf_controller import PDFConfigState, PDFController
 from file_toolbox.gui.file_models import table_model
@@ -201,11 +202,12 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
 
         if os.environ.get("FILE_TOOLBOX_NO_COM_DETECT"):
             # 测试/CI:不触发 COM,仅用缓存(可能为空),避免致命异常
-            self.ui.label_engine_info.setText(
+            info = (
                 self._svc.get_engine_info(use_cache=True)
                 if EngineManager._cached_engines
                 else "未检测到Office软件"
             )
+            self.ui.label_engine_info.setText(info + "\n" + self._kind_status_text())
             return
 
         self.ui.label_engine_info.setText("正在检测可用引擎...")
@@ -223,15 +225,24 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             # 非 Windows 或缺少 pywin32 时退回同步(带缓存)信息
             self.ui.label_engine_info.setText(self._svc.get_engine_info(use_cache=True))
 
+    def _kind_status_text(self) -> str:
+        """按文件类型的 Office 能力行(消费统一登记声明,注册表预筛)。
+
+        各 kind 独立探测自己的 ProgID:套件级缓存(以 Word/KWPS 判定)不能
+        据此否定 Excel/PPT。纯图片/PDF 路径不启动 Office,预筛命中也不冒称
+        真实转换验证(文案见 office_capability.format_statuses)。
+        """
+        return "按文件类型: " + format_statuses(tool_capability_statuses("pdf"))
+
     def _on_engine_detected(self, token: int, info: str) -> None:
         """引擎检测回显槽(对话框线程):只接受最新代次请求的结果。
 
         旧代次的晚到结果直接丢弃,不覆盖新状态(AC5);异常终态文案同样经此
-        槽回显,页面不会停留在"正在检测"。
+        槽回显,页面不会停留在"正在检测"。第二行为按文件类型的独立预筛结论。
         """
         if token != self._engine_echo_token:
             return
-        self.ui.label_engine_info.setText(info)
+        self.ui.label_engine_info.setText(info + "\n" + self._kind_status_text())
 
     def _refresh_engine_info_label(self) -> None:
         """用当前缓存刷新引擎信息 label,消除"正在检测..."残留。
@@ -243,7 +254,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         """
         info = self._svc.get_engine_info(use_cache=True)
         if info and info != "正在检测可用引擎...":
-            self.ui.label_engine_info.setText(info)
+            self.ui.label_engine_info.setText(info + "\n" + self._kind_status_text())
 
     # ---------- 配置构建 ----------
 
