@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.7
+
+### Features
+
+- **gui:** 统一引擎能力并验证便携成品关键路径 (#150) (b2e100e)
+- **markdown:** 增加批量转 Word 和 Excel 功能 (#134) (ec19db8)
+
+### Bug Fixes
+
+- **gui:** 明确手写布局与生成 UI 的维护边界 (e20b17f)
+- **office:** 明确任务会话归属并保护清理边界 (#145) (e161bb8)
+- **gui:** 统一后台任务真实结束与异步关闭边界 (#144) (a1a712b)
+
+### Performance
+
+- **gui:** 后台扫描文件并冻结重命名预览 (#149) (075fa07)
+
+### Dependencies
+
+- **build:** 升级项目依赖与 SDK 工具链 (#135) (5f42e6a)
+
 ## 0.3.6
 
 ### Features
