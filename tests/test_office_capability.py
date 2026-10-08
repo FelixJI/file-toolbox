@@ -657,6 +657,97 @@ def test_replace_hint_lists_pure_and_office_types(qt_app, monkeypatch, tmp_path)
     dialog.close()
 
 
+@pytest.mark.parametrize(
+    ("kind", "requirement"),
+    [("word", "Word(doc/docx)"), ("excel", "Excel(xls/xlsx)")],
+)
+def test_replace_hint_refreshes_to_verified_after_real_worker_finish(
+    qt_app, monkeypatch, tmp_path, kind, requirement
+):
+    """F11 回归:初始探测错误 → 真实 handler COM 成功登记(Dispatch 替身) →
+    当前 worker 真实 finished 后,同一页面提示变为"已验证可用(MS Office)",
+    不再停留在构造时快照(页面被主窗口缓存,切页不重建)。"""
+    import time as time_module
+    from unittest.mock import MagicMock
+
+    from PySide6.QtCore import QThread
+
+    pytest.importorskip("file_toolbox.gui.dialogs.replace_tab")
+    # 初始预筛:MS 探测错误(未注册 wps)→ replace(MS-only)构造时展示检测失败
+    _patch_outcomes(
+        monkeypatch,
+        {
+            "Word.Application": em._ProbeOutcome(None, "denied"),
+            "KWPS.Application": em._ProbeOutcome(False),
+            "Excel.Application": em._ProbeOutcome(None, "denied"),
+            "Ket.Application": em._ProbeOutcome(False),
+        },
+    )
+
+    from file_toolbox.gui.dialogs.replace_tab import ContentReplaceDialog
+
+    monkeypatch.chdir(tmp_path)
+    tab = ContentReplaceDialog()
+    initial = tab.ui.label_file_filter.text()
+    assert f"{requirement}: 检测失败" in initial  # 构造态:预筛错误、未验证
+
+    # 真实 handler 成功登记路径(Dispatch 替身):经生产代码写入进程内 kind 证据
+    if kind == "word":
+        from file_toolbox.core.batch_replace.handlers import word_handler as module
+
+        app = MagicMock()
+        app.Documents.Count = 0
+        monkeypatch.setattr(module, "init_office_app", lambda _pid: app)
+        monkeypatch.setattr(module, "open_office_document", lambda *a, **k: MagicMock())
+        monkeypatch.setattr(module.WordHandler, "_extract_all_text", lambda self, _doc: "x")
+        source = tmp_path / "a.docx"
+        source.write_bytes(b"fake")
+        module.WordHandler().read_content(source)
+    else:
+        from file_toolbox.core.batch_replace.handlers import excel_handler as module
+
+        app = MagicMock()
+        app.Workbooks.Count = 0
+        wb = MagicMock()
+        wb.Worksheets = []
+        monkeypatch.setattr(module, "init_office_app", lambda _pid: app)
+        monkeypatch.setattr(module, "open_office_document", lambda *a, **k: wb)
+        source = tmp_path / "a.xlsx"
+        source.write_bytes(b"fake")
+        module.ExcelHandler().read_content(source)
+
+    # 同一页面消费当前 worker 的真实 finished(经 TaskLifecycle 身份校验)。
+    # run 必须有限返回:QThread 默认 run 进入事件循环不会自然结束(夹具缺陷,
+    # 曾致 worker.wait 超时误报);失败路径也用 finally 协作收尾,不强杀。
+    class _FinishWorker(QThread):
+        def run(self) -> None:
+            return
+
+    worker = _FinishWorker(tab)
+    worker.finished.connect(tab._on_worker_finished)
+    tab._task.track(worker)
+    worker.start()
+    try:
+        assert worker.wait(5000), "worker 未自然结束(测试夹具失败,非产品缺陷)"
+        deadline = time_module.monotonic() + 5
+        text = tab.ui.label_file_filter.text()
+        while f"{requirement}: 已验证可用" not in text and time_module.monotonic() < deadline:
+            qt_app.processEvents()
+            text = tab.ui.label_file_filter.text()
+        assert f"{requirement}: 已验证可用(MS Office)" in text
+    finally:
+        # 槽内 _task.finish 会 deleteLater worker:processEvents 后 C++ 对象可能
+        # 已释放,包装对象调用抛 RuntimeError——仅在其仍存活且运行时协作收尾
+        try:
+            running = worker.isRunning()
+        except RuntimeError:
+            running = False
+        if running:
+            worker.quit()  # 协作退出请求(事件循环场景),非强杀
+            worker.wait(5000)
+    tab.close()
+
+
 def test_markdown_hint_appends_pandoc_status(qt_app, monkeypatch, tmp_path):
     pytest.importorskip("file_toolbox.gui.dialogs.markdown_tab")
     from file_toolbox.gui.dialogs.markdown_tab import MarkdownConvertTab

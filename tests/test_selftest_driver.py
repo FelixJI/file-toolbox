@@ -387,9 +387,10 @@ def test_execute_selftest_pure_then_reopen_e2e(app, monkeypatch, tmp_path):
     assert payload["evidence_missing"] is False
     # 数据根与工作目录都落在临时根内(不写真实配置/历史)
     assert str(payload["data_root"]).startswith(str(tmp_path))
-    # 取消场景:产出数少于全部文件即真实取消,或全部完成(两种合法终态)且控件恢复
+    # 取消场景:同步取消契约——首个文件真实完成后下一边界停止,产出恰 1 个
+    # (确定性,非概率;宽松 <=3 旧断言已随同步取消点废弃)
     cancel = next(item for item in payload["scenarios"] if item["name"] == "pdf_cancel")
-    assert 1 <= len(cancel["artifacts"]["outputs"]) <= 3
+    assert len(cancel["artifacts"]["outputs"]) == 1
 
     code, reopen_payload = _run_mode(app, monkeypatch, tmp_path, "reopen")
     assert code == 0, json.dumps(reopen_payload, ensure_ascii=False)

@@ -55,7 +55,9 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         """能力提示:按文件类型展示 Office 状态(消费统一登记声明,预筛结论)。
 
         txt/md 为纯文件处理,不因任何引擎缺失受影响;页面不禁用任何按钮,
-        依赖缺失只在执行期对对应操作报错。
+        依赖缺失只在执行期对对应操作报错。除构造时外,真实 worker finished
+        后也会刷新(F11):预览/替换/旧格式转换的 COM 成功已在进程内登记
+        verified 证据,同一页面应及时从"检测失败/预检"更新为"已验证"。
         """
         statuses = format_statuses(tool_capability_statuses("replace"))
         self.ui.label_file_filter.setWordWrap(True)
@@ -279,10 +281,15 @@ class ContentReplaceDialog(QDialog, BatchDialogMixin):
         # 失败后控件恢复与挂起标记的消费均在真实 finished(_on_worker_finished)
 
     def _on_worker_finished(self) -> None:
-        """真实 finished 后释放线程、恢复控件并消费挂起的预览刷新。"""
+        """真实 finished 后释放线程、恢复控件并消费挂起的预览刷新。
+
+        同时刷新能力提示(F11):预览/执行/失败收尾共享本入口,真实 COM
+        成功登记的 verified 证据在同一页面即时呈现,无需重建页面。
+        """
         if not self._task.finish(self.sender()):
             return
         self._restore_ui()
+        self._refresh_capability_hint()
         if self._task.close_pending:
             return  # 关闭中:不重跑预览,交给 TaskLifecycle 续接关闭
         if not self._resume_import():
