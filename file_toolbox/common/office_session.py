@@ -70,6 +70,38 @@ class ComSession:
                 self._thread_id = None
 
 
+def retry_com_call[T](
+    operation: Callable[[], T], cancel_check: Callable[[], bool] | None = None
+) -> T:
+    """仅恢复被 COM 明确拒绝的单次调用；不重放事务，也不能中断阻塞调用。"""
+    deadline = time.monotonic() + 5.0
+    while True:
+        if cancel_check is not None and cancel_check():
+            raise InterruptedError("操作已取消")
+        try:
+            return operation()
+        except Exception as error:
+            try:
+                import pywintypes
+            except ImportError:
+                raise error from None
+            # RPC_E_CALL_REJECTED / RPC_E_SERVERCALL_RETRYLATER 均表示未执行调用。
+            if (
+                not isinstance(error, pywintypes.com_error)
+                or not error.args
+                or error.args[0]
+                not in {
+                    -2147418111,
+                    -2147417846,
+                }
+            ):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(0.1, remaining))
+
+
 def init_office_app(prog_id: str) -> Any:
     """按需创建 COM 引用；共享应用不设置 Visible/DisplayAlerts。"""
     import win32com.client
@@ -78,8 +110,8 @@ def init_office_app(prog_id: str) -> Any:
     app = dispatch_ex(prog_id)
     if prog_id in _OWNED_APPLICATIONS:
         try:
-            app.Visible = False
-            app.DisplayAlerts = False
+            retry_com_call(lambda: setattr(app, "Visible", False))
+            retry_com_call(lambda: setattr(app, "DisplayAlerts", False))
         except Exception:
             # 初始化属性失败也必须释放已创建的专属空应用。
             with contextlib.suppress(Exception):
@@ -159,7 +191,7 @@ def dispose_office_app(
     try:
         collection_name = _OWNED_APPLICATIONS.get(prog_id)
         if collection_name is not None:
-            count = getattr(app, collection_name).Count
+            count = retry_com_call(lambda: getattr(app, collection_name).Count)
             if count != 0:
                 identity = prog_id
                 # PID 仅用于人工定位保留的会话，绝不作为 kill/归属授权。
@@ -177,7 +209,7 @@ def dispose_office_app(
                     f"{identity} 仍有 {count} 个未关闭文档，保留会话，不执行 Quit；"
                     "请在该应用中保存并关闭文档"
                 )
-            app.Quit()
+            retry_com_call(lambda: app.Quit())
     except Exception as error:
         quit_error = error
     gc.collect()

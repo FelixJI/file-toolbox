@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import re
 from collections.abc import Callable, Iterator
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -13,6 +14,7 @@ from file_toolbox.common.office_session import (
     dispose_office_app,
     init_isolated_office_app,
     open_office_document,
+    retry_com_call,
 )
 from file_toolbox.core.attendance.types import (
     AttendancePlan,
@@ -29,6 +31,12 @@ from file_toolbox.core.attendance.types import (
 from file_toolbox.core.office_capability import record_office_session_success
 
 CancelCheck = Callable[[], bool]
+_cancel_check: ContextVar[CancelCheck | None] = ContextVar("attendance_cancel_check", default=None)
+
+
+def _excel_call[**P, T](operation: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    return retry_com_call(lambda: operation(*args, **kwargs), _cancel_check.get())
+
 
 BASE_EMPLOYEE_ROWS = 15
 BASE_DATE_COLUMNS = 30
@@ -129,20 +137,40 @@ class ExcelComAdapter:
                 if key in checked:
                     continue
                 checked.add(key)
-                detail = workbook.Worksheets(available_sheets[detail_name.casefold()])
-                summary = workbook.Worksheets(available_sheets[summary_name.casefold()])
-                header = detail.Cells(
-                    plan.target.detail_matrix_start.row - 1,
-                    plan.target.detail_matrix_start.column,
-                ).Value
+                detail = _excel_call(
+                    lambda detail_name: workbook.Worksheets(
+                        available_sheets[detail_name.casefold()]
+                    ),
+                    detail_name,
+                )
+                summary = _excel_call(
+                    lambda summary_name: workbook.Worksheets(
+                        available_sheets[summary_name.casefold()]
+                    ),
+                    summary_name,
+                )
+                header = _excel_call(
+                    lambda detail: (
+                        detail.Cells(
+                            plan.target.detail_matrix_start.row - 1,
+                            plan.target.detail_matrix_start.column,
+                        ).Value
+                    ),
+                    detail,
+                )
                 if str(header).strip() != "1":
                     raise ValueError(
                         f"模板日期区域结构不符: {detail_name} 明细矩阵上方首列必须为日期 1"
                     )
-                formula = summary.Cells(
-                    plan.target.summary_name_start.row,
-                    plan.target.summary_name_start.column + 2,
-                ).Formula
+                formula = _excel_call(
+                    lambda summary: (
+                        summary.Cells(
+                            plan.target.summary_name_start.row,
+                            plan.target.summary_name_start.column + 2,
+                        ).Formula
+                    ),
+                    summary,
+                )
                 if not isinstance(formula, str) or not formula.startswith("="):
                     raise ValueError(
                         f"模板汇总区域结构不符: {summary_name} 姓名右侧第二列应包含汇总公式"
@@ -157,27 +185,48 @@ class ExcelComAdapter:
         cancel_check: CancelCheck | None = None,
     ) -> SourceAttendance:
         employees: list[EmployeeAttendance] = []
-        with _excel_workbook(source_path, read_only=True) as (_, workbook):
-            sheet = workbook.Worksheets(layout.sheet_name)
+        with _excel_workbook(source_path, read_only=True, cancel_check=cancel_check) as (
+            _,
+            workbook,
+        ):
+            sheet = _excel_call(lambda: workbook.Worksheets(layout.sheet_name))
+            group_start = layout.attendance_group_start
             for offset in range(MAX_EMPLOYEES):
                 _raise_if_cancelled(cancel_check)
                 name = _cell_text(
-                    sheet.Cells(layout.name_start.row + offset, layout.name_start.column).Value
+                    _excel_call(
+                        lambda offset: (
+                            sheet.Cells(
+                                layout.name_start.row + offset, layout.name_start.column
+                            ).Value
+                        ),
+                        offset,
+                    )
                 )
                 if not name.strip():
                     break
                 department = _cell_text(
-                    sheet.Cells(
-                        layout.department_start.row + offset,
-                        layout.department_start.column,
-                    ).Value
+                    _excel_call(
+                        lambda offset: (
+                            sheet.Cells(
+                                layout.department_start.row + offset, layout.department_start.column
+                            ).Value
+                        ),
+                        offset,
+                    )
                 )
                 records = tuple(
                     _cell_text(
-                        sheet.Cells(
-                            layout.detail_start.row + offset,
-                            layout.detail_start.column + day,
-                        ).Value
+                        _excel_call(
+                            lambda day, offset: (
+                                sheet.Cells(
+                                    layout.detail_start.row + offset,
+                                    layout.detail_start.column + day,
+                                ).Value
+                            ),
+                            day,
+                            offset,
+                        )
                     )
                     for day in range(day_count)
                 )
@@ -186,28 +235,51 @@ class ExcelComAdapter:
                     raise ValueError("源明细起始列前必须保留工作日、休息日、节假日加班三列")
                 overtime_hours = (
                     _overtime_value(
-                        sheet.Cells(layout.detail_start.row + offset, overtime_start_column).Value
+                        _excel_call(
+                            lambda offset, overtime_start_column: (
+                                sheet.Cells(
+                                    layout.detail_start.row + offset, overtime_start_column
+                                ).Value
+                            ),
+                            offset,
+                            overtime_start_column,
+                        )
                     ),
                     _overtime_value(
-                        sheet.Cells(
-                            layout.detail_start.row + offset,
-                            overtime_start_column + 1,
-                        ).Value
+                        _excel_call(
+                            lambda offset, overtime_start_column: (
+                                sheet.Cells(
+                                    layout.detail_start.row + offset, overtime_start_column + 1
+                                ).Value
+                            ),
+                            offset,
+                            overtime_start_column,
+                        )
                     ),
                     _overtime_value(
-                        sheet.Cells(
-                            layout.detail_start.row + offset,
-                            overtime_start_column + 2,
-                        ).Value
+                        _excel_call(
+                            lambda offset, overtime_start_column: (
+                                sheet.Cells(
+                                    layout.detail_start.row + offset, overtime_start_column + 2
+                                ).Value
+                            ),
+                            offset,
+                            overtime_start_column,
+                        )
                     ),
                 )
                 attendance_group = ""
-                if layout.attendance_group_start is not None:
+                if group_start is not None:
                     attendance_group = _cell_text(
-                        sheet.Cells(
-                            layout.attendance_group_start.row + offset,
-                            layout.attendance_group_start.column,
-                        ).Value
+                        _excel_call(
+                            lambda offset: (
+                                sheet.Cells(
+                                    group_start.row + offset,
+                                    group_start.column,
+                                ).Value
+                            ),
+                            offset,
+                        )
                     )
                 employees.append(
                     EmployeeAttendance(
@@ -240,31 +312,59 @@ class ExcelComAdapter:
             layout.name_start,
             layout.employee_id_start,
         )
-        with _excel_workbook(roster_path, read_only=True) as (_, workbook):
-            sheet = workbook.Worksheets(layout.sheet_name)
-            used = sheet.UsedRange
-            last_row = int(used.Row) + int(used.Rows.Count) - 1
+        with _excel_workbook(roster_path, read_only=True, cancel_check=cancel_check) as (
+            _,
+            workbook,
+        ):
+            sheet = _excel_call(lambda: workbook.Worksheets(layout.sheet_name))
+            used = _excel_call(lambda: sheet.UsedRange)
+            last_row = (
+                int(_excel_call(lambda: used.Row)) + int(_excel_call(lambda: used.Rows.Count)) - 1
+            )
             logical_row_count = max(max(0, last_row - cell.row + 1) for cell in starts)
             for offset in range(logical_row_count):
                 _raise_if_cancelled(cancel_check)
                 source_row = layout.name_start.row + offset
                 group = _cell_text(
-                    sheet.Cells(layout.group_start.row + offset, layout.group_start.column).Value
+                    _excel_call(
+                        lambda offset: (
+                            sheet.Cells(
+                                layout.group_start.row + offset, layout.group_start.column
+                            ).Value
+                        ),
+                        offset,
+                    )
                 ).strip()
                 department = _cell_text(
-                    sheet.Cells(
-                        layout.department_start.row + offset,
-                        layout.department_start.column,
-                    ).Value
+                    _excel_call(
+                        lambda offset: (
+                            sheet.Cells(
+                                layout.department_start.row + offset, layout.department_start.column
+                            ).Value
+                        ),
+                        offset,
+                    )
                 ).strip()
                 name = _cell_text(
-                    sheet.Cells(layout.name_start.row + offset, layout.name_start.column).Value
+                    _excel_call(
+                        lambda offset: (
+                            sheet.Cells(
+                                layout.name_start.row + offset, layout.name_start.column
+                            ).Value
+                        ),
+                        offset,
+                    )
                 ).strip()
                 employee_id = _cell_text(
-                    sheet.Cells(
-                        layout.employee_id_start.row + offset,
-                        layout.employee_id_start.column,
-                    ).Value
+                    _excel_call(
+                        lambda offset: (
+                            sheet.Cells(
+                                layout.employee_id_start.row + offset,
+                                layout.employee_id_start.column,
+                            ).Value
+                        ),
+                        offset,
+                    )
                 ).strip()
                 values = (group, department, name, employee_id)
                 if not any(values):
@@ -289,9 +389,12 @@ class ExcelComAdapter:
         prepared: PreparedAttendance,
         cancel_check: CancelCheck | None = None,
     ) -> None:
-        with _excel_workbook(staging_path, read_only=False) as (app, workbook):
-            app.ScreenUpdating = False
-            if bool(workbook.ReadOnly):
+        with _excel_workbook(staging_path, read_only=False, cancel_check=cancel_check) as (
+            app,
+            workbook,
+        ):
+            _excel_call(lambda: setattr(app, "ScreenUpdating", False))
+            if bool(_excel_call(lambda: workbook.ReadOnly)):
                 raise ValueError("Excel 以只读方式打开了结果副本")
             _raise_if_cancelled(cancel_check)
             if prepared.roster_mode:
@@ -303,11 +406,11 @@ class ExcelComAdapter:
                 _raise_if_cancelled(cancel_check)
                 _write_group(detail, summary, plan, group, prepared.preview.day_count)
             for sheet_name, cell_ref, value in prepared.global_mapping_values:
-                sheet = workbook.Worksheets(sheet_name)
+                sheet = _excel_call(lambda sheet_name: workbook.Worksheets(sheet_name), sheet_name)
                 _write_mapping(sheet, cell_ref, value)
             _raise_if_cancelled(cancel_check)
-            app.CalculateFullRebuild()
-            workbook.Save()
+            _excel_call(lambda: app.CalculateFullRebuild())
+            _excel_call(lambda: workbook.Save())
 
 
 def _prepare_group_sheets(
@@ -316,8 +419,8 @@ def _prepare_group_sheets(
     groups: tuple[PreparedGroup, ...],
 ) -> tuple[tuple[PreparedGroup, Any, Any], ...]:
     if plan.roster is not None:
-        base_detail = workbook.Worksheets(plan.target.detail_sheet)
-        base_summary = workbook.Worksheets(plan.target.summary_sheet)
+        base_detail = _excel_call(lambda: workbook.Worksheets(plan.target.detail_sheet))
+        base_summary = _excel_call(lambda: workbook.Worksheets(plan.target.summary_sheet))
         available_sheets = {name.casefold(): name for name in _worksheet_names(workbook)}
         roster_result: list[tuple[PreparedGroup, Any, Any]] = []
         used_detail_sheets: set[str] = set()
@@ -331,8 +434,12 @@ def _prepare_group_sheets(
                 missing_name = group.detail_sheet if detail_name is None else group.summary_sheet
                 raise ValueError(f"模板分组工作表不完整，缺少: {missing_name}")
             if detail_name is not None and summary_name is not None:
-                detail = workbook.Worksheets(detail_name)
-                summary = workbook.Worksheets(summary_name)
+                detail = _excel_call(
+                    lambda detail_name: workbook.Worksheets(detail_name), detail_name
+                )
+                summary = _excel_call(
+                    lambda summary_name: workbook.Worksheets(summary_name), summary_name
+                )
             else:
                 detail = _copy_worksheet(workbook, base_detail, group.detail_sheet)
                 summary = _copy_worksheet(workbook, base_summary, group.summary_sheet)
@@ -343,12 +450,12 @@ def _prepare_group_sheets(
             used_summary_sheets.add(summary_key)
             roster_result.append((group, detail, summary))
         if plan.target.summary_sheet.casefold() not in used_summary_sheets:
-            base_summary.Delete()
+            _excel_call(lambda: base_summary.Delete())
         if plan.target.detail_sheet.casefold() not in used_detail_sheets:
-            base_detail.Delete()
+            _excel_call(lambda: base_detail.Delete())
         return tuple(roster_result)
-    base_detail = workbook.Worksheets(plan.target.detail_sheet)
-    base_summary = workbook.Worksheets(plan.target.summary_sheet)
+    base_detail = _excel_call(lambda: workbook.Worksheets(plan.target.detail_sheet))
+    base_summary = _excel_call(lambda: workbook.Worksheets(plan.target.summary_sheet))
     if (
         len(groups) == 1
         and groups[0].detail_sheet == plan.target.detail_sheet
@@ -362,8 +469,8 @@ def _prepare_group_sheets(
         summary = _copy_worksheet(workbook, base_summary, group.summary_sheet)
         _replace_sheet_references(summary, plan.target.detail_sheet, group.detail_sheet)
         result.append((group, detail, summary))
-    base_summary.Delete()
-    base_detail.Delete()
+    _excel_call(lambda: base_summary.Delete())
+    _excel_call(lambda: base_detail.Delete())
     return tuple(result)
 
 
@@ -371,8 +478,8 @@ def _remove_roster_sheets(
     workbook: _WorkbookWithWorksheets, sheet_pairs: tuple[tuple[str, str], ...]
 ) -> None:
     for detail_name, summary_name in sheet_pairs:
-        workbook.Worksheets(summary_name).Delete()
-        workbook.Worksheets(detail_name).Delete()
+        _excel_call(lambda summary_name: workbook.Worksheets(summary_name).Delete(), summary_name)
+        _excel_call(lambda detail_name: workbook.Worksheets(detail_name).Delete(), detail_name)
 
 
 def _order_roster_group_sheets(
@@ -382,25 +489,25 @@ def _order_roster_group_sheets(
         return
     anchor = min(
         (sheet for _, detail, summary in sheets for sheet in (detail, summary)),
-        key=lambda sheet: int(sheet.Index),
+        key=lambda sheet: int(_excel_call(lambda: sheet.Index)),
     )
     for _, detail, summary in reversed(sheets):
-        summary.Move(anchor)
-        detail.Move(summary)
+        _excel_call(lambda anchor, summary: summary.Move(anchor), anchor, summary)
+        _excel_call(lambda detail, summary: detail.Move(summary), detail, summary)
         anchor = detail
 
 
 def _copy_worksheet(workbook: Any, source: Any, name: str) -> Any:
-    source.Copy(None, workbook.Sheets(workbook.Sheets.Count))
-    copied = workbook.Sheets(workbook.Sheets.Count)
-    copied.Name = name
+    _excel_call(lambda: source.Copy(None, workbook.Sheets(workbook.Sheets.Count)))
+    copied = _excel_call(lambda: workbook.Sheets(workbook.Sheets.Count))
+    _excel_call(lambda: setattr(copied, "Name", name))
     return copied
 
 
 def _worksheet_names(workbook: Any) -> tuple[str, ...]:
     return tuple(
-        str(workbook.Worksheets(index).Name)
-        for index in range(1, int(workbook.Worksheets.Count) + 1)
+        str(_excel_call(lambda index: workbook.Worksheets(index).Name, index))
+        for index in range(1, int(_excel_call(lambda: workbook.Worksheets.Count)) + 1)
     )
 
 
@@ -408,12 +515,11 @@ def _replace_sheet_references(sheet: Any, old_name: str, new_name: str) -> None:
     quoted_old = f"'{old_name.replace(chr(39), chr(39) * 2)}'!"
     quoted_new = f"'{new_name.replace(chr(39), chr(39) * 2)}'!"
     for old_reference in (quoted_old, f"{old_name}!"):
-        sheet.Cells.Replace(
-            What=old_reference,
-            Replacement=quoted_new,
-            LookAt=2,
-            SearchOrder=1,
-            MatchCase=False,
+        _excel_call(
+            lambda old_reference: sheet.Cells.Replace(
+                What=old_reference, Replacement=quoted_new, LookAt=2, SearchOrder=1, MatchCase=False
+            ),
+            old_reference,
         )
 
 
@@ -463,50 +569,58 @@ def _write_group(
 
 
 def _open_workbook(app: Any, path: Path, *, read_only: bool) -> Any:
-    return open_office_document(
-        app,
-        "Workbooks",
-        path,
-        UpdateLinks=0,
-        ReadOnly=read_only,
-        AddToMru=False,
-        IgnoreReadOnlyRecommended=True,
+    return _excel_call(
+        lambda: open_office_document(
+            app,
+            "Workbooks",
+            path,
+            UpdateLinks=0,
+            ReadOnly=read_only,
+            AddToMru=False,
+            IgnoreReadOnlyRecommended=True,
+        )
     )
 
 
 @contextlib.contextmanager
-def _excel_workbook(path: Path, *, read_only: bool) -> Iterator[tuple[Any, Any]]:
+def _excel_workbook(
+    path: Path, *, read_only: bool, cancel_check: CancelCheck | None = None
+) -> Iterator[tuple[Any, Any]]:
     """创建隔离会话，并把 Close/Quit 失败作为真实操作失败传播。"""
     app: Any | None = None
     workbook: Any | None = None
     with ComSession():
-        operation_error: Exception | None = None
+        cancel_token = _cancel_check.set(cancel_check)
         try:
-            app = init_isolated_office_app("Excel.Application")
-            # Dispatch 成功即最强证据:登记到能力层(与 PDF 转换链同一进程内
-            # 存储),页面能力提示/自测前置据此展示"已验证"。
-            record_office_session_success("excel", "office")
-            workbook = _open_workbook(app, path, read_only=read_only)
-            yield app, workbook
-        except Exception as exc:  # 保留业务错误，同时继续完整释放 COM
-            operation_error = exc
+            operation_error: Exception | None = None
+            try:
+                app = init_isolated_office_app("Excel.Application")
+                # Dispatch 成功即最强证据:登记到能力层(与 PDF 转换链同一进程内
+                # 存储),页面能力提示/自测前置据此展示"已验证"。
+                record_office_session_success("excel", "office")
+                workbook = _open_workbook(app, path, read_only=read_only)
+                yield app, workbook
+            except Exception as exc:  # 保留业务错误，同时继续完整释放 COM
+                operation_error = exc
 
-        cleanup_error = _release_excel(workbook, app)
-        workbook = None
-        app = None
-        if operation_error is not None:
+            cleanup_error = _release_excel(workbook, app)
+            workbook = None
+            app = None
+            if operation_error is not None:
+                if cleanup_error is not None:
+                    raise RuntimeError(f"{operation_error}；{cleanup_error}") from operation_error
+                raise operation_error
             if cleanup_error is not None:
-                raise RuntimeError(f"{operation_error}；{cleanup_error}") from operation_error
-            raise operation_error
-        if cleanup_error is not None:
-            raise cleanup_error
+                raise cleanup_error
+        finally:
+            _cancel_check.reset(cancel_token)
 
 
 def _release_excel(workbook: Any | None, app: Any | None) -> RuntimeError | None:
     errors: list[str] = []
     if workbook is not None:
         try:
-            workbook.Close(SaveChanges=False)
+            retry_com_call(lambda: workbook.Close(SaveChanges=False))
         except Exception as exc:
             errors.append(f"关闭工作簿失败: {exc}")
     try:
@@ -544,32 +658,39 @@ def _adjust_date_columns(sheet: Any, matrix_start: CellRef, day_count: int) -> N
     if delta > 0:
         insertion_column = matrix_start.column + BASE_DATE_COLUMNS - 1
         for _ in range(delta):
-            sheet.Columns(insertion_column).Insert(CopyOrigin=0)
+            _excel_call(lambda: sheet.Columns(insertion_column).Insert(CopyOrigin=0))
     elif delta < 0:
         first_unwanted = matrix_start.column + day_count
         for _ in range(-delta):
-            sheet.Columns(first_unwanted).Delete()
+            _excel_call(lambda: sheet.Columns(first_unwanted).Delete())
 
 
 def _adjust_employee_rows(sheet: Any, first_row: int, employee_count: int) -> None:
     extra_rows = employee_count - BASE_EMPLOYEE_ROWS
     for offset in range(max(0, extra_rows)):
         insert_row = first_row + BASE_EMPLOYEE_ROWS + offset
-        sheet.Rows(insert_row).Insert(CopyOrigin=0)
-        sheet.Rows(insert_row - 1).Copy(Destination=sheet.Rows(insert_row))
+        _excel_call(lambda insert_row: sheet.Rows(insert_row).Insert(CopyOrigin=0), insert_row)
+        _excel_call(
+            lambda insert_row: sheet.Rows(insert_row - 1).Copy(Destination=sheet.Rows(insert_row)),
+            insert_row,
+        )
     for row in range(
         first_row + BASE_EMPLOYEE_ROWS - 1,
         first_row + employee_count - 1,
         -1,
     ):
-        sheet.Rows(row).Delete()
+        _excel_call(lambda row: sheet.Rows(row).Delete(), row)
 
 
 def _write_names(sheet: Any, start: CellRef, source: SourceAttendance) -> None:
     end = start.offset(rows=len(source.employees) - 1)
-    sheet.Range(
-        sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)
-    ).Value = tuple((employee.name,) for employee in source.employees)
+    _excel_call(
+        lambda: setattr(
+            sheet.Range(sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)),
+            "Value",
+            tuple((employee.name,) for employee in source.employees),
+        )
+    )
 
 
 def _write_overtime_hours(sheet: Any, start: CellRef, source: SourceAttendance) -> None:
@@ -579,9 +700,13 @@ def _write_overtime_hours(sheet: Any, start: CellRef, source: SourceAttendance) 
         rows=len(source.employees) - 1,
         columns=OVERTIME_COLUMN_COUNT - 1,
     )
-    sheet.Range(
-        sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)
-    ).Value = tuple(employee.overtime_hours for employee in source.employees)
+    _excel_call(
+        lambda: setattr(
+            sheet.Range(sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)),
+            "Value",
+            tuple(employee.overtime_hours for employee in source.employees),
+        )
+    )
 
 
 def _write_column(
@@ -594,36 +719,49 @@ def _write_column(
     if not values:
         return
     end = start.offset(rows=len(values) - 1)
-    target = sheet.Range(sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column))
+    target = _excel_call(
+        lambda: sheet.Range(sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column))
+    )
     if as_text:
-        target.NumberFormat = "@"
-    target.Value = tuple((value,) for value in values)
+        _excel_call(lambda: setattr(target, "NumberFormat", "@"))
+    _excel_call(lambda: setattr(target, "Value", tuple((value,) for value in values)))
 
 
 def _write_symbols(sheet: Any, start: CellRef, symbols: tuple[tuple[str, ...], ...]) -> None:
     if not symbols:
         return
     end = start.offset(rows=len(symbols) - 1, columns=len(symbols[0]) - 1)
-    sheet.Range(
-        sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)
-    ).Value = symbols
+    _excel_call(
+        lambda: setattr(
+            sheet.Range(sheet.Cells(start.row, start.column), sheet.Cells(end.row, end.column)),
+            "Value",
+            symbols,
+        )
+    )
 
 
 def _write_day_labels(sheet: Any, matrix_start: CellRef, day_count: int) -> None:
     header = matrix_start.offset(rows=-1)
     end = header.offset(columns=day_count - 1)
-    sheet.Range(sheet.Cells(header.row, header.column), sheet.Cells(end.row, end.column)).Value = (
-        tuple(range(1, day_count + 1)),
+    _excel_call(
+        lambda: setattr(
+            sheet.Range(sheet.Cells(header.row, header.column), sheet.Cells(end.row, end.column)),
+            "Value",
+            (tuple(range(1, day_count + 1)),),
+        )
     )
 
 
 def _write_mapping(sheet: Any, cell_ref: CellRef, value: str) -> None:
-    cell = sheet.Cells(cell_ref.row, cell_ref.column)
-    if bool(cell.MergeCells):
-        area = cell.MergeArea
-        if int(area.Row) != cell_ref.row or int(area.Column) != cell_ref.column:
+    cell = _excel_call(lambda: sheet.Cells(cell_ref.row, cell_ref.column))
+    if bool(_excel_call(lambda: cell.MergeCells)):
+        area = _excel_call(lambda: cell.MergeArea)
+        if (
+            int(_excel_call(lambda: area.Row)) != cell_ref.row
+            or int(_excel_call(lambda: area.Column)) != cell_ref.column
+        ):
             raise ValueError(f"合并单元格只能配置左上角: {cell_ref.address}")
-    cell.Value = value
+    _excel_call(lambda: setattr(cell, "Value", value))
 
 
 def _verify_summary_formula(
@@ -633,10 +771,14 @@ def _verify_summary_formula(
     summary_name_start: CellRef,
     day_count: int,
 ) -> None:
-    formula = summary.Cells(
-        summary_name_start.row,
-        summary_name_start.column + 2,
-    ).Formula
+    formula = _excel_call(
+        lambda: (
+            summary.Cells(
+                summary_name_start.row,
+                summary_name_start.column + 2,
+            ).Formula
+        )
+    )
     start = detail_matrix_start
     end = start.offset(columns=day_count - 1)
     if not isinstance(formula, str) or not _formula_contains_range(
