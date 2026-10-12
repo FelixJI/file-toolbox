@@ -508,3 +508,18 @@ def test_preview_rows_container_defaults():
     assert rows.groups == ()
     assert rows.roster_employees == ()
     assert rows.group_employees == ()
+
+
+@pytest.mark.parametrize("text", ["0", "29", "1-3", "1.5", "abc", "1,"])
+def test_holiday_days_reject_invalid_february_input(text):
+    from file_toolbox.core.attendance.form_state import parse_holiday_days
+
+    with pytest.raises(ValueError, match="节假日"):
+        parse_holiday_days(text, 2026, 2)
+
+
+def test_holiday_days_leap_year_and_deduplication():
+    from file_toolbox.core.attendance.form_state import parse_holiday_days
+
+    assert parse_holiday_days("29，1 29", 2024, 2) == (1, 29)
+    assert parse_holiday_days(" ", 2026, 2) == ()

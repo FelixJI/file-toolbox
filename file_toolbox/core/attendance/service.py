@@ -19,6 +19,7 @@ from file_toolbox.core.attendance.excel import (
     AttendanceExcelAdapter,
     ExcelComAdapter,
 )
+from file_toolbox.core.attendance.overtime import add_holiday_overtime
 from file_toolbox.core.attendance.roster import resolve_roster
 from file_toolbox.core.attendance.rules import classify, compile_rules, render_content
 from file_toolbox.core.attendance.types import (
@@ -228,6 +229,11 @@ class AttendanceService:
             target_sheets = self._allocate_target_sheets(
                 tuple(employee_groups), request, template_sheets
             )
+        if 1 in request.holiday_days:
+            warnings = (
+                *warnings,
+                "指定了 1 日：当前文件不含上月末记录，无法补计上月跨夜至本月的工时",
+            )
         unmatched: list[UnmatchedAttendance] = []
         counts: Counter[str] = Counter()
         prepared_groups: list[PreparedGroup] = []
@@ -239,8 +245,16 @@ class AttendanceService:
                     if employee.department.strip()
                 }
                 group_department = next(iter(departments), "") if len(departments) == 1 else ""
-                group_source = SourceAttendance(tuple(employees), group_department)
-                symbols = self._classify_group(group_source, compiled, counts, unmatched)
+                group_source = SourceAttendance(
+                    tuple(
+                        add_holiday_overtime(employee, request.holiday_days)
+                        for employee in employees
+                    ),
+                    group_department,
+                )
+                symbols = self._classify_group(
+                    group_source, compiled, counts, unmatched, request.holiday_days
+                )
                 detail_sheet, summary_sheet = target_sheets[group_name]
                 mapping_values = self._group_mapping_values(
                     request,
@@ -366,6 +380,7 @@ class AttendanceService:
         compiled: tuple[tuple[re.Pattern[str], str], ...],
         counts: Counter[str],
         unmatched: list[UnmatchedAttendance],
+        holiday_days: tuple[int, ...] = (),
     ) -> tuple[tuple[str, ...], ...]:
         symbols: list[tuple[str, ...]] = []
         for employee in source.employees:
@@ -384,6 +399,8 @@ class AttendanceService:
                     )
                     row.append("")
                     continue
+                if day in holiday_days and symbol == "√":
+                    symbol = "+"
                 row.append(symbol)
                 counts[symbol or "空白"] += 1
             symbols.append(tuple(row))
@@ -553,6 +570,8 @@ class AttendanceService:
             _, day_count = calendar.monthrange(request.year, request.month)
         except (ValueError, calendar.IllegalMonthError) as exc:
             raise AttendanceError("年月无效") from exc
+        if any(type(day) is not int or not 1 <= day <= day_count for day in request.holiday_days):
+            raise AttendanceError("节假日日号必须是本月有效日期")
         if not request.plan.name.strip():
             raise AttendanceError("方案名称不能为空")
         if not request.source_path.is_file():

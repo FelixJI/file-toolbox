@@ -167,6 +167,7 @@ class AttendanceRequest:
     year: int
     month: int
     allow_overwrite: bool = False
+    holiday_days: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

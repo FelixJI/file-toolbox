@@ -116,6 +116,16 @@ class Ui_AttendanceDialog(object):
 
         self.grid_files.addWidget(self.btn_output_name, 3, 6, 1, 1)
 
+        self.label_holiday_days = QLabel(self.group_files)
+        self.label_holiday_days.setObjectName(u"label_holiday_days")
+
+        self.grid_files.addWidget(self.label_holiday_days, 4, 0, 1, 1)
+
+        self.edit_holiday_days = QLineEdit(self.group_files)
+        self.edit_holiday_days.setObjectName(u"edit_holiday_days")
+
+        self.grid_files.addWidget(self.edit_holiday_days, 4, 1, 1, 6)
+
 
         self.verticalLayout.addWidget(self.group_files)
 
@@ -613,6 +623,9 @@ class Ui_AttendanceDialog(object):
 
         self.verticalLayout.addWidget(self.label_excel_status)
 
+#if QT_CONFIG(shortcut)
+        self.label_holiday_days.setBuddy(self.edit_holiday_days)
+#endif // QT_CONFIG(shortcut)
 
         self.retranslateUi(AttendanceDialog)
 
@@ -636,6 +649,11 @@ class Ui_AttendanceDialog(object):
         self.label_output_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u6587\u4ef6\u540d", None))
         self.edit_output_name.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u81ea\u5b9a\u4e49\u7ed3\u679c\u6587\u4ef6\u540d\uff08\u81ea\u52a8\u8865 .xlsx\uff09", None))
         self.btn_output_name.setText(QCoreApplication.translate("AttendanceDialog", u"\u81ea\u52a8\u547d\u540d", None))
+        self.label_holiday_days.setText(QCoreApplication.translate("AttendanceDialog", u"\u8282\u5047\u65e5\u65e5\u53f7", None))
+        self.edit_holiday_days.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u672c\u6708\u65e5\u53f7\uff0c\u5982 1,2,3\uff1b\u7559\u7a7a\u4e0d\u8865\u7b97", None))
+#if QT_CONFIG(tooltip)
+        self.edit_holiday_days.setToolTip(QCoreApplication.translate("AttendanceDialog", u"\u53ea\u8ba1\u7b97\u6307\u5b9a\u65e5\u671f\u5185\u7684\u6253\u5361\u5de5\u65f6\uff1b\u6bcf\u6bb5\u73ed\u6b21\u6309\u534a\u5c0f\u65f6\u5411\u4e0b\u53d6\u6574\uff0c\u8fde\u7eed\u8282\u5047\u65e5\u7684\u8de8\u591c\u73ed\u6b21\u8fde\u7eed\u8ba1\u7b97\uff0c\u518d\u52a0\u5230\u539f\u6709\u8282\u5047\u65e5\u52a0\u73ed\uff1b\u5f53\u5929\u660e\u7ec6 \u221a \u6539\u4e3a +\u30021 \u65e5\u65e0\u6cd5\u8bfb\u53d6\u4e0a\u6708\u672b\u8de8\u591c\u8bb0\u5f55\u3002", None))
+#endif // QT_CONFIG(tooltip)
         self.group_plan.setTitle(QCoreApplication.translate("AttendanceDialog", u"\u65b9\u6848", None))
         self.edit_plan_name.setPlaceholderText(QCoreApplication.translate("AttendanceDialog", u"\u65b9\u6848\u540d\u79f0", None))
         self.btn_load_plan.setText(QCoreApplication.translate("AttendanceDialog", u"\u52a0\u8f7d", None))

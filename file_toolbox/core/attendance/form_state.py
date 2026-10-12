@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import calendar
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -91,6 +92,7 @@ class AttendanceFormState:
     output_name: str = ""
     year: int = 2000
     month: int = 1
+    holiday_days: str = ""
     # 方案字段
     plan_name: str = "给定格式"
     template_path: str = ""
@@ -312,6 +314,7 @@ def build_request(
         year=state.year,
         month=state.month,
         allow_overwrite=allow_overwrite,
+        holiday_days=parse_holiday_days(state.holiday_days, state.year, state.month),
     )
 
 
@@ -522,3 +525,14 @@ def capture_preview_adjustments(
         _capture_roster_adjustments(state, groups, roster_employees)
         return
     _capture_group_adjustments(state, groups, group_employees)
+
+
+def parse_holiday_days(value: str, year: int, month: int) -> tuple[int, ...]:
+    """解析本月节假日的日号，去重并拒绝无效日期。"""
+    if not value.strip():
+        return ()
+    tokens = re.split(r"[,，\s]+", value.strip())
+    last_day = calendar.monthrange(year, month)[1]
+    if any(not token.isdecimal() or not 1 <= int(token) <= last_day for token in tokens):
+        raise ValueError(f"节假日请填写本月 1–{last_day} 的日号，用逗号分隔")
+    return tuple(sorted({int(token) for token in tokens}))

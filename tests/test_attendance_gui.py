@@ -717,3 +717,17 @@ def test_fixed_mapping_selector_preserves_legacy_sheet_from_saved_plan(tab):
     ]
     assert selector.currentText() == "封面"
     assert tab._build_plan().mappings[0].sheet_name == "封面"
+
+
+def test_holiday_field_binds_request_and_invalidates_preview(tab):
+    tab._preview_request = tab._build_request()
+    tab._preview_can_generate = True
+    tab.ui.edit_holiday_days.setText("1，2,2 3")
+    assert tab._build_request().holiday_days == (1, 2, 3)
+    assert tab._preview_request is None
+    assert not tab.ui.btn_generate.isEnabled()
+    tab.ui.edit_holiday_days.setText("32")
+    with pytest.raises(ValueError, match="节假日"):
+        tab._build_request()
+    tab.ui.edit_holiday_days.clear()
+    assert tab._build_request().holiday_days == ()

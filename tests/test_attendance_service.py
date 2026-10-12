@@ -737,3 +737,36 @@ def test_generate_no_replace_commit_failure_preserves_error_and_staging_contract
     history.add_record.assert_not_called()
     assert request.source_path.read_bytes() == b"source"
     assert request.plan.template_path.read_bytes() == b"template"
+
+
+@pytest.mark.parametrize("roster_mode", [False, True])
+def test_holiday_overtime_and_symbols_reach_output(tmp_path, roster_mode):
+    request = replace(_request(tmp_path), holiday_days=(1, 2))
+    records = ("正常(18:50,08:20)", "下班外勤 (18:50,08:20)") + ("正常(08:00,09:00)",) * 29
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", records, overtime_hours=(1, 2, 3)),), "市场部"
+    )
+    roster = None
+    if roster_mode:
+        request = replace(request, plan=_roster_plan(request))
+        roster = RosterData((RosterEmployee("001", "张三", "市场部", "徐州中车", 1),))
+    excel = FakeExcel(source, roster)
+    service = AttendanceService(excel)
+    preview = service.preview(request)
+    assert preview.can_generate
+    assert preview.status_counts == {"+": 2, "√": 29}
+    assert any("上月" in warning for warning in preview.warnings)
+    service.generate(request)
+    prepared = excel.write_calls[0][2]
+    assert prepared.groups[0].source.employees[0].overtime_hours == (1, 2, 21.5)
+    assert prepared.groups[0].symbols[0][:3] == ("+", "+", "√")
+    assert excel.source.employees[0].overtime_hours == (1, 2, 3)
+
+
+@pytest.mark.parametrize("days", [(0,), (32,), (True,), (1.5,)])
+def test_invalid_holiday_days_fail_before_excel(tmp_path, days):
+    request = replace(_request(tmp_path), holiday_days=days)
+    excel = FakeExcel(_source(31))
+    with pytest.raises(AttendanceError, match="节假日日号"):
+        AttendanceService(excel).preview(request)
+    assert not excel.read_calls
