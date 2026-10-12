@@ -65,6 +65,7 @@ class AttendanceTab(QWidget):
         "template_path": "edit_template",
         "output_dir": "edit_output_dir",
         "output_name": "edit_output_name",
+        "holiday_days": "edit_holiday_days",
         "plan_name": "edit_plan_name",
         "source_sheet": "edit_source_sheet",
         "source_name": "edit_source_name",
