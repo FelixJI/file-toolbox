@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.8
+
+### Features
+
+- **attendance:** 按指定节假日日号补算加班工时 (#153) (a2c6f91)
+
+### Bug Fixes
+
+- **attendance:** 恢复 Excel 暂时拒绝的 COM 调用 (#152) (eb7c720)
+
 ## 0.3.7
 
 ### Features
