@@ -576,16 +576,27 @@ def _write_group(
 def _highlight_anomalies(
     detail: Any, summary: Any, plan: AttendancePlan, group: PreparedGroup
 ) -> None:
-    """按异常定位标黄输出单元格:按日异常标明细矩阵,无日异常标汇总节假日加班列。"""
+    """按异常定位标黄输出单元格:按日异常标明细矩阵,无日异常标汇总节假日加班列。
+
+    优先用 service 盖章的组内行号定位输出行,同名员工只标黄实际异常的那一
+    行;行号缺失(未经过 service,如直接构造)才回退按姓名匹配全部同名行。
+    """
     if not group.anomalies:
         return
     matrix = plan.target.detail_matrix_start
     overtime = plan.target.summary_name_start.offset(columns=SUMMARY_OVERTIME_COLUMN_OFFSET)
     holiday_column = overtime.column + OVERTIME_COLUMN_COUNT - 1
     for anomaly in group.anomalies:
-        for index, employee in enumerate(group.source.employees):
-            if employee.name != anomaly.employee_name:
-                continue
+        targets: tuple[int, ...]
+        if 0 <= anomaly.employee_index < len(group.source.employees):
+            targets = (anomaly.employee_index,)
+        else:
+            targets = tuple(
+                index
+                for index, employee in enumerate(group.source.employees)
+                if employee.name == anomaly.employee_name
+            )
+        for index in targets:
             if anomaly.day >= 1:
                 cell = _excel_call(
                     lambda row, column: detail.Cells(row, column),

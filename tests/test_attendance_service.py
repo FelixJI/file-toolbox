@@ -780,6 +780,7 @@ def test_raw_data_anomalies_do_not_block_preview_or_generate(tmp_path):
         ("张三", 1),
         ("张三", 2),
     ]
+    assert all(item.employee_index == 0 for item in preview.anomalies)
     assert any("节假日前一日记录不全" in item.message for item in preview.anomalies)
     assert any("节假日加班未计算" in item.message for item in preview.anomalies)
 

@@ -253,12 +253,16 @@ class AttendanceService:
                 group_department = next(iter(departments), "") if len(departments) == 1 else ""
                 adjusted: list[EmployeeAttendance] = []
                 group_anomalies: list[AttendanceAnomaly] = []
-                for employee in employees:
+                for employee_index, employee in enumerate(employees):
                     adjusted_employee, employee_anomalies = add_holiday_overtime(
                         employee, request.holiday_days
                     )
                     adjusted.append(adjusted_employee)
-                    group_anomalies.extend(employee_anomalies)
+                    # 盖章组内行号:同名员工也能在输出表中精确定位异常行。
+                    group_anomalies.extend(
+                        replace(anomaly, employee_index=employee_index)
+                        for anomaly in employee_anomalies
+                    )
                 anomalies.extend(group_anomalies)
                 group_source = SourceAttendance(tuple(adjusted), group_department)
                 symbols = self._classify_group(

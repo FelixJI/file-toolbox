@@ -81,21 +81,26 @@ def add_holiday_overtime(
             if day + 1 in holidays:
                 minutes += end
         half_hours += minutes // 30
-    if not half_hours:
-        return employee, tuple(anomalies)
     weekday, rest_day, holiday = employee.overtime_hours
+    # 原有节假日加班值无论是否有新增工时都要校验:非法原值会原样写入输出,
+    # 必须记入异常并标黄,不能因当日无打卡而静默放行。
     try:
         base = Decimal(str(holiday).strip() or "0")
-        total = float(base + Decimal(half_hours) / 2)
+        total = float(base + Decimal(half_hours) / 2) if half_hours else 0.0
         if not base.is_finite() or base < 0 or not math.isfinite(total):
             raise ValueError("节假日加班必须是有限非负数")
     except (InvalidOperation, ValueError, OverflowError):
+        uncounted = (
+            f"，补算 {half_hours / 2} 小时未累计" if half_hours else "，原值将原样输出，请人工核对"
+        )
         anomalies.append(
             AttendanceAnomaly(
                 employee.name,
                 0,
-                f"原有节假日加班不是有效时长（{holiday}），补算 {half_hours / 2} 小时未累计",
+                f"原有节假日加班不是有效时长（{holiday}）{uncounted}",
             )
         )
+        return employee, tuple(anomalies)
+    if not half_hours:
         return employee, tuple(anomalies)
     return replace(employee, overtime_hours=(weekday, rest_day, total)), tuple(anomalies)

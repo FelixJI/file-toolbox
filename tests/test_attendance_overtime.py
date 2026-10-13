@@ -133,6 +133,19 @@ def test_invalid_existing_overtime_is_not_silently_replaced(base):
     assert "未累计" in anomalies[0].message
 
 
+@pytest.mark.parametrize("base", ["未知", "NaN", -1])
+def test_invalid_existing_overtime_flagged_even_without_new_hours(base):
+    employee = EmployeeAttendance("张三", "部门", ("休息",), overtime_hours=(0, 0, base))
+
+    actual, anomalies = add_holiday_overtime(employee, (1,))
+
+    assert actual.overtime_hours == (0, 0, base)
+    assert len(anomalies) == 1
+    assert anomalies[0].day == 0
+    assert "原有节假日加班不是有效时长" in anomalies[0].message
+    assert "原值将原样输出" in anomalies[0].message
+
+
 def test_missing_record_is_not_silently_ignored():
     employee = EmployeeAttendance("张三", "部门", (), overtime_hours=(1, 2, 3))
 

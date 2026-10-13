@@ -193,6 +193,20 @@ def test_plan_from_dict_rejects_invalid_post_actions(action, message):
         plan_from_dict(data)
 
 
+@pytest.mark.parametrize("count", [True, 1.5, "2"])
+def test_plan_from_dict_rejects_non_integer_post_action_count(count):
+    data = plan_to_dict(
+        replace(
+            _plan(),
+            post_actions=(AttendancePostAction("insert_rows", "detail", CellRef(22, 1), 2),),
+        )
+    )
+    data["post_actions"][0]["count"] = count
+
+    with pytest.raises(ValueError, match="无效的考勤方案"):
+        plan_from_dict(data)
+
+
 def test_new_plan_serializes_as_v5_so_old_reader_rejects_new_semantics():
     assert plan_to_dict(_plan())["schema_version"] == 5
 

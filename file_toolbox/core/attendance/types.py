@@ -246,12 +246,15 @@ class AttendanceAnomaly:
     """原始考勤数据异常:不阻断汇总,生成后单独提示并在结果中标黄。
 
     day 为 1-based 日期;0 表示异常不针对具体日期(如原有加班值无效,
-    标黄目标为汇总表节假日加班单元格)。
+    标黄目标为汇总表节假日加班单元格)。employee_index 是组内输出行号,
+    由 service 写入,用于同名员工场景精确定位;-1 表示未指定,回退按
+    姓名匹配。
     """
 
     employee_name: str
     day: int
     message: str
+    employee_index: int = -1
 
     @property
     def display(self) -> str:
@@ -383,6 +386,17 @@ def _structure_cell_ref(value: object, _: type[CellRef]) -> CellRef:
     return CellRef.parse(value)
 
 
+def _structure_int(value: object, _: type[int]) -> int:
+    """拒绝 cattrs 默认 int() 强转:true/1.5/"2" 等损坏载荷必须判无效。
+
+    影响字段如 post_actions[].count 与 schema_version;bool 是 int 子类,
+    同样显式拒绝(与 _structure_bool 的严格风格一致)。
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"值必须是整数: {value!r}")
+    return value
+
+
 def _unstructure_cell_ref(value: CellRef) -> str:
     return value.address
 
@@ -407,6 +421,7 @@ def _plan_converter() -> Converter:
         )
         converter.register_structure_hook(str, _structure_str)
         converter.register_structure_hook(bool, _structure_bool)
+        converter.register_structure_hook(int, _structure_int)
         converter.register_structure_hook(Path, _structure_path)
         converter.register_structure_hook(CellRef, _structure_cell_ref)
         converter.register_unstructure_hook(CellRef, _unstructure_cell_ref)

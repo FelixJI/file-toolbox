@@ -552,6 +552,50 @@ def test_write_output_highlights_anomaly_cells(monkeypatch, tmp_path):
     assert summary_cells[(8, 18)].Interior.Color != ANOMALY_HIGHLIGHT_COLOR
 
 
+def test_write_output_highlights_only_indexed_duplicate_name_row(monkeypatch, tmp_path):
+    plan = _plan()
+    detail = MagicMock()
+    summary = MagicMock()
+    detail_cells = {}
+    summary_cells = {}
+    detail.Cells.side_effect = lambda row, col: detail_cells.setdefault((row, col), _cell())
+
+    def summary_cell(row, col):
+        return summary_cells.setdefault((row, col), _cell(formula='=COUNTIF(出勤明细!D7:AG7,"√")'))
+
+    summary.Cells.side_effect = summary_cell
+    detail.Rows.side_effect = lambda row: MagicMock()
+    summary.Rows.side_effect = lambda row: MagicMock()
+    workbook = MagicMock()
+    workbook.ReadOnly = False
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    _patch_excel(monkeypatch, workbook)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(30))),
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(30))),
+        ),
+        "市场部",
+    )
+    anomalies = (AttendanceAnomaly("张三", 5, "节假日加班未计算：无法识别上下班时间", 1),)
+
+    ExcelComAdapter().write_output(
+        tmp_path / "staging.xlsx",
+        plan,
+        _prepared(
+            source,
+            (tuple("√" for _ in range(30)),) * 2,
+            30,
+            anomalies=anomalies,
+        ),
+    )
+
+    # 行号盖章(employee_index=1)只标黄第二名同名员工;第一行不受牵连。
+    assert detail_cells[(8, 8)].Interior.Color == ANOMALY_HIGHLIGHT_COLOR
+    first_row_cell = detail_cells.get((7, 8))
+    assert first_row_cell is None or first_row_cell.Interior.Color != ANOMALY_HIGHLIGHT_COLOR
+
+
 def test_write_output_applies_post_actions_after_group_writes(monkeypatch, tmp_path):
     plan = _plan()
     detail = MagicMock()
