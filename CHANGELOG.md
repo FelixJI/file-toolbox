@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.9
+
+### Bug Fixes
+
+- **attendance:** 兼容班次冒号格式与无打卡记录的节假日加班解析 (#155) (ba48ff7)
+
 ## 0.3.8
 
 ### Features
