@@ -33,6 +33,7 @@ from file_toolbox.core.attendance.types import EmployeeAttendance
         (("长白班:旷工\n(-)", "长白班:正常\n(08:00,17:00)"), (2,), 9),
         (("长白班:正常\n(19:47,08:19)", "休息"), (2,), 8),
         (("长白班:迟到\n(08:30,17:00)",), (1,), 8.5),
+        (("长白班:迟到\n（08：30，17：00）",), (1,), 8.5),
     ],
 )
 def test_holiday_shift_hours(records, days, expected):
@@ -63,6 +64,9 @@ def test_existing_holiday_overtime_is_added_without_rounding(base):
         "正常(08:60,09:00)",
         "正常(08:00,09:00)(10:00,11:00)",
         "长白班:缺卡\n(08:00,-)",
+        "长白班:旷工\n(-)\n补卡 08:00",
+        "长白班:缺卡\n（08：00）",
+        "打卡 08:00,09:00\n补卡(10:00,11:00)",
     ],
 )
 def test_invalid_punches_fail_with_employee_and_day(raw):

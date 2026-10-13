@@ -10,23 +10,20 @@ from decimal import Decimal, InvalidOperation
 from file_toolbox.core.attendance.types import EmployeeAttendance
 
 _PUNCHES = re.compile(
-    r"[（(]\s*([0-9]{1,2}):([0-9]{2})\s*[,，]\s*([0-9]{1,2}):([0-9]{2})\s*[）)]\s*$"
+    r"[（(]\s*([0-9]{1,2})[:：]([0-9]{2})\s*[,，]\s*([0-9]{1,2})[:：]([0-9]{2})\s*[）)]\s*$"
 )
-# 班次:状态\n(-) 这类导出格式用 “-” 表示当日无打卡。
-_NO_PUNCHES = re.compile(r"[（(]\s*-\s*(?:[,，]\s*-\s*)?[）)]")
-_TIME = re.compile(r"[0-9]{1,2}:[0-9]{2}")
-_PUNCH_OPEN = re.compile(r"[（(]\s*[0-9]{1,2}:[0-9]{2}")
+# 班次:状态\n(-) 这类导出格式用 “-” 表示当日无打卡；判据统一为“是否存在时间 token”：
+# 有时间却解析不出唯一班次必须报错，完全没有时间才视为无打卡。
+_TIME = re.compile(r"[0-9]{1,2}[:：][0-9]{2}")
 
 
 def _punches(raw: str) -> tuple[int, int] | None:
     match = _PUNCHES.search(raw)
     if match is None:
-        if _NO_PUNCHES.search(raw):
-            return None
         if _TIME.search(raw) or re.search(r"正常|外勤|打卡", raw):
             raise ValueError(f"无法识别上下班时间: {raw}")
         return None
-    if _PUNCH_OPEN.search(raw[: match.start()]):
+    if _TIME.search(raw[: match.start()]):
         raise ValueError(f"考勤包含多段时间，无法识别唯一班次: {raw}")
     start_hour, start_minute, end_hour, end_minute = map(int, match.groups())
     if start_hour > 23 or end_hour > 23 or start_minute > 59 or end_minute > 59:
