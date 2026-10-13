@@ -27,6 +27,12 @@ from file_toolbox.core.attendance.types import EmployeeAttendance
         (("正常（08:00，09:00）",), (1,), 1),
         (("正常",), (), 0),
         (("正常(18:50,08:20)", "休息", "正常(18:50,08:20)"), (1, 3), 10),
+        (("长白班:旷工\n(-)",), (1,), 0),
+        (("长白班:旷工\n(-)", "休息"), (2,), 0),
+        (("长白班:旷工\n（-，-）",), (1,), 0),
+        (("长白班:旷工\n(-)", "长白班:正常\n(08:00,17:00)"), (2,), 9),
+        (("长白班:正常\n(19:47,08:19)", "休息"), (2,), 8),
+        (("长白班:迟到\n(08:30,17:00)",), (1,), 8.5),
     ],
 )
 def test_holiday_shift_hours(records, days, expected):
@@ -56,11 +62,24 @@ def test_existing_holiday_overtime_is_added_without_rounding(base):
         "正常(24:00,09:00)",
         "正常(08:60,09:00)",
         "正常(08:00,09:00)(10:00,11:00)",
+        "长白班:缺卡\n(08:00,-)",
     ],
 )
 def test_invalid_punches_fail_with_employee_and_day(raw):
     with pytest.raises(ValueError, match="张三.*1 日"):
         add_holiday_overtime(EmployeeAttendance("张三", "部门", (raw,)), (1,))
+
+
+def test_pre_holiday_day_error_explains_overnight_scope():
+    employee = EmployeeAttendance("张三", "部门", ("正常(08:00)", "休息"))
+    with pytest.raises(ValueError, match=r"1 日（节假日前一日，用于跨夜班次）"):
+        add_holiday_overtime(employee, (2,))
+
+
+def test_holiday_day_error_keeps_original_wording():
+    employee = EmployeeAttendance("张三", "部门", ("正常(08:00)",))
+    with pytest.raises(ValueError, match=r"1 日节假日加班计算失败"):
+        add_holiday_overtime(employee, (1,))
 
 
 @pytest.mark.parametrize("base", ["未知", "NaN", "Infinity", -1])

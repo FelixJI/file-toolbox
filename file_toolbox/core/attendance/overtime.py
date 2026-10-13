@@ -12,15 +12,21 @@ from file_toolbox.core.attendance.types import EmployeeAttendance
 _PUNCHES = re.compile(
     r"[（(]\s*([0-9]{1,2}):([0-9]{2})\s*[,，]\s*([0-9]{1,2}):([0-9]{2})\s*[）)]\s*$"
 )
+# 班次:状态\n(-) 这类导出格式用 “-” 表示当日无打卡。
+_NO_PUNCHES = re.compile(r"[（(]\s*-\s*(?:[,，]\s*-\s*)?[）)]")
+_TIME = re.compile(r"[0-9]{1,2}:[0-9]{2}")
+_PUNCH_OPEN = re.compile(r"[（(]\s*[0-9]{1,2}:[0-9]{2}")
 
 
 def _punches(raw: str) -> tuple[int, int] | None:
     match = _PUNCHES.search(raw)
     if match is None:
-        if re.search(r"正常|外勤|打卡|[:：]", raw):
+        if _NO_PUNCHES.search(raw):
+            return None
+        if _TIME.search(raw) or re.search(r"正常|外勤|打卡", raw):
             raise ValueError(f"无法识别上下班时间: {raw}")
         return None
-    if re.search(r"[:：]", raw[: match.start()]):
+    if _PUNCH_OPEN.search(raw[: match.start()]):
         raise ValueError(f"考勤包含多段时间，无法识别唯一班次: {raw}")
     start_hour, start_minute, end_hour, end_minute = map(int, match.groups())
     if start_hour > 23 or end_hour > 23 or start_minute > 59 or end_minute > 59:
@@ -54,7 +60,11 @@ def add_holiday_overtime(
                     minutes += end
             half_hours += minutes // 30
         except ValueError as exc:
-            raise ValueError(f"员工“{employee.name}”{day} 日节假日加班计算失败: {exc}") from exc
+            if day in holidays:
+                raise ValueError(f"员工“{employee.name}”{day} 日节假日加班计算失败: {exc}") from exc
+            raise ValueError(
+                f"员工“{employee.name}”{day} 日（节假日前一日，用于跨夜班次）加班计算失败: {exc}"
+            ) from exc
     if not half_hours:
         return employee
     weekday, rest_day, holiday = employee.overtime_hours
