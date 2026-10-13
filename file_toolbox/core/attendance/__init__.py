@@ -3,7 +3,9 @@
 from .plan_store import AttendancePlanStore
 from .service import AttendanceCancelled, AttendanceError, AttendanceService
 from .types import (
+    AttendanceAnomaly,
     AttendancePlan,
+    AttendancePostAction,
     AttendancePreview,
     AttendanceRequest,
     AttendanceResult,
@@ -13,6 +15,7 @@ from .types import (
     EmployeeGroupOverride,
     EmployeeGroupPreview,
     GroupSheetConfig,
+    PreparedPostAction,
     RosterConfig,
     RosterLayout,
     SourceLayout,
@@ -22,10 +25,12 @@ from .types import (
 )
 
 __all__ = [
+    "AttendanceAnomaly",
     "AttendanceCancelled",
     "AttendanceError",
     "AttendancePlan",
     "AttendancePlanStore",
+    "AttendancePostAction",
     "AttendancePreview",
     "AttendanceRequest",
     "AttendanceResult",
@@ -37,6 +42,7 @@ __all__ = [
     "EmployeeGroupOverride",
     "EmployeeGroupPreview",
     "GroupSheetConfig",
+    "PreparedPostAction",
     "RosterConfig",
     "RosterLayout",
     "SourceLayout",

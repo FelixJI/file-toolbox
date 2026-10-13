@@ -12,6 +12,7 @@ import pytest
 
 from file_toolbox.core.attendance import (
     AttendancePlanStore,
+    AttendancePostAction,
     AttendancePreview,
     AttendanceRule,
     CellMapping,
@@ -26,6 +27,7 @@ from file_toolbox.core.attendance.form_state import (
     GroupEmployeePreviewRow,
     GroupPreviewRow,
     MappingSelection,
+    PostActionSelection,
     PreviewRows,
     RosterEmployeePreviewRow,
     apply_plan_to_state,
@@ -217,6 +219,57 @@ def test_build_plan_skips_blank_mapping_rows():
     state.mappings = (MappingSelection(cell="", content=""),)
 
     assert build_plan(state).mappings == ()
+
+
+def test_build_plan_post_actions_skip_blank_rows_and_default_count():
+    state = _state()
+    state.post_actions = (
+        PostActionSelection(),
+        PostActionSelection(kind="insert_rows", row="22"),
+        PostActionSelection(kind="delete_rows", row="8", count="2"),
+        PostActionSelection(role="summary", kind="write", cell="C3", content="{{year}}备注"),
+    )
+
+    assert build_plan(state).post_actions == (
+        AttendancePostAction("insert_rows", "detail", CellRef(22, 1), 1),
+        AttendancePostAction("delete_rows", "detail", CellRef(8, 1), 2),
+        AttendancePostAction("write", "summary", CellRef(3, 3), 1, "{{year}}备注"),
+    )
+
+
+def test_build_plan_post_actions_validate_row_count_and_cell():
+    state = _state()
+    state.post_actions = (PostActionSelection(kind="insert_rows", row="0"),)
+    with pytest.raises(ValueError, match="行号"):
+        build_plan(state)
+
+    state.post_actions = (PostActionSelection(kind="insert_rows", row="8", count="x"),)
+    with pytest.raises(ValueError, match="行数"):
+        build_plan(state)
+
+    state.post_actions = (PostActionSelection(kind="write", content="内容"),)
+    with pytest.raises(ValueError, match="目标单元格"):
+        build_plan(state)
+
+
+def test_post_actions_round_trip_through_apply_plan_to_state():
+    state = _state()
+    plan = replace(
+        build_plan(state),
+        post_actions=(
+            AttendancePostAction("insert_rows", "detail", CellRef(22, 1), 3),
+            AttendancePostAction("write", "summary", CellRef.parse("C2"), 1, "备注"),
+        ),
+    )
+
+    restored = AttendanceFormState()
+    apply_plan_to_state(restored, plan)
+
+    assert restored.post_actions == (
+        PostActionSelection(role="detail", kind="insert_rows", row="22", count="3"),
+        PostActionSelection(role="summary", kind="write", cell="C2", content="备注"),
+    )
+    assert build_plan(restored).post_actions == plan.post_actions
 
 
 def test_plan_round_trip_through_state_and_store(tmp_path):

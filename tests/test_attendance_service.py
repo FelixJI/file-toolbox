@@ -10,6 +10,7 @@ from file_toolbox.common.history import JsonHistoryStore
 from file_toolbox.core.attendance import (
     AttendanceError,
     AttendancePlan,
+    AttendancePostAction,
     AttendanceRequest,
     AttendanceService,
     CellMapping,
@@ -761,6 +762,88 @@ def test_holiday_overtime_and_symbols_reach_output(tmp_path, roster_mode):
     assert prepared.groups[0].source.employees[0].overtime_hours == (1, 2, 21.5)
     assert prepared.groups[0].symbols[0][:3] == ("+", "+", "√")
     assert excel.source.employees[0].overtime_hours == (1, 2, 3)
+
+
+def test_raw_data_anomalies_do_not_block_preview_or_generate(tmp_path):
+    request = replace(_request(tmp_path), holiday_days=(2,))
+    records = ("正常\n(19:55)", "正常(08:00)") + ("正常",) * 29
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", records, overtime_hours=(1, 2, 3)),), "市场部"
+    )
+    excel = FakeExcel(source)
+    service = AttendanceService(excel)
+
+    preview = service.preview(request)
+
+    assert preview.can_generate
+    assert [(item.employee_name, item.day) for item in preview.anomalies] == [
+        ("张三", 1),
+        ("张三", 2),
+    ]
+    assert all(item.employee_index == 0 for item in preview.anomalies)
+    assert any("节假日前一日记录不全" in item.message for item in preview.anomalies)
+    assert any("节假日加班未计算" in item.message for item in preview.anomalies)
+
+    result = service.generate(request)
+
+    assert result.anomalies == preview.anomalies
+    prepared = excel.write_calls[0][2]
+    assert prepared.groups[0].anomalies == preview.anomalies
+    assert prepared.groups[0].source.employees[0].overtime_hours == (1, 2, 3)
+
+
+def test_invalid_existing_overtime_reports_dayless_anomaly(tmp_path):
+    request = replace(_request(tmp_path), holiday_days=(2,))
+    records = ("休息", "正常(08:00,12:00)") + ("正常",) * 29
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", records, overtime_hours=(1, 2, "未知")),), "市场部"
+    )
+
+    preview = AttendanceService(FakeExcel(source)).preview(request)
+
+    assert preview.can_generate
+    assert len(preview.anomalies) == 1
+    assert preview.anomalies[0].day == 0
+    assert "未累计" in preview.anomalies[0].message
+
+
+def test_post_actions_render_per_group_and_reach_output(tmp_path):
+    base = _request(tmp_path)
+    plan = replace(
+        base.plan,
+        split_by_group=True,
+        source=replace(base.plan.source, attendance_group_start=CellRef.parse("B2")),
+        post_actions=(
+            AttendancePostAction("insert_rows", "detail", CellRef(25, 1), 2),
+            AttendancePostAction("delete_rows", "summary", CellRef(9, 1), 1),
+            AttendancePostAction(
+                "write", "summary", CellRef.parse("C2"), 1, "{{attendance_group}}备注"
+            ),
+        ),
+    )
+    request = replace(base, plan=plan)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(31)), "售后组"),
+            EmployeeAttendance("李四", "市场部", tuple("正常" for _ in range(31)), "管理组"),
+        ),
+        "市场部",
+    )
+    excel = FakeExcel(source)
+
+    AttendanceService(excel).generate(request)
+
+    prepared = excel.write_calls[0][2]
+    for group in prepared.groups:
+        assert [action.kind for action in group.post_actions] == [
+            "insert_rows",
+            "delete_rows",
+            "write",
+        ]
+        write_action = group.post_actions[2]
+        assert write_action.content == f"{group.attendance_group}备注"
+        assert write_action.target == CellRef.parse("C2")
+    assert prepared.groups[0].post_actions[0].count == 2
 
 
 @pytest.mark.parametrize("days", [(0,), (32,), (True,), (1.5,)])

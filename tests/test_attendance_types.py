@@ -1,5 +1,6 @@
 """考勤领域类型、规则与变量测试。"""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from file_toolbox.core.attendance.rules import classify, compile_rules, render_content
 from file_toolbox.core.attendance.types import (
     AttendancePlan,
+    AttendancePostAction,
     AttendanceRule,
     CellMapping,
     CellRef,
@@ -106,7 +108,7 @@ def test_plan_from_old_dict_defaults_to_single_group_mode():
 
     assert plan.split_by_group is False
     assert plan.source.attendance_group_start is None
-    assert plan.schema_version == 4
+    assert plan.schema_version == 5
     assert plan.roster is None
 
 
@@ -136,7 +138,7 @@ def test_v2_plan_migrates_without_manual_adjustments():
     assert migrated.source.attendance_group_start == CellRef.parse("B2")
     assert migrated.employee_group_overrides == ()
     assert migrated.group_sheet_configs == ()
-    assert migrated.schema_version == 4
+    assert migrated.schema_version == 5
     assert migrated.roster is None
 
 
@@ -149,12 +151,64 @@ def test_v3_plan_migrates_without_roster_configuration():
 
     migrated = plan_from_dict(data)
 
-    assert migrated.schema_version == 4
+    assert migrated.schema_version == 5
     assert migrated.roster is None
 
 
-def test_new_plan_serializes_as_v4_so_old_reader_rejects_new_semantics():
-    assert plan_to_dict(_plan())["schema_version"] == 4
+def test_v4_plan_migrates_without_post_actions():
+    data = plan_to_dict(_plan())
+    data["schema_version"] = 4
+    data.pop("post_actions")
+
+    migrated = plan_from_dict(data)
+
+    assert migrated.schema_version == 5
+    assert migrated.post_actions == ()
+
+
+def test_post_actions_round_trip_through_serialization():
+    plan = replace(
+        _plan(),
+        post_actions=(
+            AttendancePostAction("insert_rows", "detail", CellRef(22, 1), 3),
+            AttendancePostAction("delete_rows", "summary", CellRef(9, 1), 1),
+            AttendancePostAction("write", "summary", CellRef.parse("C3"), 1, "{{year}}年备注"),
+        ),
+    )
+
+    assert plan_from_dict(plan_to_dict(plan)) == plan
+
+
+@pytest.mark.parametrize(
+    ("action", "message"),
+    [
+        (AttendancePostAction("move", "detail", CellRef(1, 1)), "类型"),
+        (AttendancePostAction("write", "other", CellRef(1, 1)), "明细/汇总"),
+        (AttendancePostAction("insert_rows", "detail", CellRef(1, 1), 0), "行数"),
+    ],
+)
+def test_plan_from_dict_rejects_invalid_post_actions(action, message):
+    data = plan_to_dict(replace(_plan(), post_actions=(action,)))
+    with pytest.raises(ValueError, match=message):
+        plan_from_dict(data)
+
+
+@pytest.mark.parametrize("count", [True, 1.5, "2"])
+def test_plan_from_dict_rejects_non_integer_post_action_count(count):
+    data = plan_to_dict(
+        replace(
+            _plan(),
+            post_actions=(AttendancePostAction("insert_rows", "detail", CellRef(22, 1), 2),),
+        )
+    )
+    data["post_actions"][0]["count"] = count
+
+    with pytest.raises(ValueError, match="无效的考勤方案"):
+        plan_from_dict(data)
+
+
+def test_new_plan_serializes_as_v5_so_old_reader_rejects_new_semantics():
+    assert plan_to_dict(_plan())["schema_version"] == 5
 
 
 def test_plan_from_dict_rejects_unknown_version():

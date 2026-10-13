@@ -13,7 +13,9 @@ if TYPE_CHECKING:
     from cattrs import Converter
 
 _CELL_RE = re.compile(r"^([A-Za-z]{1,3})([1-9]\d*)$")
-_PLAN_SCHEMA_VERSION = 4
+_PLAN_SCHEMA_VERSION = 5
+POST_ACTION_KINDS = ("insert_rows", "delete_rows", "write")
+POST_ACTION_ROLES = ("detail", "summary")
 
 OvertimeValue = str | int | float
 
@@ -117,6 +119,33 @@ class AttendanceRule:
 
 
 @dataclass(frozen=True)
+class AttendancePostAction:
+    """汇总写入后按列表顺序在明细/汇总 Sheet 上执行的结构调整。
+
+    kind 为 insert_rows/delete_rows 时 target 取目标行号(列号忽略),count 为行数;
+    kind 为 write 时 target 为目标单元格,content 支持固定单元格同款变量。
+    """
+
+    kind: str
+    sheet_role: str
+    target: CellRef
+    count: int = 1
+    content: str = ""
+
+    @classmethod
+    def insert_rows(cls, sheet_role: str, row: int, count: int = 1) -> AttendancePostAction:
+        return cls("insert_rows", sheet_role, CellRef(row, 1), count)
+
+    @classmethod
+    def delete_rows(cls, sheet_role: str, row: int, count: int = 1) -> AttendancePostAction:
+        return cls("delete_rows", sheet_role, CellRef(row, 1), count)
+
+    @classmethod
+    def write(cls, sheet_role: str, cell: CellRef, content: str) -> AttendancePostAction:
+        return cls("write", sheet_role, cell, 1, content)
+
+
+@dataclass(frozen=True)
 class EmployeeGroupOverride:
     employee_name: str
     source_group: str
@@ -157,6 +186,7 @@ class AttendancePlan:
     employee_group_overrides: tuple[EmployeeGroupOverride, ...] = ()
     group_sheet_configs: tuple[GroupSheetConfig, ...] = ()
     roster: RosterConfig | None = None
+    post_actions: tuple[AttendancePostAction, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -212,6 +242,28 @@ class SourceAttendance:
 
 
 @dataclass(frozen=True)
+class AttendanceAnomaly:
+    """原始考勤数据异常:不阻断汇总,生成后单独提示并在结果中标黄。
+
+    day 为 1-based 日期;0 表示异常不针对具体日期(如原有加班值无效,
+    标黄目标为汇总表节假日加班单元格)。employee_index 是组内输出行号,
+    由 service 写入,用于同名员工场景精确定位;-1 表示未指定,回退按
+    姓名匹配。
+    """
+
+    employee_name: str
+    day: int
+    message: str
+    employee_index: int = -1
+
+    @property
+    def display(self) -> str:
+        if self.day:
+            return f"{self.employee_name} {self.day} 日 {self.message}"
+        return f"{self.employee_name} {self.message}"
+
+
+@dataclass(frozen=True)
 class UnmatchedAttendance:
     employee: str
     day: int
@@ -247,6 +299,7 @@ class AttendancePreview:
     warnings: tuple[str, ...] = ()
     excluded_count: int = 0
     roster_path: Path | None = None
+    anomalies: tuple[AttendanceAnomaly, ...] = ()
 
     @property
     def can_generate(self) -> bool:
@@ -262,6 +315,18 @@ class AttendanceResult:
     warnings: tuple[str, ...] = ()
     group_counts: Mapping[str, int] = field(default_factory=dict)
     target_sheets: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    anomalies: tuple[AttendanceAnomaly, ...] = ()
+
+
+@dataclass(frozen=True)
+class PreparedPostAction:
+    """已按分组渲染内容的汇总后处理动作,由 Excel 写入阶段按顺序执行。"""
+
+    kind: str
+    sheet_role: str
+    target: CellRef
+    count: int
+    content: str
 
 
 @dataclass(frozen=True)
@@ -272,6 +337,8 @@ class PreparedGroup:
     detail_sheet: str
     summary_sheet: str
     mapping_values: tuple[tuple[str, CellRef, str], ...]
+    anomalies: tuple[AttendanceAnomaly, ...] = ()
+    post_actions: tuple[PreparedPostAction, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -319,6 +386,17 @@ def _structure_cell_ref(value: object, _: type[CellRef]) -> CellRef:
     return CellRef.parse(value)
 
 
+def _structure_int(value: object, _: type[int]) -> int:
+    """拒绝 cattrs 默认 int() 强转:true/1.5/"2" 等损坏载荷必须判无效。
+
+    影响字段如 post_actions[].count 与 schema_version;bool 是 int 子类,
+    同样显式拒绝(与 _structure_bool 的严格风格一致)。
+    """
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"值必须是整数: {value!r}")
+    return value
+
+
 def _unstructure_cell_ref(value: CellRef) -> str:
     return value.address
 
@@ -343,6 +421,7 @@ def _plan_converter() -> Converter:
         )
         converter.register_structure_hook(str, _structure_str)
         converter.register_structure_hook(bool, _structure_bool)
+        converter.register_structure_hook(int, _structure_int)
         converter.register_structure_hook(Path, _structure_path)
         converter.register_structure_hook(CellRef, _structure_cell_ref)
         converter.register_unstructure_hook(CellRef, _unstructure_cell_ref)
@@ -362,7 +441,7 @@ def _migrate_plan_payload(value: object) -> dict[str, object]:
     """把历史 schema 显式迁移为 cattrs 可结构化的完整 v4 payload。"""
     data = dict(_mapping(value, "方案"))
     version = data.get("schema_version")
-    if not isinstance(version, int) or isinstance(version, bool) or version not in {1, 2, 3, 4}:
+    if not isinstance(version, int) or isinstance(version, bool) or version not in {1, 2, 3, 4, 5}:
         raise ValueError("不支持的考勤方案版本")
 
     source = dict(_mapping(data.get("source"), "source"))
@@ -396,6 +475,11 @@ def _migrate_plan_payload(value: object) -> dict[str, object]:
         data["roster"] = None
     else:
         data.setdefault("roster", None)
+
+    if version < 5:
+        data["post_actions"] = []
+    else:
+        data.setdefault("post_actions", [])
 
     data["schema_version"] = _PLAN_SCHEMA_VERSION
     return data
@@ -458,6 +542,8 @@ def _normalize_plan(plan: AttendancePlan) -> AttendancePlan:
             ),
         )
 
+    post_actions = tuple(_normalize_post_action(action) for action in plan.post_actions)
+
     return replace(
         plan,
         name=_required_text(plan.name, "name"),
@@ -468,7 +554,27 @@ def _normalize_plan(plan: AttendancePlan) -> AttendancePlan:
         employee_group_overrides=overrides,
         group_sheet_configs=configs,
         roster=roster,
+        post_actions=post_actions,
         schema_version=_PLAN_SCHEMA_VERSION,
+    )
+
+
+def _normalize_post_action(action: AttendancePostAction) -> AttendancePostAction:
+    kind = action.kind.strip()
+    if kind not in POST_ACTION_KINDS:
+        raise ValueError(f"未知的汇总后处理类型: {action.kind}")
+    sheet_role = action.sheet_role.strip()
+    if sheet_role not in POST_ACTION_ROLES:
+        raise ValueError(f"汇总后处理只能作用于明细/汇总 Sheet: {action.sheet_role}")
+    count = 1 if kind == "write" else action.count
+    if kind != "write" and count < 1:
+        raise ValueError(f"汇总后处理行数必须大于 0: {action.count}")
+    return AttendancePostAction(
+        kind,
+        sheet_role,
+        action.target,
+        count,
+        action.content if kind == "write" else "",
     )
 
 

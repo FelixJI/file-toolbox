@@ -147,6 +147,14 @@
        <item><layout class="QHBoxLayout" name="layout_mapping_buttons"><item><widget class="QPushButton" name="btn_add_mapping"><property name="text"><string>新增映射</string></property></widget></item><item><widget class="QPushButton" name="btn_remove_mapping"><property name="text"><string>删除选中</string></property></widget></item><item><spacer name="mapping_spacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tab_post_actions">
+      <attribute name="title"><string>汇总后处理</string></attribute>
+      <layout class="QVBoxLayout" name="layout_post_actions">
+       <item><widget class="QLabel" name="label_post_help"><property name="text"><string>汇总内容全部写入后，按列表从上到下在每组明细/汇总 Sheet 上执行：增加行/删除行（填行号与行数，行数留空为 1）；写入内容（填单元格与内容，支持固定单元格变量）。行号以执行时表格状态为准，行插入/删除会影响后续动作的行位置。</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+       <item><widget class="QTableWidget" name="table_post_actions"><property name="columnCount"><number>6</number></property><property name="rowCount"><number>0</number></property><column><property name="text"><string>目标 Sheet</string></property></column><column><property name="text"><string>操作</string></property></column><column><property name="text"><string>行号</string></property></column><column><property name="text"><string>行数</string></property></column><column><property name="text"><string>单元格</string></property></column><column><property name="text"><string>内容</string></property></column></widget></item>
+       <item><layout class="QHBoxLayout" name="layout_post_buttons"><item><widget class="QPushButton" name="btn_add_post_action"><property name="text"><string>新增操作</string></property></widget></item><item><widget class="QPushButton" name="btn_remove_post_action"><property name="text"><string>删除选中</string></property></widget></item><item><widget class="QPushButton" name="btn_post_up"><property name="text"><string>上移</string></property></widget></item><item><widget class="QPushButton" name="btn_post_down"><property name="text"><string>下移</string></property></widget></item><item><spacer name="post_spacer"><property name="orientation"><enum>Qt::Orientation::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item></layout></item>
+      </layout>
+     </widget>
      <widget class="QWidget" name="tab_rules">
       <attribute name="title"><string>判定规则</string></attribute>
       <layout class="QVBoxLayout" name="layout_rules">

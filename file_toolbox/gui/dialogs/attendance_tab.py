@@ -13,7 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, Literal, cast
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt, QThread
+from PySide6.QtCore import QObject, QSortFilterProxyModel, Qt, QThread
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
@@ -36,8 +36,11 @@ from file_toolbox.core.attendance import (
     CellMapping,
 )
 from file_toolbox.core.attendance.form_state import (
+    POST_ACTION_KIND_LABELS,
     MappingRole,
     MappingSelection,
+    PostActionRole,
+    PostActionSelection,
     apply_plan_to_state,
     build_plan,
     build_preview_rows,
@@ -54,6 +57,7 @@ from file_toolbox.gui.task_lifecycle import TaskLifecycle
 _MAPPING_DETAIL_ROLE = "detail"
 _MAPPING_SUMMARY_ROLE = "summary"
 _MAPPING_LEGACY_ROLE = "legacy"
+_POST_SHEET_ROLES = (_MAPPING_DETAIL_ROLE, _MAPPING_SUMMARY_ROLE)
 
 
 class AttendanceTab(QWidget):
@@ -150,13 +154,15 @@ class AttendanceTab(QWidget):
         return self._task.close_pending
 
     def _setup_tables(self) -> None:
-        for table in (self.ui.table_mappings, self.ui.table_rules):
+        for table in (self.ui.table_mappings, self.ui.table_rules, self.ui.table_post_actions):
             table.horizontalHeader().setStretchLastSection(True)
             table.setAlternatingRowColors(True)
         self.ui.table_rules.setColumnWidth(0, 52)
         self.ui.table_rules.setColumnWidth(1, 260)
         self.ui.table_mappings.setColumnWidth(0, 150)
         self.ui.table_mappings.setColumnWidth(1, 90)
+        for column, width in enumerate((140, 90, 60, 60, 90)):
+            self.ui.table_post_actions.setColumnWidth(column, width)
         for view, proxy in (
             (self.ui.table_group_preview, self._group_proxy),
             (self.ui.table_employee_preview, self._employee_proxy),
@@ -189,6 +195,7 @@ class AttendanceTab(QWidget):
             self._configure_preview_tables(self._state.roster_enabled)
             self._render_mappings()
             self._render_rules()
+            self._render_post_actions()
         finally:
             self._loading = False
 
@@ -236,6 +243,12 @@ class AttendanceTab(QWidget):
         self.ui.btn_remove_rule.clicked.connect(lambda: self._remove_selected(self.ui.table_rules))
         self.ui.btn_rule_up.clicked.connect(lambda: self._move_rule(-1))
         self.ui.btn_rule_down.clicked.connect(lambda: self._move_rule(1))
+        self.ui.btn_add_post_action.clicked.connect(self._add_post_action)
+        self.ui.btn_remove_post_action.clicked.connect(
+            lambda: self._remove_selected(self.ui.table_post_actions)
+        )
+        self.ui.btn_post_up.clicked.connect(lambda: self._move_post_action(-1))
+        self.ui.btn_post_down.clicked.connect(lambda: self._move_post_action(1))
         self.ui.btn_preview.clicked.connect(self._preview)
         self.ui.btn_generate.clicked.connect(self._generate)
         self.ui.btn_apply_adjustments.clicked.connect(self._apply_preview_adjustments)
@@ -248,6 +261,7 @@ class AttendanceTab(QWidget):
         self.ui.spin_month.valueChanged.connect(self._on_month_changed)
         self.ui.table_mappings.cellChanged.connect(self._on_mapping_cell_changed)
         self.ui.table_rules.cellChanged.connect(self._on_rule_cell_changed)
+        self.ui.table_post_actions.cellChanged.connect(self._on_post_action_cell_changed)
         self._group_model.dataChanged.connect(self._preview_adjustments_changed)
         self._employee_model.dataChanged.connect(self._preview_adjustments_changed)
         self.ui.chk_split_groups.toggled.connect(self._on_split_changed)
@@ -265,6 +279,7 @@ class AttendanceTab(QWidget):
         setattr(self._state, attr, text)
         if attr in ("detail_sheet", "summary_sheet"):
             self._refresh_mapping_sheet_selectors()
+            self._refresh_post_sheet_selectors()
         self._invalidate_preview()
 
     def _on_flag_changed(self, attr: str, checked: bool) -> None:
@@ -585,6 +600,12 @@ class AttendanceTab(QWidget):
                 for row, selection in enumerate(self._state.mappings)
                 if row not in removed
             )
+        elif table is self.ui.table_post_actions:
+            self._state.post_actions = tuple(
+                selection
+                for row, selection in enumerate(self._state.post_actions)
+                if row not in removed
+            )
         else:
             self._state.rules = tuple(
                 rule for row, rule in enumerate(self._state.rules) if row not in removed
@@ -618,6 +639,148 @@ class AttendanceTab(QWidget):
     def _item_text(table: QTableWidget, row: int, column: int) -> str:
         item = table.item(row, column)
         return "" if item is None else item.text().strip()
+
+    # --- 汇总后处理小表格(编辑后同步回状态) ---
+
+    def _render_post_actions(self) -> None:
+        self._loading = True
+        try:
+            self.ui.table_post_actions.setRowCount(0)
+            for selection in self._state.post_actions:
+                row = self.ui.table_post_actions.rowCount()
+                self.ui.table_post_actions.insertRow(row)
+                self._install_post_action_row(row, selection)
+        finally:
+            self._loading = False
+
+    def _install_post_action_row(self, row: int, selection: PostActionSelection) -> None:
+        self.ui.table_post_actions.setCellWidget(row, 0, self._post_sheet_selector(selection))
+        self.ui.table_post_actions.setCellWidget(row, 1, self._post_kind_selector(selection))
+        self.ui.table_post_actions.setItem(row, 2, QTableWidgetItem(selection.row))
+        self.ui.table_post_actions.setItem(row, 3, QTableWidgetItem(selection.count))
+        self.ui.table_post_actions.setItem(row, 4, QTableWidgetItem(selection.cell))
+        self.ui.table_post_actions.setItem(row, 5, QTableWidgetItem(selection.content))
+
+    def _post_sheet_selector(self, selection: PostActionSelection | None = None) -> QComboBox:
+        selector = QComboBox(self.ui.table_post_actions)
+        detail_sheet = self._state.detail_sheet.strip()
+        summary_sheet = self._state.summary_sheet.strip()
+        selector.addItem(detail_sheet or "明细 Sheet", _MAPPING_DETAIL_ROLE)
+        selector.addItem(summary_sheet or "汇总 Sheet", _MAPPING_SUMMARY_ROLE)
+        if selection is not None and selection.role == "summary":
+            selector.setCurrentIndex(1)
+        selector.currentIndexChanged.connect(self._on_post_sheet_changed)
+        return selector
+
+    def _post_kind_selector(self, selection: PostActionSelection | None = None) -> QComboBox:
+        selector = QComboBox(self.ui.table_post_actions)
+        for kind, label in POST_ACTION_KIND_LABELS:
+            selector.addItem(label, kind)
+        if selection is not None:
+            index = selector.findData(selection.kind)
+            if index >= 0:
+                selector.setCurrentIndex(index)
+        selector.currentIndexChanged.connect(self._on_post_kind_changed)
+        return selector
+
+    def _refresh_post_sheet_selectors(self, *_args: object) -> None:
+        detail_sheet = self._state.detail_sheet.strip() or "明细 Sheet"
+        summary_sheet = self._state.summary_sheet.strip() or "汇总 Sheet"
+        for row in range(self.ui.table_post_actions.rowCount()):
+            selector = self.ui.table_post_actions.cellWidget(row, 0)
+            if not isinstance(selector, QComboBox):
+                continue
+            detail_index = selector.findData(_MAPPING_DETAIL_ROLE)
+            summary_index = selector.findData(_MAPPING_SUMMARY_ROLE)
+            if detail_index >= 0:
+                selector.setItemText(detail_index, detail_sheet)
+            if summary_index >= 0:
+                selector.setItemText(summary_index, summary_sheet)
+
+    def _post_widget_row(self, selector: QObject) -> int:
+        for row in range(self.ui.table_post_actions.rowCount()):
+            for column in (0, 1):
+                if self.ui.table_post_actions.cellWidget(row, column) is selector:
+                    return row
+        return -1
+
+    def _on_post_sheet_changed(self, *_args: object) -> None:
+        self._update_post_selection("role")
+
+    def _on_post_kind_changed(self, *_args: object) -> None:
+        self._update_post_selection("kind")
+
+    def _update_post_selection(self, attr: str) -> None:
+        if self._loading:
+            return
+        selector = self.sender()
+        if not isinstance(selector, QComboBox):
+            return
+        row = self._post_widget_row(selector)
+        if row < 0 or row >= len(self._state.post_actions):
+            return
+        value = selector.currentData()
+        if not isinstance(value, str):
+            return
+        actions = list(self._state.post_actions)
+        if attr == "role":
+            if value not in _POST_SHEET_ROLES:
+                return
+            actions[row] = replace(actions[row], role=cast(PostActionRole, value))
+        else:
+            if value not in ("insert_rows", "delete_rows", "write"):
+                return
+            actions[row] = replace(actions[row], kind=value)
+        self._state.post_actions = tuple(actions)
+        self._invalidate_preview()
+
+    def _on_post_action_cell_changed(self, row: int, column: int) -> None:
+        if self._loading or column not in (2, 3, 4, 5) or row >= len(self._state.post_actions):
+            return
+        text = self._item_text(self.ui.table_post_actions, row, column)
+        actions = list(self._state.post_actions)
+        selection = actions[row]
+        if column == 2:
+            selection = replace(selection, row=text)
+        elif column == 3:
+            selection = replace(selection, count=text)
+        elif column == 4:
+            selection = replace(selection, cell=text)
+        else:
+            selection = replace(selection, content=text)
+        actions[row] = selection
+        self._state.post_actions = tuple(actions)
+        self._invalidate_preview()
+
+    def _add_post_action(self) -> None:
+        selection = PostActionSelection()
+        self._state.post_actions = (*self._state.post_actions, selection)
+        row = self.ui.table_post_actions.rowCount()
+        self._loading = True
+        try:
+            self.ui.table_post_actions.insertRow(row)
+            self._install_post_action_row(row, selection)
+        finally:
+            self._loading = False
+        self.ui.table_post_actions.setCurrentCell(row, 2)
+        self._invalidate_preview()
+
+    def _move_post_action(self, delta: int) -> None:
+        row = self.ui.table_post_actions.currentRow()
+        target = row + delta
+        if row < 0 or target < 0 or target >= self.ui.table_post_actions.rowCount():
+            return
+        actions = list(self._state.post_actions)
+        actions[row], actions[target] = actions[target], actions[row]
+        self._state.post_actions = tuple(actions)
+        self._loading = True
+        try:
+            self._install_post_action_row(row, actions[row])
+            self._install_post_action_row(target, actions[target])
+            self.ui.table_post_actions.setCurrentCell(target, 2)
+        finally:
+            self._loading = False
+        self._invalidate_preview()
 
     # --- 预览调整(以模型数据行为权威) ---
 
@@ -807,12 +970,19 @@ class AttendanceTab(QWidget):
             if len(result.warnings) > 3:
                 visible_warnings += f"；另 {len(result.warnings) - 3} 项"
             warning_text = f"警告：{visible_warnings}；"
+        anomaly_text = ""
+        if result.anomalies:
+            visible_anomalies = "；".join(item.display for item in result.anomalies[:3])
+            if len(result.anomalies) > 3:
+                visible_anomalies += f"；另 {len(result.anomalies) - 3} 条"
+            anomaly_text = f"数据异常 {len(result.anomalies)} 条（不阻断生成，结果中已标黄）：{visible_anomalies}；"
         return (
             f"导出员工 {result.employee_count} 人；排除 {result.excluded_count} 人；"
             f"本月 {result.day_count} 天；"
             f"{direction}日期列 {abs(result.date_column_delta)}；"
             f"新增员工行 {result.extra_employee_rows}；判定：{counts}；"
-            f"{group_text}{error_text}{warning_text}未匹配 {len(result.unmatched)} 条。"
+            f"{group_text}{error_text}{warning_text}{anomaly_text}"
+            f"未匹配 {len(result.unmatched)} 条。"
         )
 
     def _on_generate_ok(self, result: object) -> None:
@@ -829,12 +999,21 @@ class AttendanceTab(QWidget):
         warning_text = ""
         if result.warnings:
             warning_text = "\n\n注意：" + "；".join(result.warnings)
+        anomaly_text = ""
+        if result.anomalies:
+            visible_anomalies = "\n".join(f"· {item.display}" for item in result.anomalies[:10])
+            if len(result.anomalies) > 10:
+                visible_anomalies += f"\n· 另 {len(result.anomalies) - 10} 条"
+            anomaly_text = (
+                f"\n\n以下 {len(result.anomalies)} 条原始数据异常未计入汇总，"
+                f"已在结果对应单元格标黄：\n{visible_anomalies}"
+            )
         if not self._task.close_pending:
             QMessageBox.information(
                 self,
                 "生成完成",
                 f"已另存结果：\n{result.output_path}\n\n员工 {result.employee_count} 人，"
-                f"{result.day_count} 天。{warning_text}",
+                f"{result.day_count} 天。{warning_text}{anomaly_text}",
             )
 
     def _on_failed(self, message: str) -> None:

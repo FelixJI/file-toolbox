@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from file_toolbox.core.attendance.excel import (
+    ANOMALY_HIGHLIGHT_COLOR,
     ExcelComAdapter,
     _copy_worksheet,
     _order_roster_group_sheets,
@@ -14,6 +15,7 @@ from file_toolbox.core.attendance.excel import (
     _write_column,
 )
 from file_toolbox.core.attendance.types import (
+    AttendanceAnomaly,
     AttendancePlan,
     AttendancePreview,
     CellMapping,
@@ -22,6 +24,7 @@ from file_toolbox.core.attendance.types import (
     GroupSheetConfig,
     PreparedAttendance,
     PreparedGroup,
+    PreparedPostAction,
     RosterConfig,
     RosterEmployee,
     RosterLayout,
@@ -99,6 +102,8 @@ def _prepared(
     symbols: tuple[tuple[str, ...], ...],
     day_count: int,
     mappings: tuple[tuple[str, CellRef, str], ...] = (),
+    anomalies: tuple[AttendanceAnomaly, ...] = (),
+    post_actions: tuple[PreparedPostAction, ...] = (),
 ) -> PreparedAttendance:
     return PreparedAttendance(
         groups=(
@@ -109,6 +114,8 @@ def _prepared(
                 "出勤明细",
                 "考勤汇总表",
                 mappings,
+                anomalies,
+                post_actions,
             ),
         ),
         preview=AttendancePreview(
@@ -497,6 +504,148 @@ def test_write_output_writes_overtime_and_removes_unused_tail_rows(monkeypatch, 
     assert overtime_range.Value == ((1.5, 2, ""),)
     assert {row for row, mock in detail_rows.items() if mock.Delete.called} == set(range(8, 22))
     assert {row for row, mock in summary_rows.items() if mock.Delete.called} == set(range(9, 23))
+
+
+def test_write_output_highlights_anomaly_cells(monkeypatch, tmp_path):
+    plan = _plan()
+    detail = MagicMock()
+    summary = MagicMock()
+    detail_cells = {}
+    summary_cells = {}
+    detail.Cells.side_effect = lambda row, col: detail_cells.setdefault((row, col), _cell())
+
+    def summary_cell(row, col):
+        return summary_cells.setdefault((row, col), _cell(formula='=COUNTIF(出勤明细!D7:AG7,"√")'))
+
+    summary.Cells.side_effect = summary_cell
+    detail.Rows.side_effect = lambda row: MagicMock()
+    summary.Rows.side_effect = lambda row: MagicMock()
+    workbook = MagicMock()
+    workbook.ReadOnly = False
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    _patch_excel(monkeypatch, workbook)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(30))),),
+        "市场部",
+    )
+    anomalies = (
+        AttendanceAnomaly("张三", 5, "节假日加班未计算：无法识别上下班时间"),
+        AttendanceAnomaly("张三", 0, "原有节假日加班不是有效时长，未累计"),
+    )
+
+    ExcelComAdapter().write_output(
+        tmp_path / "staging.xlsx",
+        plan,
+        _prepared(
+            source,
+            (tuple("√" for _ in range(30)),),
+            30,
+            anomalies=anomalies,
+        ),
+    )
+
+    # 明细矩阵 D7 起:员工首行第 5 日 → (7, 8)。
+    assert detail_cells[(7, 8)].Interior.Color == ANOMALY_HIGHLIGHT_COLOR
+    # 汇总 C8 起:加班三列偏移 15,节假日加班是第 3 列 → (8, 20)。
+    assert summary_cells[(8, 20)].Interior.Color == ANOMALY_HIGHLIGHT_COLOR
+    assert detail_cells[(7, 4)].Interior.Color != ANOMALY_HIGHLIGHT_COLOR
+    assert summary_cells[(8, 18)].Interior.Color != ANOMALY_HIGHLIGHT_COLOR
+
+
+def test_write_output_highlights_only_indexed_duplicate_name_row(monkeypatch, tmp_path):
+    plan = _plan()
+    detail = MagicMock()
+    summary = MagicMock()
+    detail_cells = {}
+    summary_cells = {}
+    detail.Cells.side_effect = lambda row, col: detail_cells.setdefault((row, col), _cell())
+
+    def summary_cell(row, col):
+        return summary_cells.setdefault((row, col), _cell(formula='=COUNTIF(出勤明细!D7:AG7,"√")'))
+
+    summary.Cells.side_effect = summary_cell
+    detail.Rows.side_effect = lambda row: MagicMock()
+    summary.Rows.side_effect = lambda row: MagicMock()
+    workbook = MagicMock()
+    workbook.ReadOnly = False
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    _patch_excel(monkeypatch, workbook)
+    source = SourceAttendance(
+        (
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(30))),
+            EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(30))),
+        ),
+        "市场部",
+    )
+    anomalies = (AttendanceAnomaly("张三", 5, "节假日加班未计算：无法识别上下班时间", 1),)
+
+    ExcelComAdapter().write_output(
+        tmp_path / "staging.xlsx",
+        plan,
+        _prepared(
+            source,
+            (tuple("√" for _ in range(30)),) * 2,
+            30,
+            anomalies=anomalies,
+        ),
+    )
+
+    # 行号盖章(employee_index=1)只标黄第二名同名员工;第一行不受牵连。
+    assert detail_cells[(8, 8)].Interior.Color == ANOMALY_HIGHLIGHT_COLOR
+    first_row_cell = detail_cells.get((7, 8))
+    assert first_row_cell is None or first_row_cell.Interior.Color != ANOMALY_HIGHLIGHT_COLOR
+
+
+def test_write_output_applies_post_actions_after_group_writes(monkeypatch, tmp_path):
+    plan = _plan()
+    detail = MagicMock()
+    summary = MagicMock()
+    detail_cells = {}
+    summary_cells = {}
+    detail.Cells.side_effect = lambda row, col: detail_cells.setdefault((row, col), _cell())
+
+    def summary_cell(row, col):
+        return summary_cells.setdefault((row, col), _cell(formula='=COUNTIF(出勤明细!D7:AG7,"√")'))
+
+    summary.Cells.side_effect = summary_cell
+    log: list[str] = []
+
+    def make_row(label: str, row: int) -> MagicMock:
+        row_mock = MagicMock()
+        row_mock.Insert.side_effect = lambda **kwargs: log.append(f"{label}:insert:{row}")
+        row_mock.Delete.side_effect = lambda: log.append(f"{label}:delete:{row}")
+        return row_mock
+
+    detail.Rows.side_effect = lambda row: make_row("detail", row)
+    summary.Rows.side_effect = lambda row: make_row("summary", row)
+    workbook = MagicMock()
+    workbook.ReadOnly = False
+    workbook.Worksheets.side_effect = {"出勤明细": detail, "考勤汇总表": summary}.__getitem__
+    _patch_excel(monkeypatch, workbook)
+    source = SourceAttendance(
+        (EmployeeAttendance("张三", "市场部", tuple("正常" for _ in range(30))),),
+        "市场部",
+    )
+    post_actions = (
+        PreparedPostAction("insert_rows", "detail", CellRef(22, 1), 2, ""),
+        PreparedPostAction("delete_rows", "summary", CellRef(9, 1), 1, ""),
+        PreparedPostAction("write", "detail", CellRef.parse("D2"), 1, "2026年7月备注"),
+    )
+
+    ExcelComAdapter().write_output(
+        tmp_path / "staging.xlsx",
+        plan,
+        _prepared(
+            source,
+            (tuple("√" for _ in range(30)),),
+            30,
+            post_actions=post_actions,
+        ),
+    )
+
+    # 尾部序列即后处理:员工行调整(删除多余模板行)先发生,后处理随后按列表顺序执行。
+    assert log[-3:] == ["detail:insert:22", "detail:insert:22", "summary:delete:9"]
+    assert detail_cells[(2, 4)].Value == "2026年7月备注"
 
 
 def test_write_output_save_failure_still_closes_excel(monkeypatch, tmp_path):
