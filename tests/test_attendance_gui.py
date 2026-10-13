@@ -15,7 +15,9 @@ from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from file_toolbox.core.attendance import (  # noqa: E402
+    AttendanceAnomaly,
     AttendancePlanStore,
+    AttendancePostAction,
     AttendancePreview,
     AttendanceResult,
     CellMapping,
@@ -717,6 +719,98 @@ def test_fixed_mapping_selector_preserves_legacy_sheet_from_saved_plan(tab):
     ]
     assert selector.currentText() == "封面"
     assert tab._build_plan().mappings[0].sheet_name == "封面"
+
+
+def test_post_action_table_builds_plan_from_edits(tab):
+    tab._add_post_action()
+    tab.ui.table_post_actions.item(0, 2).setText("22")
+    tab.ui.table_post_actions.item(0, 3).setText("2")
+
+    tab._add_post_action()
+    tab.ui.table_post_actions.cellWidget(1, 0).setCurrentIndex(1)
+    tab.ui.table_post_actions.cellWidget(1, 1).setCurrentIndex(2)
+    tab.ui.table_post_actions.item(1, 4).setText("C2")
+    tab.ui.table_post_actions.item(1, 5).setText("{{year}}备注")
+
+    assert tab._build_plan().post_actions == (
+        AttendancePostAction("insert_rows", "detail", CellRef(22, 1), 2),
+        AttendancePostAction("write", "summary", CellRef(2, 3), 1, "{{year}}备注"),
+    )
+
+
+def test_post_action_move_and_remove_keep_state_in_sync(tab):
+    tab._add_post_action()
+    tab.ui.table_post_actions.item(0, 2).setText("10")
+    tab._add_post_action()
+    tab.ui.table_post_actions.item(1, 2).setText("20")
+
+    tab.ui.table_post_actions.setCurrentCell(0, 2)
+    tab._move_post_action(1)
+    assert [selection.row for selection in tab._state.post_actions] == ["20", "10"]
+
+    tab.ui.table_post_actions.selectRow(0)
+    tab._remove_selected(tab.ui.table_post_actions)
+    assert [selection.row for selection in tab._state.post_actions] == ["10"]
+    assert tab._build_plan().post_actions == (
+        AttendancePostAction("insert_rows", "detail", CellRef(10, 1), 1),
+    )
+
+
+def test_post_action_sheet_selector_follows_target_sheet_rename(tab):
+    tab._add_post_action()
+    selector = tab.ui.table_post_actions.cellWidget(0, 0)
+    assert selector.itemText(0) == "出勤明细"
+
+    tab.ui.edit_detail_sheet.setText("新明细表")
+
+    assert selector.itemText(0) == "新明细表"
+
+
+def test_preview_summary_text_lists_anomalies_with_highlight_note(tab):
+    preview = AttendancePreview(
+        1,
+        31,
+        0,
+        1,
+        {},
+        (),
+        anomalies=(
+            AttendanceAnomaly("张三", 3, "节假日加班未计算：无法识别上下班时间"),
+            AttendanceAnomaly("李四", 0, "原有节假日加班不是有效时长，未累计"),
+            AttendanceAnomaly("王五", 4, "节假日加班未计算：无法识别上下班时间"),
+            AttendanceAnomaly("赵六", 5, "节假日加班未计算：无法识别上下班时间"),
+        ),
+    )
+
+    text = AttendanceTab._preview_summary_text(preview)
+
+    assert "数据异常 4 条" in text
+    assert "张三 3 日" in text
+    assert "李四 原有节假日加班" in text
+    assert "另 1 条" in text
+    assert "标黄" in text
+
+
+def test_generate_dialog_lists_anomalies(tab, monkeypatch):
+    messages = []
+    monkeypatch.setattr(
+        "file_toolbox.gui.dialogs.attendance_tab.QMessageBox.information",
+        lambda *args: messages.append(args),
+    )
+    result = AttendanceResult(
+        tab._build_request().output_path,
+        1,
+        31,
+        {},
+        (),
+        anomalies=(AttendanceAnomaly("刘奇", 24, "节假日前一日记录不全，未参与跨夜加班计算"),),
+    )
+
+    tab._on_generate_ok(result)
+
+    assert messages
+    assert "刘奇 24 日" in messages[0][2]
+    assert "标黄" in messages[0][2]
 
 
 def test_holiday_field_binds_request_and_invalidates_preview(tab):

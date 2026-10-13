@@ -15,10 +15,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from file_toolbox.core.attendance.types import (
     AttendancePlan,
+    AttendancePostAction,
     AttendancePreview,
     AttendanceRequest,
     AttendanceRule,
@@ -34,6 +35,14 @@ from file_toolbox.core.attendance.types import (
 )
 
 MappingRole = Literal["detail", "summary", "legacy"]
+PostActionRole = Literal["detail", "summary"]
+
+# 后处理表格下拉框的显示文案;数据值与 AttendancePostAction.kind 一致。
+POST_ACTION_KIND_LABELS: tuple[tuple[str, str], ...] = (
+    ("insert_rows", "增加行"),
+    ("delete_rows", "删除行"),
+    ("write", "写入内容"),
+)
 
 _INVALID_FILENAME_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -82,6 +91,30 @@ class MappingSelection:
         return self.legacy_sheet.strip()
 
 
+@dataclass(frozen=True)
+class PostActionSelection:
+    """汇总后处理行的编辑态:目标 Sheet 角色、操作与参数均以文本编辑。"""
+
+    role: PostActionRole = "detail"
+    kind: str = "insert_rows"
+    row: str = ""
+    count: str = ""
+    cell: str = ""
+    content: str = ""
+
+
+def post_action_selection(action: AttendancePostAction) -> PostActionSelection:
+    """把方案中的后处理动作转换回表格编辑行;与操作类型无关的列留空。"""
+    return PostActionSelection(
+        role=cast(PostActionRole, action.sheet_role),
+        kind=action.kind,
+        row=str(action.target.row) if action.kind != "write" else "",
+        count=str(action.count) if action.kind != "write" else "",
+        cell=action.target.address if action.kind == "write" else "",
+        content=action.content if action.kind == "write" else "",
+    )
+
+
 @dataclass
 class AttendanceFormState:
     """考勤表单的全部可编辑字段与预览调整状态(无 Qt,页面控件只做绑定)。"""
@@ -126,6 +159,7 @@ class AttendanceFormState:
     # 配置表内容(小表格控件编辑后同步进来)
     mappings: tuple[MappingSelection, ...] = ()
     rules: tuple[AttendanceRule, ...] = field(default_factory=default_rules)
+    post_actions: tuple[PostActionSelection, ...] = ()
     # 预览调整(以状态为权威,不从控件文字/固定列号回收)
     employee_group_overrides: tuple[EmployeeGroupOverride, ...] = ()
     group_sheet_configs: tuple[GroupSheetConfig, ...] = ()
@@ -205,6 +239,7 @@ def apply_plan_to_state(state: AttendanceFormState, plan: AttendancePlan) -> Non
         for mapping in plan.mappings
     )
     state.rules = plan.rules
+    state.post_actions = tuple(post_action_selection(action) for action in plan.post_actions)
 
 
 def _build_mappings(state: AttendanceFormState) -> tuple[CellMapping, ...]:
@@ -234,6 +269,54 @@ def _build_rules(state: AttendanceFormState) -> tuple[AttendanceRule, ...]:
         result.append(AttendanceRule(pattern, rule.output.strip(), rule.enabled))
     if not result:
         raise ValueError("至少需要一条判定规则")
+    return tuple(result)
+
+
+def _positive_int(value: str, label: str) -> int:
+    token = value.strip()
+    if not token.isdecimal() or int(token) < 1:
+        raise ValueError(f"{label}必须是大于 0 的整数")
+    return int(token)
+
+
+def _build_post_actions(state: AttendanceFormState) -> tuple[AttendancePostAction, ...]:
+    result: list[AttendancePostAction] = []
+    for row, selection in enumerate(state.post_actions):
+        label = f"第 {row + 1} 条后处理"
+        if (
+            not selection.row.strip()
+            and not selection.cell.strip()
+            and not selection.content.strip()
+        ):
+            continue
+        kind = selection.kind
+        if kind not in ("insert_rows", "delete_rows", "write"):
+            raise ValueError(f"{label}类型无效")
+        if kind == "write":
+            if not selection.cell.strip():
+                raise ValueError(f"{label}需要填写目标单元格")
+            result.append(
+                AttendancePostAction(
+                    "write",
+                    selection.role,
+                    CellRef.parse(selection.cell),
+                    1,
+                    selection.content,
+                )
+            )
+        else:
+            count = (
+                _positive_int(selection.count, f"{label}的行数") if selection.count.strip() else 1
+            )
+            result.append(
+                AttendancePostAction(
+                    kind,
+                    selection.role,
+                    CellRef(_positive_int(selection.row, f"{label}的行号"), 1),
+                    count,
+                    "",
+                )
+            )
     return tuple(result)
 
 
@@ -288,6 +371,7 @@ def build_plan(state: AttendanceFormState) -> AttendancePlan:
         employee_group_overrides=(() if roster is not None else state.employee_group_overrides),
         group_sheet_configs=state.group_sheet_configs,
         roster=roster,
+        post_actions=_build_post_actions(state),
     )
 
 

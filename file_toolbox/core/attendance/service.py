@@ -23,6 +23,7 @@ from file_toolbox.core.attendance.overtime import add_holiday_overtime
 from file_toolbox.core.attendance.roster import resolve_roster
 from file_toolbox.core.attendance.rules import classify, compile_rules, render_content
 from file_toolbox.core.attendance.types import (
+    AttendanceAnomaly,
     AttendancePlan,
     AttendancePreview,
     AttendanceRequest,
@@ -34,6 +35,7 @@ from file_toolbox.core.attendance.types import (
     GroupSheetConfig,
     PreparedAttendance,
     PreparedGroup,
+    PreparedPostAction,
     SourceAttendance,
     UnmatchedAttendance,
 )
@@ -129,6 +131,7 @@ class AttendanceService:
             group_counts=prepared.preview.group_counts,
             target_sheets=prepared.preview.target_sheets,
             warnings=prepared.preview.warnings,
+            anomalies=prepared.preview.anomalies,
         )
         if self._history_store is not None:
             try:
@@ -150,6 +153,7 @@ class AttendanceService:
                             else None
                         ),
                         "excluded_count": prepared.preview.excluded_count,
+                        "anomaly_count": len(prepared.preview.anomalies),
                     },
                 )
             except Exception as exc:  # noqa: BLE001 - 输出已提交，历史只能降级为警告
@@ -164,6 +168,7 @@ class AttendanceService:
                         *result.warnings,
                         f"结果已生成，但历史记录保存失败: {exc}",
                     ),
+                    anomalies=result.anomalies,
                 )
         return result
 
@@ -237,6 +242,7 @@ class AttendanceService:
         unmatched: list[UnmatchedAttendance] = []
         counts: Counter[str] = Counter()
         prepared_groups: list[PreparedGroup] = []
+        anomalies: list[AttendanceAnomaly] = []
         try:
             for group_name, employees in employee_groups.items():
                 departments = {
@@ -245,13 +251,16 @@ class AttendanceService:
                     if employee.department.strip()
                 }
                 group_department = next(iter(departments), "") if len(departments) == 1 else ""
-                group_source = SourceAttendance(
-                    tuple(
-                        add_holiday_overtime(employee, request.holiday_days)
-                        for employee in employees
-                    ),
-                    group_department,
-                )
+                adjusted: list[EmployeeAttendance] = []
+                group_anomalies: list[AttendanceAnomaly] = []
+                for employee in employees:
+                    adjusted_employee, employee_anomalies = add_holiday_overtime(
+                        employee, request.holiday_days
+                    )
+                    adjusted.append(adjusted_employee)
+                    group_anomalies.extend(employee_anomalies)
+                anomalies.extend(group_anomalies)
+                group_source = SourceAttendance(tuple(adjusted), group_department)
                 symbols = self._classify_group(
                     group_source, compiled, counts, unmatched, request.holiday_days
                 )
@@ -265,6 +274,15 @@ class AttendanceService:
                     context.day_count,
                     group_aliases.get(group_name, ""),
                 )
+                post_actions = self._group_post_actions(
+                    request,
+                    group_name,
+                    detail_sheet,
+                    summary_sheet,
+                    context.day_count,
+                    group_department,
+                    group_aliases.get(group_name, ""),
+                )
                 prepared_groups.append(
                     PreparedGroup(
                         attendance_group=group_name,
@@ -273,6 +291,8 @@ class AttendanceService:
                         detail_sheet=detail_sheet,
                         summary_sheet=summary_sheet,
                         mapping_values=mapping_values,
+                        anomalies=tuple(group_anomalies),
+                        post_actions=post_actions,
                     )
                 )
             global_mapping_values = self._global_mapping_values(request, source, context.day_count)
@@ -303,6 +323,7 @@ class AttendanceService:
             roster_path=(
                 request.plan.roster.workbook_path if request.plan.roster is not None else None
             ),
+            anomalies=tuple(anomalies),
         )
         return PreparedAttendance(
             groups=tuple(prepared_groups),
@@ -534,6 +555,43 @@ class AttendanceService:
                 )
             )
         return tuple(values)
+
+    @classmethod
+    def _group_post_actions(
+        cls,
+        request: AttendanceRequest,
+        group_name: str,
+        detail_sheet: str,
+        summary_sheet: str,
+        day_count: int,
+        department: str,
+        group_alias: str,
+    ) -> tuple[PreparedPostAction, ...]:
+        if not request.plan.post_actions:
+            return ()
+        return tuple(
+            PreparedPostAction(
+                kind=action.kind,
+                sheet_role=action.sheet_role,
+                target=action.target,
+                count=action.count,
+                content=(
+                    render_content(
+                        action.content,
+                        year=request.year,
+                        month=request.month,
+                        last_day=day_count,
+                        department=department,
+                        attendance_group=group_name,
+                        roster_group=group_name if request.plan.roster is not None else "",
+                        group_alias=group_alias,
+                    )
+                    if action.kind == "write"
+                    else ""
+                ),
+            )
+            for action in request.plan.post_actions
+        )
 
     @classmethod
     def _global_mapping_values(

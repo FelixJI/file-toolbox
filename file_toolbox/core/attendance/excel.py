@@ -43,6 +43,8 @@ BASE_DATE_COLUMNS = 30
 OVERTIME_COLUMN_COUNT = 3
 SUMMARY_OVERTIME_COLUMN_OFFSET = 15
 MAX_EMPLOYEES = 1000
+# COM 颜色是 BGR 整数:0x00FFFF 即黄色,用于标记异常数据单元格。
+ANOMALY_HIGHLIGHT_COLOR = 0xFFFF
 
 
 class AttendanceExcelAdapter(Protocol):
@@ -409,6 +411,8 @@ class ExcelComAdapter:
                 sheet = _excel_call(lambda sheet_name: workbook.Worksheets(sheet_name), sheet_name)
                 _write_mapping(sheet, cell_ref, value)
             _raise_if_cancelled(cancel_check)
+            _apply_post_actions(workbook, prepared, cancel_check)
+            _raise_if_cancelled(cancel_check)
             _excel_call(lambda: app.CalculateFullRebuild())
             _excel_call(lambda: workbook.Save())
 
@@ -559,6 +563,7 @@ def _write_group(
         if sheet_name not in {group.detail_sheet, group.summary_sheet}:
             raise ValueError(f"分组映射目标工作表无效: {sheet_name}")
         _write_mapping(target, cell_ref, value)
+    _highlight_anomalies(detail, summary, plan, group)
     _verify_summary_formula(
         summary,
         group.detail_sheet,
@@ -566,6 +571,64 @@ def _write_group(
         plan.target.summary_name_start,
         day_count,
     )
+
+
+def _highlight_anomalies(
+    detail: Any, summary: Any, plan: AttendancePlan, group: PreparedGroup
+) -> None:
+    """按异常定位标黄输出单元格:按日异常标明细矩阵,无日异常标汇总节假日加班列。"""
+    if not group.anomalies:
+        return
+    matrix = plan.target.detail_matrix_start
+    overtime = plan.target.summary_name_start.offset(columns=SUMMARY_OVERTIME_COLUMN_OFFSET)
+    holiday_column = overtime.column + OVERTIME_COLUMN_COUNT - 1
+    for anomaly in group.anomalies:
+        for index, employee in enumerate(group.source.employees):
+            if employee.name != anomaly.employee_name:
+                continue
+            if anomaly.day >= 1:
+                cell = _excel_call(
+                    lambda row, column: detail.Cells(row, column),
+                    matrix.row + index,
+                    matrix.column + anomaly.day - 1,
+                )
+            else:
+                cell = _excel_call(
+                    lambda row, column: summary.Cells(row, column),
+                    overtime.row + index,
+                    holiday_column,
+                )
+            _excel_call(lambda cell: setattr(cell.Interior, "Color", ANOMALY_HIGHLIGHT_COLOR), cell)
+
+
+def _apply_post_actions(
+    workbook: Any, prepared: PreparedAttendance, cancel_check: CancelCheck | None
+) -> None:
+    """在全部汇总内容写入后,按列表顺序对每组明细/汇总 Sheet 执行结构调整。
+
+    行插入/删除会移动后续行,同列表内动作按用户给定顺序依次执行;写入内容
+    使用准备阶段按组渲染后的文本。
+    """
+    for group in prepared.groups:
+        detail = _excel_call(lambda name: workbook.Worksheets(name), group.detail_sheet)
+        summary = _excel_call(lambda name: workbook.Worksheets(name), group.summary_sheet)
+        for action in group.post_actions:
+            _raise_if_cancelled(cancel_check)
+            sheet = detail if action.sheet_role == "detail" else summary
+            if action.kind == "insert_rows":
+                for _ in range(action.count):
+                    _excel_call(
+                        lambda sheet, row: sheet.Rows(row).Insert(CopyOrigin=0),
+                        sheet,
+                        action.target.row,
+                    )
+            elif action.kind == "delete_rows":
+                for _ in range(action.count):
+                    _excel_call(
+                        lambda sheet, row: sheet.Rows(row).Delete(), sheet, action.target.row
+                    )
+            else:
+                _write_mapping(sheet, action.target, action.content)
 
 
 def _open_workbook(app: Any, path: Path, *, read_only: bool) -> Any:

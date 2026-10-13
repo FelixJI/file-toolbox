@@ -1,4 +1,8 @@
-"""指定节假日按班次截取、半小时取整及原有加班累加契约。"""
+"""指定节假日按班次截取、半小时取整及原有加班累加契约。
+
+记录缺失或无法解析的日期不参与加班计算、不抛错:异常进入返回清单
+(employee/日号/原因),由上层提示并在结果表格中标黄。
+"""
 
 import pytest
 
@@ -38,9 +42,10 @@ from file_toolbox.core.attendance.types import EmployeeAttendance
 )
 def test_holiday_shift_hours(records, days, expected):
     employee = EmployeeAttendance("张三", "部门", records, overtime_hours=(1, 2, 3))
-    actual = add_holiday_overtime(employee, days)
+    actual, anomalies = add_holiday_overtime(employee, days)
     assert actual.overtime_hours == (1, 2, 3 + expected)
     assert employee.overtime_hours == (1, 2, 3)
+    assert anomalies == ()
 
 
 @pytest.mark.parametrize("base", ["", " 1.25 ", 1.25])
@@ -48,11 +53,9 @@ def test_existing_holiday_overtime_is_added_without_rounding(base):
     employee = EmployeeAttendance(
         "张三", "部门", ("正常(08:00,09:00)",), overtime_hours=("", 2, base)
     )
-    assert add_holiday_overtime(employee, (1,)).overtime_hours == (
-        "",
-        2,
-        (float(base) if base else 0) + 1,
-    )
+    actual, anomalies = add_holiday_overtime(employee, (1,))
+    assert actual.overtime_hours == ("", 2, (float(base) if base else 0) + 1)
+    assert anomalies == ()
 
 
 @pytest.mark.parametrize(
@@ -67,23 +70,52 @@ def test_existing_holiday_overtime_is_added_without_rounding(base):
         "长白班:旷工\n(-)\n补卡 08:00",
         "长白班:缺卡\n（08：00）",
         "打卡 08:00,09:00\n补卡(10:00,11:00)",
+        "正常\n(19:55)",
     ],
 )
-def test_invalid_punches_fail_with_employee_and_day(raw):
-    with pytest.raises(ValueError, match="张三.*1 日"):
-        add_holiday_overtime(EmployeeAttendance("张三", "部门", (raw,)), (1,))
+def test_invalid_holiday_punches_report_anomaly_without_raising(raw):
+    employee = EmployeeAttendance("张三", "部门", (raw,), overtime_hours=(1, 2, 3))
+
+    actual, anomalies = add_holiday_overtime(employee, (1,))
+
+    assert actual.overtime_hours == (1, 2, 3)
+    assert len(anomalies) == 1
+    assert anomalies[0].employee_name == "张三"
+    assert anomalies[0].day == 1
+    assert "节假日加班未计算" in anomalies[0].message
 
 
-def test_pre_holiday_day_error_explains_overnight_scope():
+def test_pre_holiday_incomplete_record_reports_anomaly_and_skips_overnight():
+    employee = EmployeeAttendance("张三", "部门", ("正常\n(19:55)", "休息"))
+
+    actual, anomalies = add_holiday_overtime(employee, (2,))
+
+    assert actual.overtime_hours == ("", "", "")
+    assert len(anomalies) == 1
+    assert anomalies[0].day == 1
+    assert "节假日前一日记录不全" in anomalies[0].message
+    assert "无法识别上下班时间" in anomalies[0].message
+
+
+def test_pre_holiday_day_anomaly_explains_overnight_scope():
     employee = EmployeeAttendance("张三", "部门", ("正常(08:00)", "休息"))
-    with pytest.raises(ValueError, match=r"1 日（节假日前一日，用于跨夜班次）"):
-        add_holiday_overtime(employee, (2,))
+
+    _, anomalies = add_holiday_overtime(employee, (2,))
+
+    assert len(anomalies) == 1
+    assert anomalies[0].employee_name == "张三"
+    assert anomalies[0].day == 1
+    assert "未参与跨夜加班计算" in anomalies[0].message
 
 
-def test_holiday_day_error_keeps_original_wording():
+def test_holiday_day_anomaly_keeps_original_wording():
     employee = EmployeeAttendance("张三", "部门", ("正常(08:00)",))
-    with pytest.raises(ValueError, match=r"1 日节假日加班计算失败"):
-        add_holiday_overtime(employee, (1,))
+
+    _, anomalies = add_holiday_overtime(employee, (1,))
+
+    assert len(anomalies) == 1
+    assert "节假日加班未计算" in anomalies[0].message
+    assert "无法识别上下班时间" in anomalies[0].message
 
 
 @pytest.mark.parametrize("base", ["未知", "NaN", "Infinity", -1])
@@ -91,10 +123,31 @@ def test_invalid_existing_overtime_is_not_silently_replaced(base):
     employee = EmployeeAttendance(
         "张三", "部门", ("正常(08:00,09:00)",), overtime_hours=(0, 0, base)
     )
-    with pytest.raises(ValueError, match="原有节假日加班"):
-        add_holiday_overtime(employee, (1,))
+
+    actual, anomalies = add_holiday_overtime(employee, (1,))
+
+    assert actual.overtime_hours == (0, 0, base)
+    assert len(anomalies) == 1
+    assert anomalies[0].day == 0
+    assert "原有节假日加班不是有效时长" in anomalies[0].message
+    assert "未累计" in anomalies[0].message
 
 
 def test_missing_record_is_not_silently_ignored():
-    with pytest.raises(ValueError, match="缺少当日考勤"):
-        add_holiday_overtime(EmployeeAttendance("张三", "部门", ()), (1,))
+    employee = EmployeeAttendance("张三", "部门", (), overtime_hours=(1, 2, 3))
+
+    actual, anomalies = add_holiday_overtime(employee, (1,))
+
+    assert actual.overtime_hours == (1, 2, 3)
+    assert anomalies[0].day == 1
+    assert "缺少当日考勤记录" in anomalies[0].message
+
+
+def test_missing_pre_holiday_record_reports_anomaly_for_overnight_day():
+    employee = EmployeeAttendance("张三", "部门", (), overtime_hours=(1, 2, 3))
+
+    _, anomalies = add_holiday_overtime(employee, (2,))
+
+    assert {anomaly.day for anomaly in anomalies} == {1, 2}
+    assert any("节假日前一日缺少考勤记录" in anomaly.message for anomaly in anomalies)
+    assert any("缺少当日考勤记录" in anomaly.message for anomaly in anomalies)
