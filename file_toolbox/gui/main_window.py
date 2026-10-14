@@ -557,10 +557,10 @@ class MainWindow(QMainWindow):
         elif target:
             message = (
                 f"上次更新未确认完成: 当前 v{current}，目标 v{target}；"
-                "如仍为旧版请到“更新”页面重新检查更新"
+                "如仍为旧版请在“关于”页的软件更新区域重新检查更新"
             )
         else:
-            message = "上次更新结果未知，请到“更新”页面检查更新确认当前版本"
+            message = "上次更新结果未知，请在“关于”页的软件更新区域检查更新确认当前版本"
         _logger.info("更新对账: %s (sdk_available=%s)", message, state.available)
         self._startup_outcome = message
         self.statusBar().showMessage(message, 15000)

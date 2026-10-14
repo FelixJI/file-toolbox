@@ -45,7 +45,7 @@ class UpdateBanner(QPushButton):
         self.setFlat(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("打开更新页面")
+        self.setToolTip("打开“关于”页的软件更新区域")
         self.setStyleSheet(
             "QPushButton { color: #0969da; padding: 2px 8px; border: none; "
             "background: transparent; text-decoration: underline; }"
