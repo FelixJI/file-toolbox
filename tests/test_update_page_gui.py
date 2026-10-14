@@ -359,6 +359,43 @@ def test_banner_click_navigates_without_download(app, monkeypatch, tmp_path):
     assert win._download_request is None
 
 
+def test_banner_click_scrolls_update_panel_into_view(app, monkeypatch, tmp_path):
+    """横幅导航把更新面板滚入视野:切页与同页停留两种情形都立即可见(AC1)。"""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QGroupBox
+
+    win, coordinator = _window_with_available(app, monkeypatch, tmp_path)
+    win.resize(1000, 460)
+    win.show()
+    app.processEvents()
+    win._on_update_checked(_available("8.0.0"))
+    win._tabs.setCurrentIndex(10)  # 关于页
+    about = win._about_tab
+    assert about is not None
+    boxes = {b.title(): b for b in about.findChildren(QGroupBox)}
+    boxes["更新日志(点击展开)"].setChecked(True)  # 展开后页面下方内容高于视口
+    app.processEvents()
+    scroll = about._scroll
+    bar = scroll.verticalScrollBar()
+    assert bar.maximum() > 0  # 关于页内容超出视口
+
+    def _panel_top_in_view() -> bool:
+        top = about.update_panel.mapTo(scroll.viewport(), QPoint(0, 0)).y()
+        return 0 <= top <= scroll.viewport().height()
+
+    bar.setValue(bar.maximum())  # 停在页面底部(更新日志/快捷方式区)
+    assert not _panel_top_in_view()
+    win._update_banner.click()  # 情形一:横幅切页导航
+    app.processEvents()
+    assert _panel_top_in_view()
+
+    bar.setValue(bar.maximum())  # 已在关于页、再次停留底部
+    win._update_banner.click()  # 情形二:同页点击横幅仍有滚动反馈
+    app.processEvents()
+    assert _panel_top_in_view()
+    assert coordinator.download_calls == 0  # 导航绝不触发下载
+
+
 def test_about_page_hosts_update_panel(app, monkeypatch, tmp_path):
     """关于页直接内嵌更新面板:进入关于页即可用更新功能,无需二次导航(AC1)。"""
     win, coordinator = _window_with_available(app, monkeypatch, tmp_path)

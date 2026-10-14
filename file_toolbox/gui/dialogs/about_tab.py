@@ -7,7 +7,7 @@ QWidget 面板使用);本页整体包进滚动区,窗口缩小后上下滚动查
 
 import platform
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QFrame,
@@ -47,6 +47,7 @@ class AboutTab(QWidget):
         root = QVBoxLayout(content)
         scroll.setWidget(content)
         outer.addWidget(scroll)
+        self._scroll: QScrollArea = scroll
 
         # --- 标题区 ---
         title = QLabel(metadata.APP_NAME)
@@ -172,6 +173,23 @@ class AboutTab(QWidget):
     def _copy_repo_url(self) -> None:
         QGuiApplication.clipboard().setText(metadata.REPO_URL)
         self._status_lbl.setText("已复制开源地址到剪贴板")
+
+    # --- 更新面板导航定位 ---
+    def ensure_update_visible(self) -> None:
+        """把内嵌更新面板滚入可视区域(横幅等导航入口在切页后调用)。
+
+        延迟到下一轮事件循环:切页时 QScrollArea 的内容尺寸/滚动范围要等
+        布局激活才确定,同步滚动会被 clamp 到旧范围。已在可视区域时同样
+        顶对齐,让主动作行(检查/下载)最先进入视野。
+        """
+        QTimer.singleShot(0, self, self._scroll_update_into_view)
+
+    def _scroll_update_into_view(self) -> None:
+        content = self._scroll.widget()
+        if content is None:
+            return
+        target = self.update_panel.mapTo(content, QPoint(0, 0)).y()
+        self._scroll.verticalScrollBar().setValue(max(0, target - 12))
 
     @staticmethod
     def _open_log_directory() -> None:

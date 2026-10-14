@@ -140,6 +140,31 @@ def test_about_tab_content_is_scrollable(app):
     assert content is not None and content.isAncestorOf(tab.update_panel)
 
 
+def test_about_tab_ensure_update_visible_scrolls_into_view(app):
+    """导航定位:停在页面底部(展开的更新日志区)时把更新面板顶对齐滚入视口。"""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QGroupBox
+
+    tab = AboutTab()
+    tab.resize(640, 420)
+    tab.show()
+    boxes = {b.title(): b for b in tab.findChildren(QGroupBox)}
+    boxes["更新日志(点击展开)"].setChecked(True)  # 展开后页面下方内容高于视口
+    app.processEvents()
+    scroll = tab._scroll
+    bar = scroll.verticalScrollBar()
+    assert bar.maximum() > 0  # 内容超出视口,确有滚动空间
+
+    bar.setValue(bar.maximum())
+    top_before = tab.update_panel.mapTo(scroll.viewport(), QPoint(0, 0)).y()
+    assert top_before < 0  # 停在底部:面板在视口上方不可见
+
+    tab.ensure_update_visible()
+    app.processEvents()  # singleShot(0) 定位在布局激活后执行
+    top_after = tab.update_panel.mapTo(scroll.viewport(), QPoint(0, 0)).y()
+    assert 0 <= top_after <= scroll.viewport().height()
+
+
 def test_about_tab_tech_and_changelog_collapsed_by_default(app):
     """技术路线与完整更新日志为次要长内容,默认真折叠(内容隐藏)。"""
     from PySide6.QtWidgets import QGroupBox, QWidget

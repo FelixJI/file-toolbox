@@ -345,10 +345,14 @@ class MainWindow(QMainWindow):
         """横幅等入口统一导航到关于页的更新面板,绝不直接启动下载。
 
         关于页位置由登记中的稳定 ID 解析(插入/重排工具后自动跟随),
-        不依赖固定标签序号。
+        不依赖固定标签序号。切换(或本就在关于页)后把更新面板滚入可视
+        区域:页面停留在下方时也能立刻看到检查/下载入口。
         """
         if self._update_entry_index >= 0:
             self._tabs.setCurrentIndex(self._update_entry_index)
+        about = self._about_tab
+        if about is not None:
+            about.ensure_update_visible()
 
     def _start_download(self) -> None:
         """更新面板"下载并更新" → 确认后锁业务页并向 worker 投递下载请求。
