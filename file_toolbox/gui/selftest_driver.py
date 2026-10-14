@@ -245,7 +245,7 @@ class SelftestUpdateCoordinator:
     """fake 更新协调器:check 结果可编程;download 阻塞并尊重真实取消门。
 
     ``download_and_apply`` 在 worker 线程循环检查 ``request.check_cancelled()``,
-    场景经真实 UI(更新页取消按钮)取消后,UpdateCancelled 由 worker 转为
+    场景经真实 UI(更新面板取消按钮)取消后,UpdateCancelled 由 worker 转为
     CANCELLED 终态;``release`` 供异常收尾放行,避免悬挂 worker 线程。
     """
 
@@ -698,7 +698,7 @@ def _scenario_replace_pure(ctx: _SelftestContext) -> ScenarioOutcome:
 
 
 def _scenario_update_mutex(ctx: _SelftestContext) -> ScenarioOutcome:
-    """fake 更新互斥:真实检查→横幅→更新页→下载期间业务锁定→取消→解锁。"""
+    """fake 更新互斥:真实检查→横幅→关于页更新面板→下载期间业务锁定→取消→解锁。"""
     window = ctx.window
     coordinator = ctx.coordinator
     coordinator.check_result = UpdateCheckResult(
@@ -716,7 +716,7 @@ def _scenario_update_mutex(ctx: _SelftestContext) -> ScenarioOutcome:
         ),
         _WAIT_FAST_S,
     )
-    window._update_banner.click()  # 横幅 → 打开更新页(仅导航,不下载)
+    window._update_banner.click()  # 横幅 → 打开关于页更新面板(仅导航,不下载)
     _wait_until(ctx.app, lambda: window._update_tab is not None, _WAIT_FAST_S)
     window._start_download()  # 确认框自动 Apply
     _wait_until(ctx.app, lambda: coordinator.download_calls == 1, _WAIT_FAST_S)
@@ -727,7 +727,7 @@ def _scenario_update_mutex(ctx: _SelftestContext) -> ScenarioOutcome:
         return _fail("update_mutex", "下载期间业务页未锁定")
     update_tab = window._update_tab
     if update_tab is None or not update_tab.isEnabled():
-        return _fail("update_mutex", "下载期间更新页不可用")
+        return _fail("update_mutex", "下载期间更新面板不可用")
     if update_tab.btn_cancel_update.isHidden():
         return _fail("update_mutex", "下载期间取消按钮不可见")
     update_tab.btn_cancel_update.click()  # 真实取消入口

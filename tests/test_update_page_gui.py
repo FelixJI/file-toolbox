@@ -1,8 +1,8 @@
-"""独立更新页(UpdateTab)行为与跨入口集成测试(#129)。
+"""更新面板(UpdateTab,内嵌关于页)行为与跨入口集成测试(#129)。
 
-覆盖:页面状态展示(检查/新版/失败/不支持/下载/应用/取消)、代理设置迁移、
-横幅与关于页"仅导航不下载"(AC1)、懒构造回放(AC3)、下载期间业务页锁定而
-更新页可操作(AC4)。
+覆盖:面板状态展示(检查/新版/失败/不支持/下载/应用/取消)、代理设置、
+横幅导航仅定位不下载(AC1)、懒构造回放(AC3)、下载期间业务页锁定而
+更新面板可操作(AC4)。
 """
 
 from __future__ import annotations
@@ -350,7 +350,7 @@ def _window_with_available(app, monkeypatch, tmp_path) -> tuple[MainWindow, Coun
 
 
 def test_banner_click_navigates_without_download(app, monkeypatch, tmp_path):
-    """右下角横幅点击 → 仅打开更新页;SDK 下载/apply 调用次数为 0(AC1)。"""
+    """右下角横幅点击 → 仅导航到关于页更新面板;SDK 下载/apply 调用次数为 0(AC1)。"""
     win, coordinator = _window_with_available(app, monkeypatch, tmp_path)
     win._on_update_checked(_available("8.0.0"))
     win._update_banner.click()
@@ -359,19 +359,19 @@ def test_banner_click_navigates_without_download(app, monkeypatch, tmp_path):
     assert win._download_request is None
 
 
-def test_about_button_navigates_without_download(app, monkeypatch, tmp_path):
-    """关于页"打开更新页面" → 仅导航;SDK 调用 0 次(AC1)。"""
+def test_about_page_hosts_update_panel(app, monkeypatch, tmp_path):
+    """关于页直接内嵌更新面板:进入关于页即可用更新功能,无需二次导航(AC1)。"""
     win, coordinator = _window_with_available(app, monkeypatch, tmp_path)
-    win._tabs.setCurrentIndex(11)  # 关于页
+    win._tabs.setCurrentIndex(10)  # 关于页(内嵌更新面板)
     about = win._about_tab
     assert about is not None
-    about.btn_open_update_page.click()
-    assert win._tabs.currentIndex() == 10
+    assert win._update_tab is about.update_panel
+    assert about.update_panel.btn_check_update.isEnabled() is True
     assert coordinator.download_calls == 0
 
 
 def test_update_page_reachable_without_new_version(app, monkeypatch, tmp_path):
-    """无新版/未检查时更新页仍可从正常导航进入(AC1)。"""
+    """无新版/未检查时关于页更新面板仍可正常进入(AC1)。"""
     monkeypatch.chdir(tmp_path)
     win = MainWindow(CountingCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
     win._tabs.setCurrentIndex(10)
@@ -432,7 +432,7 @@ def _wait_until(predicate, timeout: float = 5.0, pump: QApplication | None = Non
 
 
 def test_download_flow_locks_business_but_not_update_page(app, monkeypatch, tmp_path):
-    """下载期间:业务页禁用、更新页可操作、取消可用;容器不禁用(AC4)。"""
+    """下载期间:业务页禁用、更新面板可操作、取消可用;容器不禁用(AC4)。"""
     monkeypatch.chdir(tmp_path)
     coordinator = GatedCoordinator(_available("8.0.0"))
     win = MainWindow(coordinator)

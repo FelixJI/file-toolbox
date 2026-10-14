@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 class ToolCategory(StrEnum):
-    """工具分类:业务页参与业务锁与关闭收尾,系统页(更新/关于)保持可用。"""
+    """工具分类:业务页参与业务锁与关闭收尾,系统页(关于,内嵌更新面板)保持可用。"""
 
     BUSINESS = "business"
     SYSTEM = "system"
@@ -43,7 +43,7 @@ class OfficeAppNeed:
 
 
 # 系统页稳定 ID:主窗口导航/登记查找按 ID 定位,不依赖标签序号。
-UPDATE_TOOL_ID = "update"
+# 更新功能内嵌于关于页(update_tab.UpdateTab 面板),不再是独立标签页。
 ABOUT_TOOL_ID = "about"
 
 
@@ -295,15 +295,6 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         cli_command="markdown-convert",
         summary=_markdown_summary,
         requires_pandoc=True,  # 仅 docx 目标;xlsx 两种模式为纯库转换
-    ),
-    ToolSpec(
-        tool_id=UPDATE_TOOL_ID,
-        label="更新",
-        capability="更新",
-        gui_module="file_toolbox.gui.dialogs.update_tab",
-        gui_class="UpdateTab",
-        attr="_update_tab",
-        category=ToolCategory.SYSTEM,
     ),
     ToolSpec(
         tool_id=ABOUT_TOOL_ID,

@@ -114,31 +114,30 @@ def test_about_tab_opens_log_directory(app, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 更新入口:仅"打开更新页面"导航(检查/下载/代理已迁移至独立更新页)
+# 更新面板内嵌:检查/下载/代理控件随 UpdateTab 面板出现在关于页
 # ---------------------------------------------------------------------------
 
 
-def test_about_tab_has_open_update_page_button(app):
-    tab = AboutTab()
-    assert tab.btn_open_update_page.text() == "打开更新页面"
-
-
-def test_about_tab_open_update_page_emits_signal(app):
-    tab = AboutTab()
-    received: list = []
-    tab.open_update_page_requested.connect(lambda: received.append(1))
-    tab.btn_open_update_page.click()
-    assert received == [1]
-
-
-def test_about_tab_has_no_update_actions(app):
-    """关于页不再承载更新动作:无检查/下载按钮,也无代理输入控件。"""
+def test_about_tab_hosts_update_panel(app):
+    """关于页内嵌完整更新面板:检查/下载/取消按钮与代理输入随面板出现。"""
     from PySide6.QtWidgets import QLineEdit
 
     tab = AboutTab()
     buttons = [b.text() for b in tab.findChildren(QPushButton)]
-    assert not any(("检查更新" in t or "立即更新" in t or "下载并更新" in t) for t in buttons)
-    assert tab.findChild(QLineEdit) is None
+    assert "检查更新" in buttons and "下载并更新" in buttons and "取消" in buttons
+    assert tab.findChild(QLineEdit) is not None  # 代理设置输入随面板内嵌
+
+
+def test_about_tab_content_is_scrollable(app):
+    """关于页整体内容(含更新面板)包进滚动区:窗口缩小后上下滚动查看。"""
+    from PySide6.QtWidgets import QScrollArea
+
+    tab = AboutTab()
+    scroll = tab.findChild(QScrollArea)
+    assert scroll is not None
+    assert scroll.widgetResizable() is True
+    content = scroll.widget()
+    assert content is not None and content.isAncestorOf(tab.update_panel)
 
 
 def test_about_tab_tech_and_changelog_collapsed_by_default(app):

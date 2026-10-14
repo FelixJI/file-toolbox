@@ -173,7 +173,7 @@ class TestUpdateWorker:
 class TestMainWindowIntegration:
     def test_available_check_updates_page_and_banner(self, app):
         win = MainWindow(FakeCoordinator(_available("8.0.0")))
-        win._tabs.setCurrentIndex(10)  # 独立更新页(懒构造 Tab)
+        win._tabs.setCurrentIndex(10)  # 关于页(懒构造,内嵌更新面板)
         win._update_worker.do_check()
         app.processEvents()
         assert "8.0.0" in win._update_tab._status_lbl.text()
@@ -216,9 +216,9 @@ class TestMainWindowIntegration:
         assert win._pending_update is None
 
     def test_auto_result_reaches_already_open_update_page(self, app):
-        """自动检查结果到达时,已打开的更新页实时回放(不再只服务手动检查)。"""
+        """自动检查结果到达时,已打开的更新面板实时回放(不再只服务手动检查)。"""
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
-        win._tabs.setCurrentIndex(10)  # 更新页已构造
+        win._tabs.setCurrentIndex(10)  # 关于页更新面板已构造
         assert win._update_tab is not None
 
         win._on_update_checked(_available("8.0.0"))
@@ -231,12 +231,12 @@ class TestMainWindowIntegration:
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
         win._on_update_checked(UpdateCheckResult(UpdateCheckStatus.LATEST))
 
-        win._tabs.setCurrentIndex(10)  # 懒构造更新页
+        win._tabs.setCurrentIndex(10)  # 懒构造关于页更新面板
 
         assert "最新" in win._update_tab._status_lbl.text()
 
     def test_unsupported_check_result_shown_on_update_page(self, app):
-        """UNSUPPORTED 形态(源码/开发运行)在更新页给出准确原因与横幅隐藏。"""
+        """UNSUPPORTED 形态(源码/开发运行)在更新面板给出准确原因与横幅隐藏。"""
         win = MainWindow(FakeCoordinator(UpdateCheckResult(UpdateCheckStatus.LATEST)))
         win._tabs.setCurrentIndex(10)
         win._on_update_checked(_available("8.0.0"))
@@ -288,7 +288,7 @@ class TestUpdateOutcomeReconciliation:
             _available("8.0.0"), apply_result or UpdateApplyResult(UpdateApplyStatus.APPLY_STARTED)
         )
         win = MainWindow(coordinator)
-        win._tabs.setCurrentIndex(10)  # 下载只能从更新页发起
+        win._tabs.setCurrentIndex(10)  # 下载只能从更新面板发起
         monkeypatch.setattr(
             QMessageBox,
             "question",

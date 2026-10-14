@@ -421,7 +421,7 @@ def test_main_window_registers_markdown_tab(app, monkeypatch, tmp_path):
     assert win._tabs.widget(9) is win._markdown_tab
 
     win._tabs.setCurrentIndex(10)
-    assert win._tabs.tabText(10) == "更新"
+    assert win._tabs.tabText(10) == "关于"
     assert win.btn_history.isEnabled() is False
 
 
@@ -568,7 +568,7 @@ def test_deferred_close_waits_for_real_finished_and_keeps_outputs(tab, app, monk
 
 
 def test_markdown_tab_disabled_when_lazily_built_during_download(app, monkeypatch, tmp_path):
-    """下载锁期间懒构造的业务页(Markdown)按锁状态禁用,更新页保持可用(AC4)。"""
+    """下载锁期间懒构造的业务页(Markdown)按锁状态禁用,更新面板保持可用(AC4)。"""
     monkeypatch.chdir(tmp_path)
     from file_toolbox.gui.main_window import MainWindow
 
