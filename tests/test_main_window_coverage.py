@@ -67,12 +67,12 @@ def test_history_button_opens_current_tab_history(win, monkeypatch):
     assert opened == ["pdf"]
 
 
-def test_history_button_disabled_on_update_page(win):
+def test_history_button_disabled_on_about_page(win):
     win._tabs.setCurrentIndex(10)
     assert win.btn_history.isEnabled() is False
 
 
-def test_history_button_noop_on_update_page(win, monkeypatch):
+def test_history_button_noop_on_about_page(win, monkeypatch):
     dialog = MagicMock()
     monkeypatch.setattr("file_toolbox.gui.dialogs.history_dialog.HistoryDialog", dialog)
     win._tabs.setCurrentIndex(10)
@@ -93,7 +93,6 @@ def test_tab_tools_mapping(win):
         "plan_schedule",
         "markdown_convert",
         None,
-        None,
     ]
 
 
@@ -104,8 +103,8 @@ def test_only_first_tab_constructed_initially(win):
     assert win._replace_tab is None
     assert win._update_tab is None
     assert win._about_tab is None
-    assert win._tabs.count() == 12
-    assert [win._tabs.tabText(i) for i in range(12)] == [
+    assert win._tabs.count() == 11
+    assert [win._tabs.tabText(i) for i in range(11)] == [
         "重命名",
         "建文件夹",
         "生成PDF",
@@ -116,7 +115,6 @@ def test_only_first_tab_constructed_initially(win):
         "PDF排序",
         "计划排布",
         "Markdown转换",
-        "更新",
         "关于",
     ]
 
@@ -126,7 +124,7 @@ def test_lazy_tab_materialized_on_switch(win):
 
     win._tabs.setCurrentIndex(3)
     assert isinstance(win._replace_tab, ContentReplaceDialog)
-    assert win._tabs.count() == 12
+    assert win._tabs.count() == 11
     assert win._tabs.tabText(3) == "内容替换"
     assert win._tabs.widget(3) is win._replace_tab
     assert win._tabs.currentIndex() == 3
@@ -930,17 +928,17 @@ def _fixture_spec() -> ToolSpec:
 
 
 def test_fixture_insertion_keeps_update_navigation_by_stable_id(app, monkeypatch, tmp_path):
-    """插入业务工具后:更新页按稳定 ID 定位,历史按钮/页面顺序随登记变化。"""
+    """插入业务工具后:关于页(内嵌更新面板)按稳定 ID 定位,历史按钮/页面顺序随登记变化。"""
     monkeypatch.chdir(tmp_path)
     specs = list(TOOL_SPECS)
     specs.insert(3, _fixture_spec())
     win = MainWindow(LatestCoordinator(), specs=specs)
 
-    assert win._tabs.count() == 13
+    assert win._tabs.count() == 12
     assert win._tabs.tabText(3) == "夹具工具"
     assert win._tab_tools[3] == "fixture_tool"
-    # 更新/关于页被顺延,导航不依赖固定序号 10
-    assert win._update_tab_index == 11
+    # 关于页被顺延,导航不依赖固定序号 10
+    assert win._update_entry_index == 11
     win._open_update_page()
     assert win._tabs.currentIndex() == 11
     assert win.btn_history.isEnabled() is False
@@ -1008,42 +1006,34 @@ def test_fixture_tab_participates_in_shutdown(app, monkeypatch, tmp_path):
 
 
 def test_system_pages_relocated_still_wired_by_stable_id(app, monkeypatch, tmp_path):
-    """系统页移动到不同位置后仍按稳定 ID 接线:导航/历史/锁定全部正确(AC1)。"""
+    """关于页移到不同位置后仍按稳定 ID 接线:导航/历史/锁定/更新面板全部正确(AC1)。"""
     from file_toolbox.gui.dialogs.about_tab import AboutTab
 
     monkeypatch.chdir(tmp_path)
     specs = list(TOOL_SPECS)
-    update = next(s for s in specs if s.tool_id == "update")
     about = next(s for s in specs if s.tool_id == "about")
-    specs.remove(update)
     specs.remove(about)
-    specs.insert(1, update)  # 更新页挪到首屏业务页(重命名)之后
-    specs.append(about)  # 关于页挪到最后
+    specs.insert(1, about)  # 关于页(内嵌更新面板)挪到首屏业务页(重命名)之后
     win = MainWindow(LatestCoordinator(), specs=specs)
 
     # 业务首屏保持:首 Tab 仍是重命名并被构造
     assert win._tabs.tabText(0) == "重命名"
     assert isinstance(win._rename_tab, FileRenamerDialog)
-    assert win._update_tab_index == 1
+    assert win._update_entry_index == 1
 
-    # 更新页新位置:历史禁用,统一入口导航到位
+    # 关于页新位置:历史禁用,统一入口导航到位,更新面板随页接线
     win._tabs.setCurrentIndex(1)
-    assert win._update_tab is not None
+    assert isinstance(win._about_tab, AboutTab)
+    assert win._update_tab is win._about_tab.update_panel
     assert win.btn_history.isEnabled() is False
     win._tabs.setCurrentIndex(0)
     win._open_update_page()
     assert win._tabs.currentIndex() == 1
 
-    # 关于页新位置:「打开更新页面」按稳定 ID 导航到更新页
-    win._tabs.setCurrentIndex(win._tabs.count() - 1)
-    assert isinstance(win._about_tab, AboutTab)
-    win._about_tab.btn_open_update_page.click()
-    assert win._tabs.currentIndex() == 1
-
-    # 业务锁分类不随位置漂移:业务页禁用,系统页保持可用
+    # 业务锁分类不随位置漂移:业务页禁用,关于页(含更新面板)保持可用
     win._set_business_tabs_locked(True)
     assert win._rename_tab.isEnabled() is False
-    assert win._update_tab.isEnabled() is True and win._about_tab.isEnabled() is True
+    assert win._about_tab.isEnabled() is True and win._update_tab.isEnabled() is True
 
 
 def test_unopened_fixture_tab_survives_business_scan_and_close(app, monkeypatch, tmp_path):
@@ -1063,4 +1053,4 @@ def test_default_window_uses_production_registry(win):
     """未注入 specs 时使用生产登记:属性/顺序与登记一致。"""
     assert win._specs == TOOL_SPECS
     assert [win._tabs.tabText(i) for i in range(win._tabs.count())] == [s.label for s in TOOL_SPECS]
-    assert win._update_tab_index == 10
+    assert win._update_entry_index == 10
