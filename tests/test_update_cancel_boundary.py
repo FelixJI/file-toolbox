@@ -209,7 +209,7 @@ def win(app, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     manager = Manager()
     window = MainWindow(coordinator(manager))
-    window._tabs.setCurrentIndex(10)  # 下载只能从独立更新页发起(#129)
+    window._tabs.setCurrentIndex(10)  # 下载只能从关于页更新面板发起(#129)
     window._pending_update = window._update_worker._coordinator.check()
     return window
 
@@ -364,7 +364,7 @@ def test_gui_update_excludes_new_business_until_result(app, monkeypatch, tmp_pat
     manager = Manager()
     window = MainWindow(coordinator(manager))
     window._tabs.setCurrentIndex(6)
-    window._tabs.setCurrentIndex(10)  # 构造更新页:下载的唯一发起入口
+    window._tabs.setCurrentIndex(10)  # 构造关于页更新面板:下载的唯一发起入口
     window._pending_update = window._update_worker._coordinator.check()
     entered, release = Event(), Event()
 
@@ -383,7 +383,7 @@ def test_gui_update_excludes_new_business_until_result(app, monkeypatch, tmp_pat
     try:
         window._start_download()
         assert entered.wait(5)
-        # 容器保持可用(可切换查看),业务页被锁定且历史按钮禁用;更新页可操作
+        # 容器保持可用(可切换查看),业务页被锁定且历史按钮禁用;更新面板可操作
         assert window._tabs.isEnabled()
         assert not window._excel_merge_tab.isEnabled() and not window.btn_history.isEnabled()
         assert window._update_tab.isEnabled()

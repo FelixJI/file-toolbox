@@ -1,4 +1,4 @@
-"""File Toolbox 主窗口：QMainWindow + 10 个功能 Tab。"""
+"""File Toolbox 主窗口：QMainWindow + 10 个业务 Tab + 关于系统页(内嵌更新面板)。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, cast
 from PySide6.QtCore import QByteArray, QMetaObject, QRect, Qt, QThread, QTimer
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QMainWindow,
     QMessageBox,
     QStatusBar,
@@ -29,7 +28,6 @@ from file_toolbox.common.runtime import is_packaged_runtime
 from file_toolbox.common.tool_registry import (
     ABOUT_TOOL_ID,
     TOOL_SPECS,
-    UPDATE_TOOL_ID,
     ToolCategory,
     ToolSpec,
 )
@@ -79,7 +77,7 @@ def _construct_tab(factory: Callable[[], QWidget], name: str) -> QWidget:
 
 
 class MainWindow(QMainWindow):
-    """工具箱主窗口，10 个功能 Tab。"""
+    """工具箱主窗口，10 个业务 Tab + 关于系统页(内嵌更新面板)。"""
 
     def __init__(
         self,
@@ -95,35 +93,32 @@ class MainWindow(QMainWindow):
         # 不再依赖固定标签序号(插入/重排工具无需修改主窗口)。
         self._specs: tuple[ToolSpec, ...] = tuple(TOOL_SPECS if specs is None else specs)
         self._spec_by_index: dict[int, ToolSpec] = dict(enumerate(self._specs))
-        update_index = next(
-            (i for i, spec in enumerate(self._specs) if spec.tool_id == UPDATE_TOOL_ID), -1
+        # 更新面板内嵌关于页:横幅/导航的落点是关于页位置(按稳定 ID 解析)
+        about_index = next(
+            (i for i, spec in enumerate(self._specs) if spec.tool_id == ABOUT_TOOL_ID), -1
         )
-        self._update_tab_index = update_index
+        self._update_entry_index = about_index
 
         self._history = JsonHistoryStore()
 
         central = QWidget()
         layout = QVBoxLayout(central)
-        # 主区域不留外边距,避免标签栏上方出现一片空白带
+        # 主区域不留外边距/间距,标签栏直接贴顶,上方不再出现空白带
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 顶部:历史按钮(直接对应当前标签页,无需二次选择;右对齐)
-        top = QHBoxLayout()
-        top.setContentsMargins(9, 5, 9, 2)
-        top.addStretch(1)
-        self.btn_history = QToolButton()
-        self.btn_history.setText("历史")
-        self.btn_history.clicked.connect(self._open_history_for_current_tab)
-        top.addWidget(self.btn_history)
-        layout.addLayout(top)
-
-        # 10 个功能 Tab + 更新 + 关于:Tab 类与重依赖(pypdfium2/pypdf/chardet/cattrs)
-        # 均懒导入,首次构造某 Tab 时才 import;首屏只构造重命名 Tab。
+        # 10 个业务 Tab + 关于(内嵌更新面板):Tab 类与重依赖(pypdfium2/pypdf/
+        # chardet/cattrs)均懒导入,首次构造某 Tab 时才 import;首屏只构造重命名 Tab。
         # 打包形态下真实平台主窗口构造可达 ~1.7s,大头是首个控件初始化链
         # 之后的各 Tab 陆续构造;懒掉非首屏 Tab 让首帧只付首 Tab 的成本。
         tabs = QTabWidget()
         self._tabs = tabs
+        # 历史按钮挂在标签栏右上角(与标签同行):不再为它单列一行,
+        # 消除标签栏上方整条空白带。
+        self.btn_history = QToolButton()
+        self.btn_history.setText("历史")
+        self.btn_history.clicked.connect(self._open_history_for_current_tab)
+        tabs.setCornerWidget(self.btn_history, Qt.Corner.TopRightCorner)
         self._tab_error_message: str | None = None
         self._status_before_tab_error = ""
         self._rename_tab: FileRenamerDialog | None = None
@@ -245,29 +240,28 @@ class MainWindow(QMainWindow):
         self._tabs.insertTab(index, tab, label)
         self._tabs.setCurrentIndex(current)
         self._tabs.blockSignals(False)
-        if tool_spec.tool_id == UPDATE_TOOL_ID:
-            # 更新页是唯一的更新主动作入口:请求信号接主窗口既有更新链
-            update_tab = cast("UpdateTab", tab)
-            update_tab.check_requested.connect(self._on_check_requested)
-            update_tab.download_requested.connect(self._start_download)
-            update_tab.cancel_requested.connect(self._on_download_cancel)
+        if tool_spec.tool_id == ABOUT_TOOL_ID:
+            # 关于页承载完整更新面板:面板请求信号接主窗口既有更新链;
+            # 页面可能晚于状态创建,构造后回放启动对账、最近检查与进行中的下载。
+            about_tab = cast("AboutTab", tab)
+            panel = about_tab.update_panel
+            self._update_tab = panel
+            panel.check_requested.connect(self._on_check_requested)
+            panel.download_requested.connect(self._start_download)
+            panel.cancel_requested.connect(self._on_download_cancel)
             if self._business_tabs_locked:
-                update_tab.setEnabled(True)
+                about_tab.setEnabled(True)
             # 页面可能晚于状态创建:回放启动对账、最近检查与进行中的下载
-            update_tab.set_startup_outcome(self._startup_outcome)
+            panel.set_startup_outcome(self._startup_outcome)
             if self._last_check is not None:
-                update_tab.display_check_result(self._last_check)
+                panel.display_check_result(self._last_check)
             request = self._download_request
             if request is not None:
                 version = self._pending_update.version if self._pending_update else ""
-                update_tab.begin_download(version)
-                update_tab.set_download_progress(self._last_progress)
+                panel.begin_download(version)
+                panel.set_download_progress(self._last_progress)
                 if request.applying:
-                    update_tab.enter_apply_phase()
-        elif tool_spec.tool_id == ABOUT_TOOL_ID:
-            # 关于页只保留"打开更新页面"导航,不再承载检查/下载动作
-            about_tab = cast("AboutTab", tab)
-            about_tab.open_update_page_requested.connect(self._open_update_page)
+                    panel.enter_apply_phase()
 
     def _materialize_all_tabs(self) -> None:
         """立即构造全部懒 Tab(测试与预热场景使用)。"""
@@ -318,7 +312,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_check_requested(self) -> None:
-        """更新页请求检查更新:确保 worker 运行并投递 do_check。"""
+        """更新面板请求检查更新:确保 worker 运行并投递 do_check。"""
         if not self._update_worker.isRunning():
             # 非便携形态(pip/dev):按需启动 worker(自动检查不会启)
             self._update_worker.start()
@@ -348,18 +342,22 @@ class MainWindow(QMainWindow):
             self._update_tab.display_check_result(result)
 
     def _open_update_page(self) -> None:
-        """横幅/关于页入口统一导航到独立更新页,绝不直接启动下载。
+        """横幅等入口统一导航到关于页的更新面板,绝不直接启动下载。
 
-        更新页位置由登记中的稳定 ID 解析(插入/重排工具后自动跟随),
-        不依赖固定标签序号。
+        关于页位置由登记中的稳定 ID 解析(插入/重排工具后自动跟随),
+        不依赖固定标签序号。切换(或本就在关于页)后把更新面板滚入可视
+        区域:页面停留在下方时也能立刻看到检查/下载入口。
         """
-        if self._update_tab_index >= 0:
-            self._tabs.setCurrentIndex(self._update_tab_index)
+        if self._update_entry_index >= 0:
+            self._tabs.setCurrentIndex(self._update_entry_index)
+        about = self._about_tab
+        if about is not None:
+            about.ensure_update_visible()
 
     def _start_download(self) -> None:
-        """更新页"下载并更新" → 确认后锁业务页并向 worker 投递下载请求。
+        """更新面板"下载并更新" → 确认后锁业务页并向 worker 投递下载请求。
 
-        进度、校验提示与取消都承载在更新页内(#129),不再弹独立进度对话框。
+        进度、校验提示与取消都承载在关于页更新面板内(#129),不再弹独立进度对话框。
         """
         if (
             self._pending_update is None
@@ -390,7 +388,7 @@ class MainWindow(QMainWindow):
             return
         update_tab = self._update_tab
         if update_tab is None:
-            # 下载只能从更新页发起;防御懒构造态异常路径
+            # 下载只能从更新面板发起;防御懒构造态异常路径
             return
         self._set_business_tabs_locked(True)
         self.btn_history.setEnabled(False)
@@ -430,7 +428,7 @@ class MainWindow(QMainWindow):
             self._update_tab.enter_apply_phase()
 
     def _restore_retry_affordances(self) -> None:
-        """下载取消/失败后恢复重试入口(状态栏横幅 + 更新页/业务页)。"""
+        """下载取消/失败后恢复重试入口(状态栏横幅 + 更新面板/业务页)。"""
         if self._pending_update is not None:
             self._update_banner.show()
         if not self._close_requested:
@@ -445,7 +443,7 @@ class MainWindow(QMainWindow):
         """下载期间锁定业务页(不能开始新的业务写入),系统页保持可用。
 
         业务/系统页集合来自统一登记的分类;不整体禁用 Tab 容器:页面可切换
-        查看,更新页的进度与可取消阶段的取消按钮必须保持可用。此后懒构造的
+        查看,更新面板的进度与可取消阶段的取消按钮必须保持可用。此后懒构造的
         业务页也按当前锁状态初始化。
         """
         self._business_tabs_locked = locked
@@ -559,10 +557,10 @@ class MainWindow(QMainWindow):
         elif target:
             message = (
                 f"上次更新未确认完成: 当前 v{current}，目标 v{target}；"
-                "如仍为旧版请到“更新”页面重新检查更新"
+                "如仍为旧版请在“关于”页的软件更新区域重新检查更新"
             )
         else:
-            message = "上次更新结果未知，请到“更新”页面检查更新确认当前版本"
+            message = "上次更新结果未知，请在“关于”页的软件更新区域检查更新确认当前版本"
         _logger.info("更新对账: %s (sdk_available=%s)", message, state.available)
         self._startup_outcome = message
         self.statusBar().showMessage(message, 15000)

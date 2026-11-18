@@ -1,13 +1,13 @@
-"""关于 Tab:应用名/版本/能力简介、仓库与许可证、运行信息、更新日志与快捷方式。
+"""关于 Tab:应用名/版本/能力简介、仓库与许可证、运行信息、更新面板与快捷方式。
 
-更新检查、下载与代理设置集中在独立"更新"页(见 update_tab.py);本页只保留
-"打开更新页面"导航,不再承载任何更新动作。技术路线与完整更新日志为次要长
-内容,默认折叠,需要时展开。
+更新检查、下载与代理设置集中在内嵌更新面板(update_tab.UpdateTab 作为普通
+QWidget 面板使用);本页整体包进滚动区,窗口缩小后上下滚动查看。技术路线与
+完整更新日志为次要长内容,默认折叠,需要时展开。
 """
 
 import platform
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QFrame,
@@ -23,16 +23,16 @@ from PySide6.QtWidgets import (
 
 from file_toolbox.common import metadata, shortcuts
 from file_toolbox.common.paths import get_log_dir
+from file_toolbox.gui.dialogs.update_tab import UpdateTab
 
 
 class AboutTab(QWidget):
-    """关于界面 Tab(纯展示 + 快捷方式管理 + 更新页导航)。"""
-
-    # 用户点"打开更新页面"时请求主窗口切换到独立更新页(不触发任何更新动作)
-    open_update_page_requested = Signal()
+    """关于界面 Tab(展示 + 快捷方式管理 + 内嵌完整更新面板)。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        # 内嵌更新面板:主窗口经 self.update_panel 接线既有更新链并推送状态。
+        self.update_panel = UpdateTab(self)
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -47,6 +47,7 @@ class AboutTab(QWidget):
         root = QVBoxLayout(content)
         scroll.setWidget(content)
         outer.addWidget(scroll)
+        self._scroll: QScrollArea = scroll
 
         # --- 标题区 ---
         title = QLabel(metadata.APP_NAME)
@@ -93,15 +94,14 @@ class AboutTab(QWidget):
         info_layout.addLayout(log_row)
         root.addWidget(info_box)
 
-        # --- 更新入口:仅导航 ---
+        # --- 软件更新组:内嵌完整更新面板(检查/下载/取消 + 高级代理设置) ---
         update_box = QGroupBox("软件更新")
         update_layout = QVBoxLayout(update_box)
-        update_hint = QLabel("检查更新、下载与进度、更新源与代理设置都在“更新”页面。")
-        update_hint.setWordWrap(True)
-        update_layout.addWidget(update_hint)
-        self.btn_open_update_page = QPushButton("打开更新页面")
-        self.btn_open_update_page.clicked.connect(self._on_open_update_page)
-        update_layout.addWidget(self.btn_open_update_page)
+        panel_layout = self.update_panel.layout()
+        if panel_layout is not None:
+            # 面板自身布局默认 9px 外边距,嵌入分组框后避免双重内缩
+            panel_layout.setContentsMargins(0, 0, 0, 0)
+        update_layout.addWidget(self.update_panel)
         root.addWidget(update_box)
 
         # --- 技术路线组(次要长内容,默认折叠) ---
@@ -174,12 +174,26 @@ class AboutTab(QWidget):
         QGuiApplication.clipboard().setText(metadata.REPO_URL)
         self._status_lbl.setText("已复制开源地址到剪贴板")
 
+    # --- 更新面板导航定位 ---
+    def ensure_update_visible(self) -> None:
+        """把内嵌更新面板滚入可视区域(横幅等导航入口在切页后调用)。
+
+        延迟到下一轮事件循环:切页时 QScrollArea 的内容尺寸/滚动范围要等
+        布局激活才确定,同步滚动会被 clamp 到旧范围。已在可视区域时同样
+        顶对齐,让主动作行(检查/下载)最先进入视野。
+        """
+        QTimer.singleShot(0, self, self._scroll_update_into_view)
+
+    def _scroll_update_into_view(self) -> None:
+        content = self._scroll.widget()
+        if content is None:
+            return
+        target = self.update_panel.mapTo(content, QPoint(0, 0)).y()
+        self._scroll.verticalScrollBar().setValue(max(0, target - 12))
+
     @staticmethod
     def _open_log_directory() -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_log_dir())))
-
-    def _on_open_update_page(self) -> None:
-        self.open_update_page_requested.emit()
 
     def _add_desktop(self) -> None:
         r = shortcuts.create_desktop_shortcut()

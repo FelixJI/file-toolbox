@@ -46,7 +46,7 @@ def test_cli_imports_stay_qt_and_gui_free():
 
 
 def test_production_order_and_labels():
-    """生产页面顺序与名称的唯一回归锚点(保持当前 10 业务 + 更新 + 关于)。"""
+    """生产页面顺序与名称的唯一回归锚点(10 业务 + 关于;更新面板内嵌关于页)。"""
     assert [(spec.tool_id, spec.label) for spec in TOOL_SPECS] == [
         ("rename", "重命名"),
         ("mkdir", "建文件夹"),
@@ -58,7 +58,6 @@ def test_production_order_and_labels():
         ("pdf_sort", "PDF排序"),
         ("plan_schedule", "计划排布"),
         ("markdown_convert", "Markdown转换"),
-        ("update", "更新"),
         ("about", "关于"),
     ]
 
@@ -68,7 +67,7 @@ def test_categories_history_keys_and_summaries():
     assert business and all(spec.history_key == spec.tool_id for spec in business)
     assert all(spec.summary is not None for spec in business)
     system = [spec for spec in TOOL_SPECS if spec.category is ToolCategory.SYSTEM]
-    assert {spec.tool_id for spec in system} == {"update", "about"}
+    assert {spec.tool_id for spec in system} == {"about"}
     assert all(spec.history_key is None and spec.cli_command is None for spec in system)
 
 
@@ -111,7 +110,7 @@ def test_unique_ids_attrs_and_gui_entries():
 def test_history_key_lookup():
     markdown = tool_registry.spec_by_history_key("markdown_convert")
     assert markdown is not None and markdown.cli_command == "markdown-convert"
-    assert tool_registry.spec_by_history_key("update") is None  # 系统页无历史键
+    assert tool_registry.spec_by_history_key("about") is None  # 系统页无历史键
     assert tool_registry.spec_by_history_key("no-such-tool") is None
 
 

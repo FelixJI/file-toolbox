@@ -114,31 +114,55 @@ def test_about_tab_opens_log_directory(app, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 更新入口:仅"打开更新页面"导航(检查/下载/代理已迁移至独立更新页)
+# 更新面板内嵌:检查/下载/代理控件随 UpdateTab 面板出现在关于页
 # ---------------------------------------------------------------------------
 
 
-def test_about_tab_has_open_update_page_button(app):
-    tab = AboutTab()
-    assert tab.btn_open_update_page.text() == "打开更新页面"
-
-
-def test_about_tab_open_update_page_emits_signal(app):
-    tab = AboutTab()
-    received: list = []
-    tab.open_update_page_requested.connect(lambda: received.append(1))
-    tab.btn_open_update_page.click()
-    assert received == [1]
-
-
-def test_about_tab_has_no_update_actions(app):
-    """关于页不再承载更新动作:无检查/下载按钮,也无代理输入控件。"""
+def test_about_tab_hosts_update_panel(app):
+    """关于页内嵌完整更新面板:检查/下载/取消按钮与代理输入随面板出现。"""
     from PySide6.QtWidgets import QLineEdit
 
     tab = AboutTab()
     buttons = [b.text() for b in tab.findChildren(QPushButton)]
-    assert not any(("检查更新" in t or "立即更新" in t or "下载并更新" in t) for t in buttons)
-    assert tab.findChild(QLineEdit) is None
+    assert "检查更新" in buttons and "下载并更新" in buttons and "取消" in buttons
+    assert tab.findChild(QLineEdit) is not None  # 代理设置输入随面板内嵌
+
+
+def test_about_tab_content_is_scrollable(app):
+    """关于页整体内容(含更新面板)包进滚动区:窗口缩小后上下滚动查看。"""
+    from PySide6.QtWidgets import QScrollArea
+
+    tab = AboutTab()
+    scroll = tab.findChild(QScrollArea)
+    assert scroll is not None
+    assert scroll.widgetResizable() is True
+    content = scroll.widget()
+    assert content is not None and content.isAncestorOf(tab.update_panel)
+
+
+def test_about_tab_ensure_update_visible_scrolls_into_view(app):
+    """导航定位:停在页面底部(展开的更新日志区)时把更新面板顶对齐滚入视口。"""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QGroupBox
+
+    tab = AboutTab()
+    tab.resize(640, 420)
+    tab.show()
+    boxes = {b.title(): b for b in tab.findChildren(QGroupBox)}
+    boxes["更新日志(点击展开)"].setChecked(True)  # 展开后页面下方内容高于视口
+    app.processEvents()
+    scroll = tab._scroll
+    bar = scroll.verticalScrollBar()
+    assert bar.maximum() > 0  # 内容超出视口,确有滚动空间
+
+    bar.setValue(bar.maximum())
+    top_before = tab.update_panel.mapTo(scroll.viewport(), QPoint(0, 0)).y()
+    assert top_before < 0  # 停在底部:面板在视口上方不可见
+
+    tab.ensure_update_visible()
+    app.processEvents()  # singleShot(0) 定位在布局激活后执行
+    top_after = tab.update_panel.mapTo(scroll.viewport(), QPoint(0, 0)).y()
+    assert 0 <= top_after <= scroll.viewport().height()
 
 
 def test_about_tab_tech_and_changelog_collapsed_by_default(app):
