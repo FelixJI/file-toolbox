@@ -40,17 +40,17 @@ def test_dpi_combo_populated(dlg):
     assert dlg.ui.combo_dpi.currentText() == str(DPI_DEFAULT)
 
 
-def test_paper_size_combo_contains_auto_and_a4(dlg):
+def test_paper_size_combo_contains_keep_original_and_a4(dlg):
     items = [dlg.ui.combo_paper_size.itemText(i) for i in range(dlg.ui.combo_paper_size.count())]
-    assert "自动" in items
+    assert "保持原样" in items
     assert "A4" in items
-    assert dlg.ui.combo_paper_size.currentText() == "自动"
+    assert dlg.ui.combo_paper_size.currentText() == "保持原样"
 
 
 def test_orientation_combo_has_options(dlg):
     items = [dlg.ui.combo_orientation.itemText(i) for i in range(dlg.ui.combo_orientation.count())]
-    assert set(items) == {"自动", "纵向", "横向"}
-    assert dlg.ui.combo_orientation.currentText() == "自动"
+    assert set(items) == {"保持原样", "纵向", "横向"}
+    assert dlg.ui.combo_orientation.currentText() == "保持原样"
 
 
 def test_scale_combo_populated(dlg):
@@ -115,7 +115,7 @@ def test_build_config_defaults(dlg):
 def test_build_config_paper_size_maps_auto(dlg):
     dlg.ui.combo_paper_size.setCurrentText("A4")
     assert dlg._build_config()["paper_size"] == "A4"
-    dlg.ui.combo_paper_size.setCurrentText("自动")
+    dlg.ui.combo_paper_size.setCurrentText("保持原样")
     assert dlg._build_config()["paper_size"] == "auto"
 
 

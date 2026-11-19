@@ -1,14 +1,15 @@
 """
 PDF工具函数
 
-包含PDF合并、PDF转图片型PDF等功能
+包含PDF合并、PDF转图片型PDF、页面重排到指定纸张等功能
 """
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pypdfium2 as pdfium
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter, Transformation
+from pypdf.generic import ArrayObject, FloatObject, NameObject, RectangleObject
 
 from file_toolbox.common.file_utils import format_file_size
 
@@ -16,6 +17,7 @@ from .constants import (
     DPI_DEFAULT,
     ORIENTATION_AUTO_DETECT,
     ORIENTATION_LANDSCAPE,
+    ORIENTATION_PORTRAIT,
     PAPER_SIZES,
     PRINT_MODE_DUPLEX,
     SCALE_ACTUAL_SIZE,
@@ -25,6 +27,7 @@ from .constants import (
 
 if TYPE_CHECKING:
     from PIL import Image
+    from pypdf import PageObject
 
 
 def convert_pdf_to_image_pdf(
@@ -193,8 +196,111 @@ def _fit_image_to_paper(
         return canvas
 
 
+def _paper_target_points(
+    paper_size: str, orientation: str, src_w: float, src_h: float
+) -> tuple[float, float]:
+    """计算目标纸张尺寸(单位:点)。
+
+    portrait/landscape 强制对应方向;orientation == "auto"(保持原样)时纸张
+    长边对齐源页面长边(宽>高取横放),与图片路径的自动横竖语义一致。
+    """
+    paper_w_mm, paper_h_mm = PAPER_SIZES[paper_size]
+    paper_w = paper_w_mm * 72 / 25.4
+    paper_h = paper_h_mm * 72 / 25.4
+    if orientation == ORIENTATION_LANDSCAPE:
+        return paper_h, paper_w
+    if orientation == ORIENTATION_PORTRAIT:
+        return paper_w, paper_h
+    return (paper_h, paper_w) if src_w > src_h else (paper_w, paper_h)
+
+
+# 页面尺寸与目标纸张差值在该容差(点)内视为已达标,跳过重排保持内容流不变。
+_PAPER_TOLERANCE_PT = 0.5
+
+
+def _transform_annotations(
+    page: "PageObject", scale: float, offset_x: float, offset_y: float
+) -> None:
+    """对页面注释应用与内容流相同的 CTM(x' = s*x + tx)。
+
+    add_transformation 只包装内容流,不移动 /Annots 的 /Rect;若不同步变换,
+    批注/链接/表单控件会停留在旧坐标系而错位。/QuadPoints(文本标记等)为
+    x,y 交替序列,同样变换。
+    """
+    annots = page.get("/Annots")
+    if not annots:
+        return
+    for annot_ref in annots:
+        annot = annot_ref.get_object()
+        rect = annot.get("/Rect")
+        if rect is not None:
+            x0, y0, x1, y1 = (float(v) for v in rect)
+            annot[NameObject("/Rect")] = ArrayObject(
+                [
+                    FloatObject(x0 * scale + offset_x),
+                    FloatObject(y0 * scale + offset_y),
+                    FloatObject(x1 * scale + offset_x),
+                    FloatObject(y1 * scale + offset_y),
+                ]
+            )
+        quad_points = annot.get("/QuadPoints")
+        if quad_points is not None:
+            points = [float(v) for v in quad_points]
+            annot[NameObject("/QuadPoints")] = ArrayObject(
+                [
+                    FloatObject(
+                        x * scale + (offset_x if i % 2 == 0 else offset_y)
+                    )  # 偶数位为 x,奇数位为 y
+                    for i, x in enumerate(points)
+                ]
+            )
+
+
+def _repaper_page(page: "PageObject", paper_size: str, orientation: str, scale_mode: str) -> None:
+    """将已写入 writer 的页面原地重排到目标纸张。
+
+    内容等比缩放并居中(缩放语义与图片型路径一致:fit_margin 留 5% 边距、
+    actual_size 不缩放居中裁剪、shrink_oversized 缩放到正好放下),页面
+    MediaBox/CropBox/TrimBox 等设为目标尺寸,注释矩形随同一变换移动;
+    内容保持矢量,不栅格化。页面已达标时直接跳过。不处理 /Rotate 非零的
+    页面方向差异(按 MediaBox 原始宽高对齐)。
+    """
+    src_w = float(page.mediabox.width)
+    src_h = float(page.mediabox.height)
+    target_w, target_h = _paper_target_points(paper_size, orientation, src_w, src_h)
+    if (
+        abs(src_w - target_w) <= _PAPER_TOLERANCE_PT
+        and abs(src_h - target_h) <= _PAPER_TOLERANCE_PT
+    ):
+        return
+
+    if scale_mode == SCALE_FIT_MARGIN:
+        limit_w, limit_h = target_w * 0.95, target_h * 0.95
+    else:  # SCALE_ACTUAL_SIZE / SCALE_SHRINK_OVERSIZED
+        limit_w, limit_h = target_w, target_h
+    scale = 1.0 if scale_mode == SCALE_ACTUAL_SIZE else min(limit_w / src_w, limit_h / src_h)
+
+    # MediaBox 原点可能非 (0,0):先抵消原点再缩放,最后居中到目标画布。
+    x0 = float(page.mediabox.left)
+    y0 = float(page.mediabox.bottom)
+    offset_x = (target_w - src_w * scale) / 2 - x0 * scale
+    offset_y = (target_h - src_h * scale) / 2 - y0 * scale
+    page.add_transformation(Transformation().scale(scale, scale).translate(offset_x, offset_y))
+    _transform_annotations(page, scale, offset_x, offset_y)
+    page.mediabox = RectangleObject([0.0, 0.0, target_w, target_h])
+    page.cropbox = RectangleObject([0.0, 0.0, target_w, target_h])
+    page.trimbox = RectangleObject([0.0, 0.0, target_w, target_h])
+    page.bleedbox = RectangleObject([0.0, 0.0, target_w, target_h])
+    page.artbox = RectangleObject([0.0, 0.0, target_w, target_h])
+
+
 def merge_pdfs(
-    pdf_files: list[Path], output_path: Path, print_mode: str = "single"
+    pdf_files: list[Path],
+    output_path: Path,
+    print_mode: str = "single",
+    paper_size: str = "auto",
+    orientation: str = "auto",
+    scale_mode: str = SCALE_DEFAULT,
 ) -> tuple[bool, str]:
     """
     合并多个PDF为一个
@@ -203,6 +309,10 @@ def merge_pdfs(
         pdf_files: PDF文件列表
         output_path: 输出路径
         print_mode: 打印模式 ('single'单面, 'duplex'双面)
+        paper_size: 纸张尺寸 ("auto"保持原样, 或 "A3"/"A4"/"A5"/"Letter"/"Legal");
+            选定后所有页面统一重排到该纸张(含可编辑型内容,保持矢量)
+        orientation: 纸张方向 ("auto"保持原样按每页长边对齐, "portrait", "landscape")
+        scale_mode: 重排缩放模式(与图片型路径一致, 默认缩小过大页面)
 
     Returns:
         (是否成功, 错误消息)
@@ -212,15 +322,22 @@ def merge_pdfs(
         if not existing_files:
             return False, "合并PDF失败: 没有可合并的PDF文件"
 
+        repaper = paper_size in PAPER_SIZES
         writer = PdfWriter()
         try:
             for pdf_file in existing_files:
                 with pdf_file.open("rb") as stream:
                     reader = PdfReader(stream)
+                    start = len(writer.pages)
                     writer.append(reader)
 
+                    if repaper:
+                        for idx in range(start, len(writer.pages)):
+                            _repaper_page(writer.pages[idx], paper_size, orientation, scale_mode)
+
                     if print_mode == PRINT_MODE_DUPLEX and len(reader.pages) % 2 == 1:
-                        last_page = reader.pages[-1]
+                        # 补白页与前一页重排后的最终尺寸一致
+                        last_page = writer.pages[len(writer.pages) - 1]
                         writer.add_blank_page(
                             width=float(last_page.mediabox.width),
                             height=float(last_page.mediabox.height),

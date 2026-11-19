@@ -15,7 +15,7 @@ def svc(monkeypatch):
     """构造 service,mock 掉所有转换器,generate_pdf 直接成功。"""
     s = PDFGeneratorService()
     monkeypatch.setattr(s, "generate_pdf", lambda src, out, cfg: (True, ""))
-    monkeypatch.setattr(s, "merge_pdfs", lambda pdfs, out, mode: (True, ""))
+    monkeypatch.setattr(s, "merge_pdfs", lambda pdfs, out, mode, **kwargs: (True, ""))
     return s
 
 

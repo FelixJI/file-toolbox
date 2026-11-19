@@ -14,6 +14,7 @@ from .constants import (
     DPI_DEFAULT,
     OUTPUT_MERGE,
     OUTPUT_SEPARATE,
+    PAPER_SIZES,
     PDF_TYPE_EDITABLE,
     PDF_TYPE_IMAGE,
     PRINT_MODE_SINGLE,
@@ -176,7 +177,17 @@ class PDFGeneratorService:
                     scale_mode=scale_mode,
                 )
             else:
-                # 直接复制
+                # 可编辑型:选定纸张时重排到目标纸张(内容保持矢量),否则直接复制
+                paper_size = config.get("paper_size", "auto")
+                if paper_size in PAPER_SIZES:
+                    return self.merge_pdfs(
+                        [file_path],
+                        output_path,
+                        PRINT_MODE_SINGLE,
+                        paper_size=paper_size,
+                        orientation=config.get("orientation", "auto"),
+                        scale_mode=config.get("scale_mode", SCALE_DEFAULT),
+                    )
                 try:
                     shutil.copy2(file_path, output_path)
                     return True, ""
@@ -233,7 +244,13 @@ class PDFGeneratorService:
             return False, f"未知的文件类型: {file_type}"
 
     def merge_pdfs(
-        self, pdf_files: list[Path], output_path: Path, print_mode: str = "single"
+        self,
+        pdf_files: list[Path],
+        output_path: Path,
+        print_mode: str = "single",
+        paper_size: str = "auto",
+        orientation: str = "auto",
+        scale_mode: str = SCALE_DEFAULT,
     ) -> tuple[bool, str]:
         """
         合并多个PDF为一个
@@ -242,13 +259,23 @@ class PDFGeneratorService:
             pdf_files: PDF文件列表
             output_path: 输出路径
             print_mode: 打印模式 ('single'单面, 'duplex'双面)
+            paper_size: 纸张尺寸 ("auto"保持原样, 或纸张名);选定后页面统一重排
+            orientation: 纸张方向 ("auto"保持原样按页面长边对齐, "portrait", "landscape")
+            scale_mode: 重排缩放模式
 
         Returns:
             (是否成功, 错误消息)
         """
         from .pdf_utils import merge_pdfs  # 按需导入(见模块顶部说明)
 
-        return merge_pdfs(pdf_files, output_path, print_mode)
+        return merge_pdfs(
+            pdf_files,
+            output_path,
+            print_mode,
+            paper_size=paper_size,
+            orientation=orientation,
+            scale_mode=scale_mode,
+        )
 
     def batch_generate(
         self,
@@ -330,7 +357,12 @@ class PDFGeneratorService:
                     counter += 1
 
             success, error = self.merge_pdfs(
-                temp_pdfs, merge_output, config.get("print_mode", PRINT_MODE_SINGLE)
+                temp_pdfs,
+                merge_output,
+                config.get("print_mode", PRINT_MODE_SINGLE),
+                paper_size=config.get("paper_size", "auto"),
+                orientation=config.get("orientation", "auto"),
+                scale_mode=config.get("scale_mode", SCALE_DEFAULT),
             )
 
             # 每个输入的成功状态表示最终产物,不能指向即将删除的中间文件。

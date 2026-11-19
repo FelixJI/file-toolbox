@@ -346,7 +346,7 @@ def test_pdf_merge_reports_final_output_only(merge_failure, make_text_pdf, tmp_p
     source = make_text_pdf("source.pdf", ["page"])
     if merge_failure:
         monkeypatch.setattr(
-            PDFGeneratorService, "merge_pdfs", lambda *args: (False, "merge failed")
+            PDFGeneratorService, "merge_pdfs", lambda *args, **kwargs: (False, "merge failed")
         )
     result = CliRunner().invoke(app, ["pdf", str(source), "--output-mode", "merge", "--yes"])
     output = tmp_path / "合并文档.pdf"
@@ -378,7 +378,7 @@ def test_pdf_temp_cleanup_failure_preserves_output_or_primary(
             raise PermissionError("locked merge temp")
         return real_unlink(path, *args, **kwargs)
 
-    def merge(*args):
+    def merge(*args, **kwargs):
         raise primary
 
     monkeypatch.setattr(Path, "unlink", unlink)
