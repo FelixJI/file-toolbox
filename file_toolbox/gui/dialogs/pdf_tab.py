@@ -42,8 +42,10 @@ from file_toolbox.gui.task_lifecycle import TaskLifecycle
 from file_toolbox.gui.workers.file_scan_worker import FileScanWorker, ScannedFile
 
 # 下拉框显示文本 -> 服务层期望的常量值
-_PAPER_AUTO = "自动"
-_ORIENT_LABELS = {"自动": "auto", "纵向": "portrait", "横向": "landscape"}
+# "保持原样"沿用内部值 "auto":纸张=不修改源页面尺寸;方向=不强制,选定纸张时
+# 纸张长边自动对齐每页长边(与图片路径的自动横竖语义一致)。
+_PAPER_KEEP_ORIGINAL = "保持原样"
+_ORIENT_LABELS = {"保持原样": "auto", "纵向": "portrait", "横向": "landscape"}
 _SCALE_LABELS = {
     "适合边距": SCALE_FIT_MARGIN,
     "实际大小": SCALE_ACTUAL_SIZE,
@@ -156,7 +158,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             self.ui.combo_dpi.setCurrentIndex(default_dpi_idx)
 
         self.ui.combo_paper_size.clear()
-        self.ui.combo_paper_size.addItem(_PAPER_AUTO)
+        self.ui.combo_paper_size.addItem(_PAPER_KEEP_ORIGINAL)
         for name in PAPER_SIZES:
             self.ui.combo_paper_size.addItem(name)
         self.ui.combo_paper_size.setCurrentIndex(0)
@@ -277,7 +279,7 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         )
 
         paper_label = self.ui.combo_paper_size.currentText()
-        paper_size = "auto" if paper_label == _PAPER_AUTO else paper_label
+        paper_size = "auto" if paper_label == _PAPER_KEEP_ORIGINAL else paper_label
 
         orient_label = self.ui.combo_orientation.currentText()
         orientation = _ORIENT_LABELS.get(orient_label, "auto")

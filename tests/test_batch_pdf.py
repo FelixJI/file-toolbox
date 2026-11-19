@@ -202,7 +202,7 @@ def test_batch_generate_merge_mode_success(tmp_path, monkeypatch):
     for f in files:
         f.write_bytes(b"stub")
     monkeypatch.setattr(svc, "generate_pdf", lambda src, out, cfg: (True, ""))
-    monkeypatch.setattr(svc, "merge_pdfs", lambda pdfs, out, mode: (True, ""))
+    monkeypatch.setattr(svc, "merge_pdfs", lambda pdfs, out, mode, **kwargs: (True, ""))
 
     config = {
         "output_mode": OUTPUT_MERGE,
@@ -223,7 +223,7 @@ def test_batch_generate_merge_failure_marks_inputs_failed(tmp_path, monkeypatch)
     files = [tmp_path / "a.docx"]
     files[0].write_bytes(b"stub")
     monkeypatch.setattr(svc, "generate_pdf", lambda src, out, cfg: (True, ""))
-    monkeypatch.setattr(svc, "merge_pdfs", lambda pdfs, out, mode: (False, "merge broke"))
+    monkeypatch.setattr(svc, "merge_pdfs", lambda pdfs, out, mode, **kwargs: (False, "merge broke"))
 
     config = {"output_mode": OUTPUT_MERGE, "same_as_source": True, "merge_filename": "M.pdf"}
     results = svc.batch_generate(files, config)
@@ -246,7 +246,7 @@ def test_batch_generate_merge_output_dir_collision(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_merge(pdfs, out, mode):
+    def fake_merge(pdfs, out, mode, **kwargs):
         captured["out"] = out
         return True, ""
 
@@ -267,7 +267,7 @@ def test_batch_generate_merge_explicit_output_dir(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_merge(pdfs, out, mode):
+    def fake_merge(pdfs, out, mode, **kwargs):
         captured["out"] = out
         return True, ""
 
@@ -280,6 +280,85 @@ def test_batch_generate_merge_explicit_output_dir(tmp_path, monkeypatch):
     }
     svc.batch_generate(files, config)
     assert captured["out"] == out_dir / "X.pdf"
+
+
+def test_batch_generate_merge_passes_paper_config(tmp_path, monkeypatch):
+    """合并调用透传 paper_size/orientation/scale_mode(修核心 bug 的接线契约)。"""
+    svc = PDFGeneratorService()
+    files = [tmp_path / "a.docx"]
+    files[0].write_bytes(b"stub")
+    monkeypatch.setattr(svc, "generate_pdf", lambda src, out, cfg: (True, ""))
+
+    captured = {}
+
+    def fake_merge(pdfs, out, mode, **kwargs):
+        captured.update(kwargs, mode=mode)
+        return True, ""
+
+    monkeypatch.setattr(svc, "merge_pdfs", fake_merge)
+    config = {
+        "output_mode": OUTPUT_MERGE,
+        "same_as_source": True,
+        "merge_filename": "M.pdf",
+        "paper_size": "A4",
+        "orientation": "landscape",
+        "scale_mode": "fit_margin",
+        "print_mode": "duplex",
+    }
+    svc.batch_generate(files, config)
+    assert captured["mode"] == "duplex"
+    assert captured["paper_size"] == "A4"
+    assert captured["orientation"] == "landscape"
+    assert captured["scale_mode"] == "fit_margin"
+
+
+def test_batch_generate_merge_default_paper_auto(tmp_path, monkeypatch):
+    """未配置纸张时合并仍以 auto(保持原样)调用,不改变默认行为。"""
+    svc = PDFGeneratorService()
+    files = [tmp_path / "a.docx"]
+    files[0].write_bytes(b"stub")
+    monkeypatch.setattr(svc, "generate_pdf", lambda src, out, cfg: (True, ""))
+
+    captured = {}
+
+    def fake_merge(pdfs, out, mode, **kwargs):
+        captured.update(kwargs)
+        return True, ""
+
+    monkeypatch.setattr(svc, "merge_pdfs", fake_merge)
+    svc.batch_generate(files, {"output_mode": OUTPUT_MERGE, "same_as_source": True})
+    assert captured["paper_size"] == "auto"
+    assert captured["orientation"] == "auto"
+
+
+def test_generate_pdf_input_editable_repapers_to_paper(make_text_pdf, tmp_path):
+    """PDF 输入 + 可编辑型 + 选定纸张 → 页面重排到目标纸张(不再原样复制)。"""
+    from pypdf import PdfReader
+
+    src = make_text_pdf("src.pdf", ["hello"])  # 612x792 Letter
+    out = tmp_path / "out.pdf"
+
+    ok, err = PDFGeneratorService().generate_pdf(
+        src, out, {"pdf_type": PDF_TYPE_EDITABLE, "paper_size": "A4"}
+    )
+
+    assert ok, err
+    page = PdfReader(out).pages[0]
+    assert float(page.mediabox.width) == pytest.approx(210 * 72 / 25.4, abs=0.5)
+    assert "hello" in (page.extract_text() or "")
+
+
+def test_generate_pdf_input_editable_auto_copies_unchanged(make_text_pdf, tmp_path):
+    """PDF 输入 + 可编辑型 + 保持原样(auto) → 逐字节复制(既有默认行为)。"""
+    src = make_text_pdf("src.pdf", ["hello"])
+    out = tmp_path / "out.pdf"
+
+    ok, err = PDFGeneratorService().generate_pdf(
+        src, out, {"pdf_type": PDF_TYPE_EDITABLE, "paper_size": "auto"}
+    )
+
+    assert ok, err
+    assert out.read_bytes() == src.read_bytes()
 
 
 def test_batch_generate_separate_progress_callback(tmp_path, monkeypatch):
@@ -302,7 +381,7 @@ def test_batch_generate_failed_file_not_added_to_merge(tmp_path, monkeypatch):
     files = [tmp_path / "a.docx"]
     files[0].write_bytes(b"stub")
     monkeypatch.setattr(svc, "generate_pdf", lambda src, out, cfg: (False, "fail"))
-    monkeypatch.setattr(svc, "merge_pdfs", lambda pdfs, out, mode: (True, ""))
+    monkeypatch.setattr(svc, "merge_pdfs", lambda pdfs, out, mode, **kwargs: (True, ""))
     config = {"output_mode": OUTPUT_MERGE, "same_as_source": True}
     # 没有成功的 PDF → 不进入合并分支,merge_pdfs 不应被调用
     results = svc.batch_generate(files, config)

@@ -22,8 +22,12 @@ def pdf(
     merge_name: str = typer.Option("合并文档.pdf", "--merge-name", help="合并文件名"),
     pdf_type: str = typer.Option(PDF_TYPE_EDITABLE, "--pdf-type", help="editable|image"),
     dpi: int = typer.Option(DPI_DEFAULT, "--dpi", min=1, help="图片型 DPI"),
-    paper: str = typer.Option("auto", "--paper", help="auto|A3|A4|A5|Letter|Legal"),
-    orientation: str = typer.Option("auto", "--orientation", help="auto|portrait|landscape"),
+    paper: str = typer.Option(
+        "auto", "--paper", help="auto=保持原样|A3|A4|A5|Letter|Legal(选定后页面统一重排)"
+    ),
+    orientation: str = typer.Option(
+        "auto", "--orientation", help="auto=保持原样|portrait|landscape"
+    ),
     engine: str = typer.Option("auto", "--engine", help="auto|office|wps"),
     yes: bool = typer.Option(False, "--yes", help="确认生成 PDF(默认仅预览)"),
 ) -> None:

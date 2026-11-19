@@ -34,11 +34,11 @@ from file_toolbox.core.batch_pdf.pdf_utils import (  # noqa: E402
 # --- fixture 构造工具 ----------------------------------------------------------
 
 
-def _make_pdf(path: Path, pages: int = 1) -> Path:
-    """生成一个指定页数的空白 PDF(width=200, height=300 点)。"""
+def _make_pdf(path: Path, pages: int = 1, width: float = 200, height: float = 300) -> Path:
+    """生成一个指定页数与页面尺寸(点)的空白 PDF,默认 200x300。"""
     writer = PdfWriter()
     for _ in range(pages):
-        writer.add_blank_page(width=200, height=300)
+        writer.add_blank_page(width=width, height=height)
     writer.write(path)
     writer.close()
     return path
@@ -142,6 +142,181 @@ def test_merge_pdfs_empty_list_fails_cleanly(tmp_path):
     assert ok is False
     assert "合并PDF失败" in msg
     assert not out.exists()
+
+
+# --- 纸张重排(paper_size/orientation) ------------------------------------------
+
+
+def _a4_points() -> tuple[float, float]:
+    """A4 尺寸(点),与 _paper_target_points 的 mm→pt 换算一致。"""
+    return 210 * 72 / 25.4, 297 * 72 / 25.4
+
+
+def test_merge_pdfs_paper_size_unifies_mixed_pages(tmp_path):
+    """选定 A4 后,不同尺寸源页面统一重排到 A4(核心回归:可编辑型合并)。"""
+    a4_w, a4_h = _a4_points()
+    small = _make_pdf(tmp_path / "small.pdf", pages=1)  # 200x300
+    big = _make_pdf(tmp_path / "big.pdf", pages=1, width=400, height=200)  # 横版
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([small, big], out, paper_size="A4")
+
+    assert ok, msg
+    pages = PdfReader(out).pages
+    assert len(pages) == 2
+    # 方向保持原样(auto):每页对齐到同尺寸纸张,横版页取横向、纵版页取纵向
+    assert float(pages[0].mediabox.width) == pytest.approx(a4_w, abs=0.5)  # 200x300 → 纵向
+    assert float(pages[0].mediabox.height) == pytest.approx(a4_h, abs=0.5)
+    assert float(pages[1].mediabox.width) == pytest.approx(a4_h, abs=0.5)  # 400x200 → 横向
+    assert float(pages[1].mediabox.height) == pytest.approx(a4_w, abs=0.5)
+
+
+def test_merge_pdfs_paper_auto_keeps_original_sizes(tmp_path):
+    """paper_size=auto(保持原样)时页面尺寸不变(默认行为回归)。"""
+    a = _make_pdf(tmp_path / "a.pdf", pages=1)  # 200x300
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([a], out, paper_size="auto")
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    assert float(page.mediabox.width) == pytest.approx(200, abs=0.1)
+    assert float(page.mediabox.height) == pytest.approx(300, abs=0.1)
+
+
+def test_merge_pdfs_orientation_auto_aligns_long_edge(tmp_path):
+    """方向保持原样(auto):横版页面对齐到横向 A4,纵版页面对齐到纵向 A4。"""
+    a4_w, a4_h = _a4_points()
+    wide = _make_pdf(tmp_path / "wide.pdf", pages=1, width=400, height=200)
+    tall = _make_pdf(tmp_path / "tall.pdf", pages=1)  # 200x300
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([wide, tall], out, paper_size="A4", orientation="auto")
+
+    assert ok, msg
+    pages = PdfReader(out).pages
+    # 宽>高 → 横向 A4(长边对长边)
+    assert float(pages[0].mediabox.width) == pytest.approx(a4_h, abs=0.5)
+    assert float(pages[0].mediabox.height) == pytest.approx(a4_w, abs=0.5)
+    # 高>宽 → 纵向 A4
+    assert float(pages[1].mediabox.width) == pytest.approx(a4_w, abs=0.5)
+    assert float(pages[1].mediabox.height) == pytest.approx(a4_h, abs=0.5)
+
+
+def test_merge_pdfs_orientation_forced_portrait_letterboxes(tmp_path):
+    """强制纵向:横版页面统一到纵向 A4(信盒式留白,不旋转内容)。"""
+    a4_w, a4_h = _a4_points()
+    wide = _make_pdf(tmp_path / "wide.pdf", pages=1, width=400, height=200)
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([wide], out, paper_size="A4", orientation="portrait")
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    assert float(page.mediabox.width) == pytest.approx(a4_w, abs=0.5)
+    assert float(page.mediabox.height) == pytest.approx(a4_h, abs=0.5)
+
+
+def test_merge_pdfs_duplex_blank_matches_repapered_size(tmp_path):
+    """duplex 补白页尺寸跟随重排后的目标纸张,而不是源页面原始尺寸。"""
+    a4_w, a4_h = _a4_points()
+    odd = _make_pdf(tmp_path / "odd.pdf", pages=1)  # 200x300,单页
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([odd], out, print_mode=PRINT_MODE_DUPLEX, paper_size="A4")
+
+    assert ok, msg
+    pages = PdfReader(out).pages
+    assert len(pages) == 2
+    blank = pages[1]
+    assert float(blank.mediabox.width) == pytest.approx(a4_w, abs=0.5)
+    assert float(blank.mediabox.height) == pytest.approx(a4_h, abs=0.5)
+
+
+def test_repaper_page_fast_path_skips_matching_page():
+    """页面已等于目标纸张时跳过重排,不注入变换矩阵。"""
+    from pypdf import PdfWriter
+
+    from file_toolbox.core.batch_pdf.pdf_utils import _repaper_page
+
+    a4_w, a4_h = _a4_points()
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=a4_w, height=a4_h)
+    try:
+        _repaper_page(page, "A4", "auto", "shrink_oversized")
+        # 未发生重排:页面无内容流(空白页),也未写入 MediaBox 变换
+        assert page.get_contents() is None
+    finally:
+        writer.close()
+
+
+def test_merge_pdfs_paper_size_preserves_text_content(make_text_pdf, tmp_path):
+    """重排保持内容:文字经 cm 变换后仍可提取(可编辑型不丢内容)。"""
+    src = make_text_pdf("src.pdf", ["hello paper"])  # 612x792 Letter
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4")
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    assert "hello paper" in (page.extract_text() or "")
+    a4_w, a4_h = _a4_points()
+    assert float(page.mediabox.width) == pytest.approx(a4_w, abs=0.5)
+
+
+def test_merge_pdfs_paper_size_moves_annotations(tmp_path):
+    """重排时注释 /Rect 与 /QuadPoints 随内容同一 CTM 缩放,不留在旧坐标系。"""
+    from pypdf import PdfWriter
+    from pypdf.annotations import Link
+    from pypdf.generic import ArrayObject, DictionaryObject, FloatObject, NameObject
+
+    a4_w, a4_h = _a4_points()
+    src = tmp_path / "annotated.pdf"
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)  # Letter 纵向
+    highlight = DictionaryObject()
+    highlight[NameObject("/Type")] = NameObject("/Annot")
+    highlight[NameObject("/Subtype")] = NameObject("/Highlight")
+    highlight[NameObject("/Rect")] = ArrayObject([FloatObject(v) for v in (60, 610, 190, 630)])
+    highlight[NameObject("/QuadPoints")] = ArrayObject(
+        [FloatObject(v) for v in (60, 630, 190, 630, 60, 610, 190, 610)]
+    )
+    page[NameObject("/Annots")] = ArrayObject([highlight])
+    # add_annotation 会在现有 /Annots 基础上追加,先放 highlight 再加 Link
+    writer.add_annotation(0, Link(rect=(50, 600, 200, 650), url="https://example.com"))
+    writer.write(src)
+    writer.close()
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4")
+
+    assert ok, msg
+    result_page = PdfReader(out).pages[0]
+    annots = {str(a.get_object()["/Subtype"]): a.get_object() for a in result_page["/Annots"]}
+    # shrink_oversized → s = min(A4/Letter)
+    scale = min(a4_w / 612, a4_h / 792)
+    link_rect = [float(v) for v in annots["/Link"]["/Rect"]]
+    assert (link_rect[2] - link_rect[0]) == pytest.approx(150 * scale, abs=0.6)
+    assert (link_rect[3] - link_rect[1]) == pytest.approx(50 * scale, abs=0.6)
+    assert 0 <= link_rect[0] < link_rect[2] <= a4_w + 0.6
+    assert 0 <= link_rect[1] < link_rect[3] <= a4_h + 0.6
+    quad = [float(v) for v in annots["/Highlight"]["/QuadPoints"]]
+    x_span = max(quad[0::2]) - min(quad[0::2])
+    y_span = max(quad[1::2]) - min(quad[1::2])
+    assert x_span == pytest.approx(130 * scale, abs=0.6)
+    assert y_span == pytest.approx(20 * scale, abs=0.6)
+
+
+def test_paper_target_points_orientation_matrix():
+    """_paper_target_points:三种方向 + auto 长边对齐的尺寸选择。"""
+    from file_toolbox.core.batch_pdf.pdf_utils import _paper_target_points
+
+    a4_w, a4_h = _a4_points()
+    assert _paper_target_points("A4", "portrait", 400, 200) == (a4_w, a4_h)
+    assert _paper_target_points("A4", "landscape", 200, 300) == (a4_h, a4_w)
+    # auto:源页面宽>高 → 横放;否则纵放
+    assert _paper_target_points("A4", "auto", 400, 200) == (a4_h, a4_w)
+    assert _paper_target_points("A4", "auto", 200, 400) == (a4_w, a4_h)
 
 
 # --- get_file_info -------------------------------------------------------------
