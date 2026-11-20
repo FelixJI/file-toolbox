@@ -388,6 +388,35 @@ def test_merge_pdfs_view_rotation_visual_orientation_wins(make_text_pdf, tmp_pat
     assert "rotated" in (page.extract_text() or "")
 
 
+def test_merge_pdfs_pages_tree_inherited_rotate(make_text_pdf, tmp_path):
+    """/Rotate 挂在页面树节点(非页本身)同样按视觉对齐。
+
+    契约锁定:锁定版 pypdf 在 reader 展平页树时把继承属性物化进页字典,
+    writer 克隆随之携带;若未来升级 pypdf 改变该物化行为,此测试先行失败。
+    """
+    from pypdf.generic import NameObject, NumberObject
+
+    a4_w, a4_h = _a4_points()
+    writer = PdfWriter(clone_from=make_text_pdf("src.pdf", ["inherited"]))
+    # reportlab 页字典自带显式 /Rotate 0(自身值优先于继承),先删掉再造纯继承场景
+    del writer.pages[0][NameObject("/Rotate")]
+    writer.root_object[NameObject("/Pages")][NameObject("/Rotate")] = NumberObject(90)
+    src = tmp_path / "tree_rot.pdf"
+    writer.write(src)
+    writer.close()
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4", orientation="auto")
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    # 视觉 792x612 横版 → 横向 A4,烘焙后 /Rotate 归零,文字仍可提取
+    assert float(page.mediabox.width) == pytest.approx(a4_h, abs=0.5)
+    assert float(page.mediabox.height) == pytest.approx(a4_w, abs=0.5)
+    assert int(page.get("/Rotate", 0)) == 0
+    assert "inherited" in (page.extract_text() or "")
+
+
 def test_repaper_view_rotated_page_not_skipped_even_if_dims_match(tmp_path):
     """/Rotate 90 且 MediaBox 恰为目标纵向尺寸:不因尺寸相等跳过,仍归一化。"""
     from pypdf.generic import NameObject, NumberObject
@@ -428,7 +457,7 @@ def test_page_view_rotation_normalizes_values():
 
 
 def test_rotate_image_to_match_matrix():
-    """_rotate_image_to_match:仅强制方向 + auto 旋转 + 长边相反时转置。"""
+    """_rotate_image_to_match:仅强制方向 + auto 旋转 + 长边相反时顺时针转置。"""
     from PIL import Image
 
     from file_toolbox.core.batch_pdf.pdf_utils import _rotate_image_to_match

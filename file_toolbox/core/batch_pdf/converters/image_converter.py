@@ -60,10 +60,11 @@ class ImageConverter:
 
     @staticmethod
     def _rotate_to_match(img: "Image.Image", orientation: str, rotate: str) -> "Image.Image":
-        """强制方向且开启自动旋转时,若图片长边方向与纸张相反则转 90° 对齐。
+        """强制方向且开启自动旋转时,若图片长边方向与纸张相反则顺时针转 90° 对齐。
 
-        与 pdf_utils._rotate_image_to_paper 语义一致;方向为保持原样时纸张本就
-        跟随图片长边,旋转无意义,原样返回。
+        与 pdf_utils._rotate_image_to_match 语义一致(顺时针,同 PDF 重排路径的
+        /Rotate 烘焙方向);方向为保持原样时纸张本就跟随图片长边,旋转无意义,
+        原样返回。
         """
         from PIL import Image
 
@@ -76,7 +77,8 @@ class ImageConverter:
         sheet_landscape = orientation == ORIENTATION_LANDSCAPE
         if img_landscape == sheet_landscape or img.width == img.height:
             return img
-        return img.transpose(Image.Transpose.ROTATE_90)
+        # PIL 角度为逆时针,270° 即顺时针 90°
+        return img.transpose(Image.Transpose.ROTATE_270)
 
     def _apply_scale(
         self, img: "Image.Image", paper_w_px: int, paper_h_px: int, scale_mode: str

@@ -132,9 +132,10 @@ def _resize_to_fit(img: "Image.Image", max_w: int, max_h: int) -> "Image.Image":
 
 
 def _rotate_image_to_match(img: "Image.Image", orientation: str, rotate: str) -> "Image.Image":
-    """强制方向且开启自动旋转时,若图片长边方向与纸张相反则转 90° 对齐。
+    """强制方向且开启自动旋转时,若图片长边方向与纸张相反则顺时针转 90° 对齐。
 
     方向为保持原样(auto)时纸张本就跟随图片长边,旋转无意义,原样返回。
+    旋转方向与 PDF 重排路径的 /Rotate 烘焙一致(顺时针)。
     """
     from PIL import Image
 
@@ -144,7 +145,9 @@ def _rotate_image_to_match(img: "Image.Image", orientation: str, rotate: str) ->
     sheet_landscape = orientation == ORIENTATION_LANDSCAPE
     if img_landscape == sheet_landscape or img.width == img.height:
         return img
-    return img.transpose(Image.Transpose.ROTATE_90)
+    # 顺时针 90°(PIL 角度为逆时针,270° 即顺时针 90°),与 PDF 重排路径的
+    # /Rotate 烘焙方向一致,两种输出类型的旋转姿态相同。
+    return img.transpose(Image.Transpose.ROTATE_270)
 
 
 def _fit_image_to_paper(
