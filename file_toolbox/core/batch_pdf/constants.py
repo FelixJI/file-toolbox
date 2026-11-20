@@ -31,6 +31,13 @@ ORIENTATION_LANDSCAPE = "landscape"  # 横向
 ORIENTATION_AUTO = "auto"  # 按文档
 ORIENTATION_AUTO_DETECT = "auto_detect"  # 自动横纵（根据页面尺寸判断）
 
+# 页面旋转(与纸张方向正交:方向决定目标页宽高谁长,旋转决定内容放上去前
+# 是否先转 90° 使内容长边对齐纸张长边;仅重排/图片型路径生效,COM 导出走
+# 文档版式,无内容旋转概念)
+ROTATE_NONE = "none"  # 不旋转(反向页面等比缩小居中,留白)
+ROTATE_AUTO = "auto"  # 自动旋转匹配纸张(内容长边对齐纸张长边后再缩放)
+ROTATE_DEFAULT = ROTATE_NONE
+
 # PDF类型
 PDF_TYPE_IMAGE = "image"  # 图片型
 PDF_TYPE_EDITABLE = "editable"  # 可编辑型

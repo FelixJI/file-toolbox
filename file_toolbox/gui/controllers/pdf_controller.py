@@ -15,6 +15,7 @@ from file_toolbox.core.batch_pdf.constants import (
     OUTPUT_SEPARATE,
     PDF_TYPE_EDITABLE,
     PRINT_MODE_SINGLE,
+    ROTATE_DEFAULT,
     SCALE_DEFAULT,
 )
 
@@ -34,6 +35,7 @@ class PDFConfigState:
     dpi: int = DPI_DEFAULT
     paper_size: str = "auto"  # "auto" 或纸张名(A4/A5/...)
     orientation: str = "auto"  # "auto"/"portrait"/"landscape"
+    rotate: str = ROTATE_DEFAULT  # "none"不旋转 / "auto"自动旋转匹配纸张
     scale_mode: str = SCALE_DEFAULT
     engine: str = "auto"  # "auto"/"office"/"wps"
     output_mode: str = OUTPUT_SEPARATE  # "separate"/"merge"
@@ -67,6 +69,7 @@ class PDFController:
             "dpi": int(state.dpi),
             "paper_size": state.paper_size,
             "orientation": state.orientation,
+            "rotate": state.rotate,
             "scale_mode": state.scale_mode,
             "engine": state.engine,
             "output_mode": state.output_mode,

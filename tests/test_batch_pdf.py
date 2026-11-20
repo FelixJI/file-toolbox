@@ -302,6 +302,7 @@ def test_batch_generate_merge_passes_paper_config(tmp_path, monkeypatch):
         "merge_filename": "M.pdf",
         "paper_size": "A4",
         "orientation": "landscape",
+        "rotate": "auto",
         "scale_mode": "fit_margin",
         "print_mode": "duplex",
     }
@@ -309,6 +310,7 @@ def test_batch_generate_merge_passes_paper_config(tmp_path, monkeypatch):
     assert captured["mode"] == "duplex"
     assert captured["paper_size"] == "A4"
     assert captured["orientation"] == "landscape"
+    assert captured["rotate"] == "auto"
     assert captured["scale_mode"] == "fit_margin"
 
 
@@ -329,6 +331,7 @@ def test_batch_generate_merge_default_paper_auto(tmp_path, monkeypatch):
     svc.batch_generate(files, {"output_mode": OUTPUT_MERGE, "same_as_source": True})
     assert captured["paper_size"] == "auto"
     assert captured["orientation"] == "auto"
+    assert captured["rotate"] == "none"
 
 
 def test_generate_pdf_input_editable_repapers_to_paper(make_text_pdf, tmp_path):
@@ -346,6 +349,29 @@ def test_generate_pdf_input_editable_repapers_to_paper(make_text_pdf, tmp_path):
     page = PdfReader(out).pages[0]
     assert float(page.mediabox.width) == pytest.approx(210 * 72 / 25.4, abs=0.5)
     assert "hello" in (page.extract_text() or "")
+
+
+def test_generate_pdf_input_editable_passes_rotate(make_text_pdf, tmp_path, monkeypatch):
+    """PDF 输入 + 可编辑型重排:rotate 从 config 透传到 merge_pdfs(接线契约)。"""
+    svc = PDFGeneratorService()
+    src = make_text_pdf("src.pdf", ["hello"])
+    captured = {}
+    real_merge = svc.merge_pdfs
+
+    def spy_merge(pdfs, out, mode, **kwargs):
+        captured.update(kwargs)
+        return real_merge(pdfs, out, mode, **kwargs)
+
+    monkeypatch.setattr(svc, "merge_pdfs", spy_merge)
+
+    ok, err = svc.generate_pdf(
+        src,
+        tmp_path / "out.pdf",
+        {"pdf_type": PDF_TYPE_EDITABLE, "paper_size": "A4", "rotate": "auto"},
+    )
+
+    assert ok, err
+    assert captured["rotate"] == "auto"
 
 
 def test_generate_pdf_input_editable_auto_copies_unchanged(make_text_pdf, tmp_path):

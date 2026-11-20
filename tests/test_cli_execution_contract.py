@@ -140,6 +140,7 @@ def test_replace_partial_failure_is_nonzero(tmp_path):
         ("--pdf-type", "typo"),
         ("--paper", "bad"),
         ("--orientation", "bad"),
+        ("--rotate", "bad"),
         ("--engine", "bad"),
         ("--dpi", "0"),
     ],

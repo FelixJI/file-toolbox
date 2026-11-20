@@ -19,6 +19,8 @@ from file_toolbox.core.batch_pdf import pdf_utils  # noqa: E402
 from file_toolbox.core.batch_pdf.constants import (  # noqa: E402
     PAPER_SIZES,
     PRINT_MODE_DUPLEX,
+    ROTATE_AUTO,
+    ROTATE_NONE,
     SCALE_ACTUAL_SIZE,
     SCALE_FIT_MARGIN,
     SUPPORTED_FORMATS,
@@ -305,6 +307,189 @@ def test_merge_pdfs_paper_size_moves_annotations(tmp_path):
     y_span = max(quad[1::2]) - min(quad[1::2])
     assert x_span == pytest.approx(130 * scale, abs=0.6)
     assert y_span == pytest.approx(20 * scale, abs=0.6)
+
+
+# --- 页面旋转与 /Rotate 归一化 -------------------------------------------------
+
+
+def _make_annotated_link_pdf(path: Path, width: float = 612, height: float = 792) -> Path:
+    """生成带 Link 注释(150x50)的页,用于验证内容与注释随同一旋转变换。"""
+    from pypdf.annotations import Link
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=width, height=height)
+    writer.add_annotation(0, Link(rect=(50, 600, 200, 650), url="https://example.com"))
+    writer.write(path)
+    writer.close()
+    return path
+
+
+def _with_view_rotation(src: Path, dst: Path, degrees: int) -> Path:
+    """给 PDF 每页写入 /Rotate(模拟扫描件/Office 导出的显示旋转页)。"""
+    from pypdf.generic import NameObject, NumberObject
+
+    writer = PdfWriter(clone_from=src)
+    for page in writer.pages:
+        page[NameObject("/Rotate")] = NumberObject(degrees)
+    writer.write(dst)
+    writer.close()
+    return dst
+
+
+def test_merge_pdfs_rotate_auto_turns_content_to_match_sheet(tmp_path):
+    """强制横向 + 自动旋转:纵向内容转 90° 长边对齐,注释宽高交换(150x50 → 50x150)。"""
+    a4_w, a4_h = _a4_points()
+    src = _make_annotated_link_pdf(tmp_path / "portrait.pdf")  # 612x792 Letter 纵向
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4", orientation="landscape", rotate=ROTATE_AUTO)
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    assert float(page.mediabox.width) == pytest.approx(a4_h, abs=0.5)
+    assert float(page.mediabox.height) == pytest.approx(a4_w, abs=0.5)
+    # 旋转盒 792x612 → 横向 A4;注释 150 宽 50 高 → 旋转后宽高交换
+    scale = min(a4_h / 792, a4_w / 612)
+    rect = [float(v) for v in page["/Annots"][0].get_object()["/Rect"]]
+    assert (rect[2] - rect[0]) == pytest.approx(50 * scale, abs=0.6)
+    assert (rect[3] - rect[1]) == pytest.approx(150 * scale, abs=0.6)
+
+
+def test_merge_pdfs_rotate_none_keeps_content_axes(tmp_path):
+    """不旋转(默认):强制横向时纵向内容等比缩小居中留白,注释宽高不交换。"""
+    a4_w, a4_h = _a4_points()
+    src = _make_annotated_link_pdf(tmp_path / "portrait.pdf")
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4", orientation="landscape", rotate=ROTATE_NONE)
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    scale = min(a4_h / 612, a4_w / 792)  # 内容盒 612x792 信盒式放进横向 A4
+    rect = [float(v) for v in page["/Annots"][0].get_object()["/Rect"]]
+    assert (rect[2] - rect[0]) == pytest.approx(150 * scale, abs=0.6)
+    assert (rect[3] - rect[1]) == pytest.approx(50 * scale, abs=0.6)
+
+
+def test_merge_pdfs_view_rotation_visual_orientation_wins(make_text_pdf, tmp_path):
+    """/Rotate 90 页按视觉横版对齐(修复前按 MediaBox 误判纵向),旋转烘焙进内容。"""
+    a4_w, a4_h = _a4_points()
+    src = _with_view_rotation(make_text_pdf("src.pdf", ["rotated"]), tmp_path / "r90.pdf", 90)
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4", orientation="auto")
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    # 视觉 792x612 横版 → 横向 A4,且 /Rotate 归零(不再依赖查看器旋转)
+    assert float(page.mediabox.width) == pytest.approx(a4_h, abs=0.5)
+    assert float(page.mediabox.height) == pytest.approx(a4_w, abs=0.5)
+    assert int(page.get("/Rotate", 0)) == 0
+    assert "rotated" in (page.extract_text() or "")
+
+
+def test_merge_pdfs_pages_tree_inherited_rotate(make_text_pdf, tmp_path):
+    """/Rotate 挂在页面树节点(非页本身)同样按视觉对齐。
+
+    契约锁定:锁定版 pypdf 在 reader 展平页树时把继承属性物化进页字典,
+    writer 克隆随之携带;若未来升级 pypdf 改变该物化行为,此测试先行失败。
+    """
+    from pypdf.generic import NameObject, NumberObject
+
+    a4_w, a4_h = _a4_points()
+    writer = PdfWriter(clone_from=make_text_pdf("src.pdf", ["inherited"]))
+    # reportlab 页字典自带显式 /Rotate 0(自身值优先于继承),先删掉再造纯继承场景
+    del writer.pages[0][NameObject("/Rotate")]
+    writer.root_object[NameObject("/Pages")][NameObject("/Rotate")] = NumberObject(90)
+    src = tmp_path / "tree_rot.pdf"
+    writer.write(src)
+    writer.close()
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4", orientation="auto")
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    # 视觉 792x612 横版 → 横向 A4,烘焙后 /Rotate 归零,文字仍可提取
+    assert float(page.mediabox.width) == pytest.approx(a4_h, abs=0.5)
+    assert float(page.mediabox.height) == pytest.approx(a4_w, abs=0.5)
+    assert int(page.get("/Rotate", 0)) == 0
+    assert "inherited" in (page.extract_text() or "")
+
+
+def test_repaper_view_rotated_page_not_skipped_even_if_dims_match(tmp_path):
+    """/Rotate 90 且 MediaBox 恰为目标纵向尺寸:不因尺寸相等跳过,仍归一化。"""
+    from pypdf.generic import NameObject, NumberObject
+
+    a4_w, a4_h = _a4_points()
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=a4_w, height=a4_h)
+    page[NameObject("/Rotate")] = NumberObject(90)
+    src = tmp_path / "r90.pdf"
+    writer.write(src)
+    writer.close()
+    out = tmp_path / "merged.pdf"
+
+    ok, msg = merge_pdfs([src], out, paper_size="A4", orientation="auto")
+
+    assert ok, msg
+    result = PdfReader(out).pages[0]
+    assert float(result.mediabox.width) == pytest.approx(a4_h, abs=0.5)
+    assert int(result.get("/Rotate", 0)) == 0
+
+
+def test_page_view_rotation_normalizes_values():
+    """/Rotate 归一:模 360 落到 0/90/180/270 网格,非法与非 90 倍数按 0。"""
+    from pypdf.generic import NameObject, NumberObject
+
+    from file_toolbox.core.batch_pdf.pdf_utils import _page_view_rotation
+
+    writer = PdfWriter()
+    try:
+        cases = ((90, 90), (270, 270), (-90, 270), (360, 0), (450, 90), (45, 0))
+        for raw, expected in cases:
+            page = writer.add_blank_page(width=100, height=100)
+            page[NameObject("/Rotate")] = NumberObject(raw)
+            assert _page_view_rotation(page) == expected, raw
+        assert _page_view_rotation(writer.add_blank_page(width=100, height=100)) == 0
+    finally:
+        writer.close()
+
+
+def test_rotate_image_to_match_matrix():
+    """_rotate_image_to_match:仅强制方向 + auto 旋转 + 长边相反时顺时针转置。"""
+    from PIL import Image
+
+    from file_toolbox.core.batch_pdf.pdf_utils import _rotate_image_to_match
+
+    wide = Image.new("RGB", (400, 200))
+    tall = Image.new("RGB", (200, 400))
+    square = Image.new("RGB", (300, 300))
+    try:
+        assert _rotate_image_to_match(wide, "portrait", "auto").size == (200, 400)
+        assert _rotate_image_to_match(tall, "landscape", "auto").size == (400, 200)
+        assert _rotate_image_to_match(wide, "landscape", "auto") is wide  # 长边已对齐
+        assert _rotate_image_to_match(wide, "portrait", "none") is wide  # 未开启旋转
+        assert _rotate_image_to_match(wide, "auto", "auto") is wide  # 方向保持原样
+        assert _rotate_image_to_match(square, "portrait", "auto") is square  # 方图
+    finally:
+        wide.close()
+        tall.close()
+        square.close()
+
+
+def test_convert_pdf_to_image_pdf_rotate_auto(tmp_path):
+    """图片型:强制横向 + 自动旋转 → 输出横向 A4 画布(内容长边对齐纸张长边)。"""
+    src = _make_pdf(tmp_path / "src.pdf", pages=1)  # 200x300 纵向
+    out = tmp_path / "out.pdf"
+
+    ok, msg = convert_pdf_to_image_pdf(
+        src, out, paper_size="A4", orientation="landscape", rotate=ROTATE_AUTO
+    )
+
+    assert ok, msg
+    page = PdfReader(out).pages[0]
+    assert float(page.mediabox.width) > float(page.mediabox.height)
 
 
 def test_paper_target_points_orientation_matrix():
