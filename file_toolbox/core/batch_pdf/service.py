@@ -18,6 +18,7 @@ from .constants import (
     PDF_TYPE_EDITABLE,
     PDF_TYPE_IMAGE,
     PRINT_MODE_SINGLE,
+    ROTATE_DEFAULT,
     SCALE_DEFAULT,
     SUPPORTED_FORMATS,
 )
@@ -132,12 +133,13 @@ class PDFGeneratorService:
         paper_size: str = "auto",
         orientation: str = "auto",
         scale_mode: str = SCALE_DEFAULT,
+        rotate: str = ROTATE_DEFAULT,
     ) -> tuple[bool, str]:
         """将可编辑PDF转换为图片型PDF"""
         from .pdf_utils import convert_pdf_to_image_pdf  # 按需导入(见模块顶部说明)
 
         return convert_pdf_to_image_pdf(
-            input_pdf, output_pdf, dpi, paper_size, orientation, scale_mode
+            input_pdf, output_pdf, dpi, paper_size, orientation, scale_mode, rotate
         )
 
     def generate_pdf(
@@ -175,6 +177,7 @@ class PDFGeneratorService:
                     paper_size=paper_size,
                     orientation=orientation,
                     scale_mode=scale_mode,
+                    rotate=config.get("rotate", ROTATE_DEFAULT),
                 )
             else:
                 # 可编辑型:选定纸张时重排到目标纸张(内容保持矢量),否则直接复制
@@ -187,6 +190,7 @@ class PDFGeneratorService:
                         paper_size=paper_size,
                         orientation=config.get("orientation", "auto"),
                         scale_mode=config.get("scale_mode", SCALE_DEFAULT),
+                        rotate=config.get("rotate", ROTATE_DEFAULT),
                     )
                 try:
                     shutil.copy2(file_path, output_path)
@@ -215,6 +219,7 @@ class PDFGeneratorService:
                     paper_size=paper_size,
                     orientation=orientation,
                     scale_mode=scale_mode,
+                    rotate=config.get("rotate", ROTATE_DEFAULT),
                 )
 
                 return success, error
@@ -251,6 +256,7 @@ class PDFGeneratorService:
         paper_size: str = "auto",
         orientation: str = "auto",
         scale_mode: str = SCALE_DEFAULT,
+        rotate: str = ROTATE_DEFAULT,
     ) -> tuple[bool, str]:
         """
         合并多个PDF为一个
@@ -262,6 +268,7 @@ class PDFGeneratorService:
             paper_size: 纸张尺寸 ("auto"保持原样, 或纸张名);选定后页面统一重排
             orientation: 纸张方向 ("auto"保持原样按页面长边对齐, "portrait", "landscape")
             scale_mode: 重排缩放模式
+            rotate: 页面旋转 ("none"不旋转, "auto"方向强制时内容长边对齐纸张长边)
 
         Returns:
             (是否成功, 错误消息)
@@ -275,6 +282,7 @@ class PDFGeneratorService:
             paper_size=paper_size,
             orientation=orientation,
             scale_mode=scale_mode,
+            rotate=rotate,
         )
 
     def batch_generate(
@@ -363,6 +371,7 @@ class PDFGeneratorService:
                 paper_size=config.get("paper_size", "auto"),
                 orientation=config.get("orientation", "auto"),
                 scale_mode=config.get("scale_mode", SCALE_DEFAULT),
+                rotate=config.get("rotate", ROTATE_DEFAULT),
             )
 
             # 每个输入的成功状态表示最终产物,不能指向即将删除的中间文件。

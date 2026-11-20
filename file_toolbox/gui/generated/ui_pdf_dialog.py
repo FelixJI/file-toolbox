@@ -245,6 +245,32 @@ class Ui_PDFGeneratorDialog:
 
         self.settingsLayout.addLayout(self.paperLayout)
 
+        # 页面旋转与纸张方向正交:方向决定目标页宽高谁长,旋转决定内容放上去前
+        # 是否先转 90° 对齐纸张长边。启用条件由 pdf_tab 按纸张/方向选择治理。
+        self.rotateLayout = QHBoxLayout()
+        self.rotateLayout.setObjectName("rotateLayout")
+        self.label_rotate = QLabel(self.group_settings)
+        self.label_rotate.setObjectName("label_rotate")
+        self.label_rotate.setMinimumSize(QSize(80, 0))
+        self.label_rotate.setEnabled(False)
+
+        self.rotateLayout.addWidget(self.label_rotate)
+
+        self.combo_rotate = QComboBox(self.group_settings)
+        self.combo_rotate.setObjectName("combo_rotate")
+        self.combo_rotate.setEnabled(False)
+        self.combo_rotate.setMinimumSize(QSize(120, 28))
+
+        self.rotateLayout.addWidget(self.combo_rotate)
+
+        self.horizontalSpacer_rotate = QSpacerItem(
+            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+
+        self.rotateLayout.addItem(self.horizontalSpacer_rotate)
+
+        self.settingsLayout.addLayout(self.rotateLayout)
+
         self.line1 = QFrame(self.group_settings)
         self.line1.setObjectName("line1")
         self.line1.setFrameShape(QFrame.Shape.HLine)
@@ -437,8 +463,8 @@ class Ui_PDFGeneratorDialog:
         self.retranslateUi(PDFGeneratorDialog)
         self.radio_type_image.toggled.connect(self.label_dpi.setEnabled)
         self.radio_type_image.toggled.connect(self.combo_dpi.setEnabled)
-        self.radio_type_image.toggled.connect(self.label_scale.setEnabled)
-        self.radio_type_image.toggled.connect(self.combo_scale.setEnabled)
+        # 缩放/旋转的启用不再跟随 PDF 类型:#163 起可编辑重排同样消费 scale_mode,
+        # rotate 也适用于重排与图片型;两者改由 pdf_tab 按纸张/方向选择统一治理。
         self.radio_merge.toggled.connect(self.label_merge_name.setEnabled)
         self.radio_merge.toggled.connect(self.edit_merge_filename.setEnabled)
         self.radio_merge.toggled.connect(self.label_print_mode.setEnabled)
@@ -512,6 +538,17 @@ class Ui_PDFGeneratorDialog:
         )
         self.label_scale.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u7f29\u653e:", None)
+        )
+        self.label_rotate.setText(
+            QCoreApplication.translate("PDFGeneratorDialog", "\u9875\u9762\u65cb\u8f6c:", None)
+        )
+        self.combo_rotate.setToolTip(
+            QCoreApplication.translate(
+                "PDFGeneratorDialog",
+                "方向为纵向/横向时生效:自动旋转匹配会先转 90° 让内容长边对齐纸张长边再缩放,"
+                "减少留白;不旋转则等比缩放居中",
+                None,
+            )
         )
         self.label_output_mode.setText(
             QCoreApplication.translate("PDFGeneratorDialog", "\u8f93\u51fa\u6a21\u5f0f:", None)

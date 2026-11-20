@@ -60,6 +60,41 @@ def test_scale_combo_populated(dlg):
     assert "shrink_oversized" in data
 
 
+def test_rotate_combo_populated(dlg):
+    items = [dlg.ui.combo_rotate.itemText(i) for i in range(dlg.ui.combo_rotate.count())]
+    assert items == ["不旋转", "自动旋转匹配"]
+    assert dlg.ui.combo_rotate.currentData() == "none"
+
+
+def test_paper_dependent_controls_follow_selection(dlg):
+    """缩放随纸张启用;旋转额外要求方向为纵向/横向(保持原样时是 no-op)。"""
+    # 默认:纸张/方向均为保持原样 → 两者禁用
+    assert not dlg.ui.combo_scale.isEnabled()
+    assert not dlg.ui.label_scale.isEnabled()
+    assert not dlg.ui.combo_rotate.isEnabled()
+    assert not dlg.ui.label_rotate.isEnabled()
+    # 仅选纸张 → 缩放启用,旋转仍禁用
+    dlg.ui.combo_paper_size.setCurrentText("A4")
+    assert dlg.ui.combo_scale.isEnabled()
+    assert not dlg.ui.combo_rotate.isEnabled()
+    # 再选方向 → 旋转启用
+    dlg.ui.combo_orientation.setCurrentText("横向")
+    assert dlg.ui.combo_rotate.isEnabled()
+    # 纸张回保持原样 → 全部禁用
+    dlg.ui.combo_paper_size.setCurrentText("保持原样")
+    assert not dlg.ui.combo_scale.isEnabled()
+    assert not dlg.ui.combo_rotate.isEnabled()
+
+
+def test_scale_enablement_independent_of_pdf_type(dlg):
+    """可编辑重排同样消费 scale_mode:启用只看纸张选择,与 PDF 类型无关。"""
+    dlg.ui.radio_type_image.setChecked(True)  # 纸张仍保持原样 → 不启用
+    assert not dlg.ui.combo_scale.isEnabled()
+    dlg.ui.combo_paper_size.setCurrentText("A4")
+    dlg.ui.radio_type_editable.setChecked(True)  # 可编辑 + 选纸张 → 仍启用
+    assert dlg.ui.combo_scale.isEnabled()
+
+
 # ---------- 单选按钮分组互斥 ----------
 
 
@@ -109,6 +144,7 @@ def test_build_config_defaults(dlg):
     assert config["dpi"] == DPI_DEFAULT
     assert config["paper_size"] == "auto"
     assert config["orientation"] == "auto"
+    assert config["rotate"] == "none"
     assert "output_dir" not in config
 
 
@@ -117,6 +153,13 @@ def test_build_config_paper_size_maps_auto(dlg):
     assert dlg._build_config()["paper_size"] == "A4"
     dlg.ui.combo_paper_size.setCurrentText("保持原样")
     assert dlg._build_config()["paper_size"] == "auto"
+
+
+def test_build_config_rotate_maps_auto(dlg):
+    dlg.ui.combo_rotate.setCurrentText("自动旋转匹配")
+    assert dlg._build_config()["rotate"] == "auto"
+    dlg.ui.combo_rotate.setCurrentText("不旋转")
+    assert dlg._build_config()["rotate"] == "none"
 
 
 def test_build_config_custom_dir_includes_output_dir(dlg):

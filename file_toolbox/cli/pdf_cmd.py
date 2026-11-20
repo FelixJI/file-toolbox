@@ -28,6 +28,9 @@ def pdf(
     orientation: str = typer.Option(
         "auto", "--orientation", help="auto=保持原样|portrait|landscape"
     ),
+    rotate: str = typer.Option(
+        "none", "--rotate", help="none=不旋转|auto=自动旋转匹配纸张方向(方向强制时生效)"
+    ),
     engine: str = typer.Option("auto", "--engine", help="auto|office|wps"),
     yes: bool = typer.Option(False, "--yes", help="确认生成 PDF(默认仅预览)"),
 ) -> None:
@@ -41,6 +44,7 @@ def pdf(
         ("--pdf-type", pdf_type, ("editable", "image")),
         ("--paper", paper, ("auto", *PAPER_SIZES)),
         ("--orientation", orientation, ("auto", "auto_detect", "portrait", "landscape")),
+        ("--rotate", rotate, ("none", "auto")),
         ("--engine", engine, ("auto", "office", "wps")),
     ):
         if value not in choices:
@@ -60,6 +64,7 @@ def pdf(
         "dpi": dpi,
         "paper_size": paper,
         "orientation": orientation,
+        "rotate": rotate,
         "engine": engine,
         "output_mode": output_mode,
         "same_as_source": True,

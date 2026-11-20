@@ -55,6 +55,7 @@ def test_build_config_separate_same_dir():
     assert config["dpi"] == DPI_DEFAULT
     assert config["paper_size"] == "auto"
     assert config["orientation"] == "auto"
+    assert config["rotate"] == "none"
     assert config["scale_mode"] == SCALE_DEFAULT
     assert config["engine"] == "auto"
     assert config["print_mode"] == PRINT_MODE_SINGLE
@@ -99,6 +100,7 @@ def test_build_config_image_merge_duplex_wps():
             engine="wps",
             paper_size="A4",
             orientation="landscape",
+            rotate="auto",
             scale_mode="actual_size",
             dpi=600,
             merge_filename="合并.pdf",
@@ -110,6 +112,7 @@ def test_build_config_image_merge_duplex_wps():
     assert config["engine"] == "wps"
     assert config["paper_size"] == "A4"
     assert config["orientation"] == "landscape"
+    assert config["rotate"] == "auto"
     assert config["scale_mode"] == "actual_size"
     assert config["dpi"] == 600
     assert config["merge_filename"] == "合并.pdf"

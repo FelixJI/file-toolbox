@@ -27,6 +27,9 @@ from file_toolbox.core.batch_pdf.constants import (
     PDF_TYPE_IMAGE,
     PRINT_MODE_DUPLEX,
     PRINT_MODE_SINGLE,
+    ROTATE_AUTO,
+    ROTATE_DEFAULT,
+    ROTATE_NONE,
     SCALE_ACTUAL_SIZE,
     SCALE_DEFAULT,
     SCALE_FIT_MARGIN,
@@ -46,6 +49,9 @@ from file_toolbox.gui.workers.file_scan_worker import FileScanWorker, ScannedFil
 # 纸张长边自动对齐每页长边(与图片路径的自动横竖语义一致)。
 _PAPER_KEEP_ORIGINAL = "保持原样"
 _ORIENT_LABELS = {"保持原样": "auto", "纵向": "portrait", "横向": "landscape"}
+# 页面旋转与纸张方向正交(方向决定目标页宽高谁长,旋转决定内容放上去前是否
+# 先转 90° 对齐纸张长边);仅方向为纵向/横向时"自动旋转匹配"有实际效果。
+_ROTATE_LABELS = {"不旋转": ROTATE_NONE, "自动旋转匹配": ROTATE_AUTO}
 _SCALE_LABELS = {
     "适合边距": SCALE_FIT_MARGIN,
     "实际大小": SCALE_ACTUAL_SIZE,
@@ -175,6 +181,13 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         if default_scale_idx >= 0:
             self.ui.combo_scale.setCurrentIndex(default_scale_idx)
 
+        self.ui.combo_rotate.clear()
+        for label, value in _ROTATE_LABELS.items():
+            self.ui.combo_rotate.addItem(label, userData=value)
+        default_rotate_idx = self.ui.combo_rotate.findData(ROTATE_DEFAULT)
+        if default_rotate_idx >= 0:
+            self.ui.combo_rotate.setCurrentIndex(default_rotate_idx)
+
     def _connect_signals(self) -> None:
         self.ui.btn_select_files.clicked.connect(self._on_select_files)
         self.ui.btn_select_folder.clicked.connect(self._on_select_folder)
@@ -183,6 +196,26 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
         self.ui.btn_generate.clicked.connect(self._generate)
         self.ui.btn_refresh.clicked.connect(self._do_refresh_preview)
         self.ui.btn_cancel.clicked.connect(self._on_cancel)
+        # 纸张/方向选择驱动缩放与旋转控件的可用性(见 _update_paper_dependent_controls)
+        self.ui.combo_paper_size.currentTextChanged.connect(self._update_paper_dependent_controls)
+        self.ui.combo_orientation.currentTextChanged.connect(self._update_paper_dependent_controls)
+        self._update_paper_dependent_controls()
+
+    def _update_paper_dependent_controls(self) -> None:
+        """按纸张/方向选择启用缩放与页面旋转控件。
+
+        - 缩放:可编辑重排与图片型均消费 scale_mode,选定纸张即可用(纸张=
+          保持原样时不发生重排/适配,缩放无意义);
+        - 页面旋转:额外要求方向为纵向/横向——方向=保持原样时纸张本就按每页
+          长边对齐,旋转是 no-op。
+        """
+        paper_selected = self.ui.combo_paper_size.currentText() != _PAPER_KEEP_ORIGINAL
+        orientation_forced = self.ui.combo_orientation.currentText() != "保持原样"
+        self.ui.label_scale.setEnabled(paper_selected)
+        self.ui.combo_scale.setEnabled(paper_selected)
+        rotate_enabled = paper_selected and orientation_forced
+        self.ui.label_rotate.setEnabled(rotate_enabled)
+        self.ui.combo_rotate.setEnabled(rotate_enabled)
 
     def _init_engine_info(self) -> None:
         """启动时异步检测可用 Office 引擎并更新提示(回显经信号桥回 GUI 线程)。
@@ -289,12 +322,14 @@ class PDFGeneratorDialog(QDialog, BatchDialogMixin):
             or _SCALE_LABELS.get(self.ui.combo_scale.currentText())
             or SCALE_DEFAULT
         )
+        rotate = self.ui.combo_rotate.currentData() or ROTATE_DEFAULT
 
         state = PDFConfigState(
             pdf_type=pdf_type,
             dpi=int(self.ui.combo_dpi.currentText() or DPI_DEFAULT),
             paper_size=paper_size,
             orientation=orientation,
+            rotate=rotate,
             scale_mode=scale_mode,
             engine=engine,
             output_mode=output_mode,

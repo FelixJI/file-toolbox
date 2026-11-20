@@ -11,7 +11,10 @@ from ..constants import (
     DPI_DEFAULT,
     ORIENTATION_AUTO_DETECT,
     ORIENTATION_LANDSCAPE,
+    ORIENTATION_PORTRAIT,
     PAPER_SIZES,
+    ROTATE_AUTO,
+    ROTATE_DEFAULT,
     SCALE_ACTUAL_SIZE,
     SCALE_DEFAULT,
     SCALE_FIT_MARGIN,
@@ -54,6 +57,26 @@ class ImageConverter:
         except Exception:
             pass
         return "portrait"
+
+    @staticmethod
+    def _rotate_to_match(img: "Image.Image", orientation: str, rotate: str) -> "Image.Image":
+        """强制方向且开启自动旋转时,若图片长边方向与纸张相反则转 90° 对齐。
+
+        与 pdf_utils._rotate_image_to_paper 语义一致;方向为保持原样时纸张本就
+        跟随图片长边,旋转无意义,原样返回。
+        """
+        from PIL import Image
+
+        if rotate != ROTATE_AUTO or orientation not in (
+            ORIENTATION_PORTRAIT,
+            ORIENTATION_LANDSCAPE,
+        ):
+            return img
+        img_landscape = img.width > img.height
+        sheet_landscape = orientation == ORIENTATION_LANDSCAPE
+        if img_landscape == sheet_landscape or img.width == img.height:
+            return img
+        return img.transpose(Image.Transpose.ROTATE_90)
 
     def _apply_scale(
         self, img: "Image.Image", paper_w_px: int, paper_h_px: int, scale_mode: str
@@ -141,6 +164,7 @@ class ImageConverter:
             paper_size = config.get("paper_size", "auto")
             orientation = config.get("orientation", "auto")
             scale_mode = config.get("scale_mode", SCALE_DEFAULT)
+            rotate = config.get("rotate", ROTATE_DEFAULT)
 
             # 自动检测方向
             if orientation == ORIENTATION_AUTO_DETECT:
@@ -151,6 +175,8 @@ class ImageConverter:
 
             # 如果指定纸张大小，创建固定大小的画布
             if paper_size != "auto" and paper_size in PAPER_SIZES:
+                # 强制方向 + 自动旋转:内容长边先对齐纸张长边再缩放
+                img = self._rotate_to_match(img, orientation, rotate)
                 paper_w, paper_h = PAPER_SIZES[paper_size]
                 # 转换为像素
                 paper_w_px = int(paper_w * target_dpi / 25.4)
